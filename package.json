@@ -1,0 +1,19 @@
+{
+  "name": "soneybun",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SONEYBUN — Descent Protocol: a 3D action roguelike with time-scaled difficulty, chest-driven item drops across five rarities, and a persistent meta-progression currency.",
+  "scripts": {
+    "start": "node tools/serve.js",
+    "dev": "node tools/serve.js",
+    "check": "node --experimental-vm-modules tools/check.js && node tools/coop-check.js",
+    "check:coop": "node tools/coop-check.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/three": "0.169.0"
+  }
+}

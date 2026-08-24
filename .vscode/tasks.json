@@ -1,0 +1,30 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "serve",
+      "detail": "Start the zero-dependency dev server on :8080",
+      "type": "shell",
+      "command": "node tools/serve.js",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "soneybun-serve",
+        "pattern": { "regexp": "^(?!x)x$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "SONEYBUN dev server",
+          "endsPattern": "localhost:"
+        }
+      },
+      "presentation": { "reveal": "silent", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "check",
+      "detail": "Parse every module to catch syntax errors without a browser",
+      "type": "shell",
+      "command": "node --experimental-vm-modules tools/check.js",
+      "problemMatcher": [],
+      "group": { "kind": "test", "isDefault": true }
+    }
+  ]
+}

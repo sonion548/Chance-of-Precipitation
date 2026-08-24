@@ -1,0 +1,8 @@
+{
+  "javascript.preferences.importModuleSpecifierEnding": "js",
+  "javascript.suggest.paths": true,
+  "editor.formatOnSave": false,
+  "files.exclude": { "node_modules": true },
+  "search.exclude": { "vendor/three.module.js": true, "node_modules": true },
+  "files.associations": { "*.js": "javascript" }
+}

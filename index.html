@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>SONEYBUN — Descent Protocol</title>
+<link rel="stylesheet" href="./styles/main.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#9876;</text></svg>" />
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+  <div id="viewport"></div>
+
+  <!-- ============ In-run HUD ============ -->
+  <div id="hud" class="hidden">
+    <div id="dmg-layer"></div>
+    <div id="crosshair"><i></i><i></i><i></i><i></i><b></b></div>
+
+    <div id="hud-top">
+      <div class="clock-wrap">
+        <div id="run-clock">00:00</div>
+        <div id="difficulty">
+          <span id="diff-label">Easy</span>
+          <div id="diff-bar"><div id="diff-fill"></div></div>
+        </div>
+      </div>
+      <div id="stage-pill"><span id="stage-name">Ashfall Basin</span><em id="stage-num">Stage 1</em></div>
+    </div>
+
+    <div id="boss-bar" class="hidden">
+      <div class="bb-head">
+        <span id="boss-name">Boss</span>
+        <span id="boss-affix"></span>
+        <span id="boss-hp-text"></span>
+      </div>
+      <div class="bb-track">
+        <div id="boss-fill"></div>
+        <div id="boss-lag"></div>
+      </div>
+    </div>
+
+    <div id="objective" class="hidden">
+      <div id="objective-text">Locate the Beacon</div>
+      <div id="objective-bar"><div id="objective-fill"></div></div>
+      <div id="objective-sub"></div>
+    </div>
+
+    <div id="hud-bottom">
+      <div id="vitals">
+        <div id="hp-bar">
+          <div id="hp-fill"></div>
+          <div id="barrier-fill"></div>
+          <span id="hp-text">110 / 110</span>
+        </div>
+        <div id="xp-bar"><div id="xp-fill"></div></div>
+        <div id="lvl-badge">LVL <b id="lvl-num">1</b></div>
+      </div>
+      <div id="abilities"></div>
+    </div>
+
+    <div id="party" class="hidden"></div>
+    <div id="hud-right">
+      <div id="gold-wrap"><span class="coin">◈</span><span id="gold-num">0</span></div>
+      <div id="brood" class="hidden"></div>
+      <div id="buffs"></div>
+    </div>
+
+    <div id="inventory"></div>
+    <div id="pickup-card" class="hidden">
+      <div class="pc-icon"><span id="pc-glyph">?</span></div>
+      <div class="pc-body">
+        <div class="pc-head">
+          <span id="pc-name">Item</span>
+          <span id="pc-rarity">Common</span>
+          <span id="pc-stack" class="hidden"></span>
+        </div>
+        <p id="pc-desc"></p>
+        <p id="pc-stackline"></p>
+      </div>
+    </div>
+    <div id="prompt" class="hidden"><b id="prompt-key">E</b><span id="prompt-text"></span></div>
+    <div id="toasts"></div>
+    <div id="hurt-vignette"></div>
+    <div id="heal-vignette"></div>
+  </div>
+
+  <!-- ============ Screens ============ -->
+  <div id="screens">
+    <div id="screen-loading" class="screen active">
+      <div class="loader"><div class="loader-ring"></div><p>Calibrating descent vectors…</p></div>
+    </div>
+
+    <div id="screen-menu" class="screen">
+      <div class="menu-bg"></div>
+      <div class="menu-inner">
+        <header class="brand">
+          <h1>SONEYBUN</h1>
+          <p class="tagline">Descent Protocol</p>
+        </header>
+        <nav class="main-nav">
+          <button class="nav-btn primary" data-goto="loadout"><span class="nb-key">▶</span> Begin Descent</button>
+          <button class="nav-btn" data-goto="coop"><span class="nb-key">⇄</span> Co-op <em id="menu-coop-state">Play with friends</em></button>
+          <button class="nav-btn" data-goto="unlocks"><span class="nb-key">◈</span> Sanctum <em id="menu-echoes">0 Echoes</em></button>
+          <button class="nav-btn" data-goto="codex"><span class="nb-key">✦</span> Codex</button>
+          <button class="nav-btn" data-goto="stats"><span class="nb-key">⌁</span> Records</button>
+          <button class="nav-btn" data-goto="help"><span class="nb-key">?</span> How to Play</button>
+        </nav>
+        <footer class="menu-foot"><span id="menu-version"></span></footer>
+      </div>
+    </div>
+
+    <div id="screen-loadout" class="screen panel-screen">
+      <div class="panel wide">
+        <div class="panel-head"><h2>Loadout</h2><button class="x-btn" data-goto="menu">✕</button></div>
+        <div class="panel-body">
+          <div class="sect-label">Character</div>
+          <div class="char-strip" id="char-strip"></div>
+          <div class="char-detail" id="char-detail"></div>
+          <div class="sect-label">Weapon</div>
+          <div class="loadout-grid">
+            <div class="weapon-list" id="weapon-list"></div>
+            <div class="weapon-detail" id="weapon-detail"></div>
+          </div>
+        </div>
+        <div class="panel-foot">
+          <div class="diff-select" id="diff-select"></div>
+          <button class="big-btn" id="launch-btn">Launch Run</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="screen-coop" class="screen panel-screen">
+      <div class="panel">
+        <div class="panel-head"><h2>Co-op Descent</h2><button class="x-btn" data-goto="menu">✕</button></div>
+        <div class="panel-body" id="coop-body"></div>
+        <div class="panel-foot stack" id="coop-foot"></div>
+      </div>
+    </div>
+
+    <div id="screen-unlocks" class="screen panel-screen">
+      <div class="panel wide">
+        <div class="panel-head">
+          <h2>Sanctum</h2>
+          <div class="echo-counter"><span class="echo-glyph">◈</span><b id="unlock-echoes">0</b> Echoes</div>
+          <button class="x-btn" data-goto="menu">✕</button>
+        </div>
+        <div class="tabs" id="unlock-tabs">
+          <button class="tab active" data-tab="items">Items</button>
+          <button class="tab" data-tab="weapons">Weapons</button>
+          <button class="tab" data-tab="characters">Characters</button>
+        </div>
+        <div class="panel-body" id="unlock-body"></div>
+      </div>
+    </div>
+
+    <div id="screen-codex" class="screen panel-screen">
+      <div class="panel wide">
+        <div class="panel-head"><h2>Codex</h2><button class="x-btn" data-goto="menu">✕</button></div>
+        <div class="tabs" id="codex-tabs">
+          <button class="tab active" data-tab="items">Items</button>
+          <button class="tab" data-tab="enemies">Bestiary</button>
+        </div>
+        <div class="panel-body" id="codex-body"></div>
+      </div>
+    </div>
+
+    <div id="screen-stats" class="screen panel-screen">
+      <div class="panel">
+        <div class="panel-head"><h2>Records</h2><button class="x-btn" data-goto="menu">✕</button></div>
+        <div class="panel-body" id="stats-body"></div>
+        <div class="panel-foot"><button class="ghost-btn" id="wipe-btn">Erase All Progress</button></div>
+      </div>
+    </div>
+
+    <div id="screen-help" class="screen panel-screen">
+      <div class="panel">
+        <div class="panel-head"><h2>How to Play</h2><button class="x-btn" data-goto="menu">✕</button></div>
+        <div class="panel-body" id="help-body"></div>
+      </div>
+    </div>
+
+    <div id="screen-pause" class="screen panel-screen">
+      <div class="panel narrow">
+        <div class="panel-head"><h2>Paused</h2></div>
+        <div class="panel-body" id="pause-body"></div>
+        <div class="panel-foot stack">
+          <button class="big-btn" id="resume-btn">Resume</button>
+          <button class="ghost-btn" id="abandon-btn">Abandon Run</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="screen-summary" class="screen panel-screen">
+      <div class="panel">
+        <div class="panel-head"><h2 id="summary-title">Run Terminated</h2></div>
+        <div class="panel-body" id="summary-body"></div>
+        <div class="panel-foot stack">
+          <button class="big-btn" id="summary-again">Descend Again</button>
+          <button class="ghost-btn" id="summary-menu">Return to Sanctum</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="fatal" class="hidden"><div class="panel narrow"><div class="panel-head"><h2>Startup Error</h2></div><div class="panel-body"><pre id="fatal-msg"></pre></div></div></div>
+
+  <script type="module" src="./src/main.js"></script>
+  <script>
+    window.addEventListener('error', (e) => {
+      const box = document.getElementById('fatal');
+      if (!box || !box.classList.contains('hidden')) return;
+      box.classList.remove('hidden');
+      document.getElementById('fatal-msg').textContent = (e.error && e.error.stack) || e.message || String(e);
+    });
+  </script>
+</body>
+</html>
