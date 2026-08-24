@@ -10,11 +10,11 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `27c550dc`
+- Built from commit: `ec0bbb2f`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
-### Hand-applied delta (27c550dc)
+### Hand-applied delta (ec0bbb2f)
 The co-op terrain / lobby-code / Void Reaper / boss-loot / Shrine of Ruin change
 set was folded into the graph by hand: graphify lives as a uv tool on the
 author's machine and is not installed in the environment the change was made in.
