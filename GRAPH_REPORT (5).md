@@ -1,18 +1,56 @@
 # Graph Report - claude project  (2026-08-23)
 
 ## Corpus Check
-- 65 files · ~162,165 words
+- 66 files · ~162,165 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3118 nodes · 6736 edges · 182 communities (67 shown, 115 thin omitted)
+- 3136 nodes · 6787 edges · 182 communities (67 shown, 115 thin omitted)
 - Extraction: 96% EXTRACTED · 4% INFERRED · 0% AMBIGUOUS · INFERRED: 297 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `269beeaa`
+- Built from commit: `27c550dc`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
+
+### Hand-applied delta (27c550dc)
+The co-op terrain / lobby-code / Void Reaper / boss-loot / Shrine of Ruin change
+set was folded into the graph by hand: graphify lives as a uv tool on the
+author's machine and is not installed in the environment the change was made in.
+What that means for anyone reading this:
+
+- **18 nodes and 51 edges were written in manually**, in the shape the AST
+  extractor emits (`method`, `contains`, `calls`). They carry `_origin: "manual"`
+  instead of `_origin: "ast"`, so a query can separate them:
+  `[n for n in graph["nodes"] if n.get("_origin") == "manual"]`. Both endpoints
+  of every added edge were checked against the existing graph — there are no
+  dangling edges and no duplicate ids.
+- **The 19 touched files are flagged for re-extraction** in `manifest.json`:
+  their `ast_hash` and `semantic_hash` are cleared and `mtime` zeroed, so the
+  next `graphify update .` re-reads them from disk instead of trusting a
+  fingerprint taken before the change.
+- **`graph.html` and `community_summary.txt` were not regenerated.** They are
+  exports, and they still describe the graph as it stood at `269beeaa`. Running
+  `graphify update .` and re-exporting refreshes both.
+
+New symbols in the graph: `Arena.terrainHash`, `isTextTarget`, `FX.slash`,
+`FX._buildSlashes`, `Game._verifyTerrain`, `Game.livingBosses`,
+`Game.bossItemCount`, `Game.spawnBossLoot`, `Game.grantRuinBoon`,
+`Game.applyBoon`, `Game.announceRuinBoon`, `Coop._sendWorldTo`,
+`Coop.requestStage`, `Coop.partySize`, `Coop.onBoon`, `Chest.isShrine`,
+`Player.moveDirection`, and the `tools/coop-check.js` file node.
+
+### The graph is one step ahead of the source in this repository
+The graph was built from a working tree this repository does not contain. It
+carries nodes for `src/core/audio.js`, `src/core/settings.js`, `src/ui/chat.js`,
+`src/data/pets.js` and `src/entities/pet.js`, plus `Arena._initLandform`,
+`Arena.terrainHeightAt`, `Arena._terrainGeometry`, `Input.captureBinding`,
+`Director.partyScale`, `Game.partySize`, `Coop.onPortalState` and a `Portal`
+interactable — none of which exist in the uploaded snapshot the source here was
+edited from (that snapshot still has `src/entities/minion.js`, since renamed to
+`pet.js`). Read the graph as describing the newer tree and the source as the
+older one, until both are rebuilt from one commit.
 
 ## Community Hubs (Navigation)
 - three.module.js
