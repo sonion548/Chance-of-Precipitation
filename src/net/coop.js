@@ -167,11 +167,12 @@ export class Coop {
     /* ---------------- world state, host → clients ---------------- */
     s.on('stage', (m) => {
       if (this.isHost) return;
-      // Arriving mid-run, the stage packet is the first thing we hear about the
-      // descent. Enter the run before applying it, or it lands on a client with
-      // no player, no managers and nothing to build onto.
-      if (!this.runStarted || this.game.state !== 'running') {
-        this.runStarted = true;
+      // Joining mid-run, `start` and the stage arrive back to back and the
+      // stage can land first on a client that has not entered the run yet — on
+      // which it would have no player, no managers and nothing to build onto.
+      // Enter the run first. The guard is `runStarted`, not the packet itself:
+      // a stray stage after the run has ended must not drag anyone back in.
+      if (this.runStarted && this.game.state !== 'running') {
         this.session.status = 'ingame';
         this.game.startRun({ coopClient: true, mode: m.mode });
       }
@@ -188,7 +189,12 @@ export class Coop {
     s.on('chest', (m) => { if (!this.isHost) this.game.applyChestState(m.i, m.o, m.c); });
     s.on('egg', (m) => { if (!this.isHost) this.game.applyEggState(m.i); });
     s.on('tp', (m) => { if (!this.isHost) this.game.applyTeleporterState(m); });
-    s.on('over', () => { if (!this.isHost) this.game.finishCoopRun(); });
+    s.on('over', () => {
+      if (this.isHost) return;
+      // The run is finished, so nothing that arrives late reopens it.
+      this.runStarted = false;
+      this.game.finishCoopRun();
+    });
     s.on('fx', (m) => this._applyFx(m));
 
     /* ---------------- per-peer state, everyone → everyone ---------------- */
@@ -439,7 +445,11 @@ export class Coop {
 
   onMinionHatched() { /* covered by the minion state stream */ }
 
-  onRunOver() { if (this.isHost) this.session.send({ k: 'over' }); }
+  onRunOver() {
+    if (!this.isHost) return;
+    this.runStarted = false;
+    this.session.send({ k: 'over' });
+  }
 
   /** Fires whenever the local player shoots, so teammates see tracers. */
   onLocalShot(payload) {
