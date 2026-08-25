@@ -1,9 +1,31 @@
 import * as THREE from 'three';
 import { raycastWorld, distanceToBody } from '../systems/physics.js';
 import { fx as rng } from '../core/rng.js';
+import { aimYaw, aimPitch } from '../core/mathx.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+const _e = new THREE.Euler();
+const _roll = new THREE.Quaternion();
+const FORWARD = new THREE.Vector3(0, 0, 1);
+
+/**
+ * Points a travelling crescent along the way it is actually going.
+ *
+ * A wave used to be turned about Y alone, which meant a cut thrown at
+ * something above you arrived as a flat disc hanging in the air at the height
+ * you threw it from — the same orientation every time, whatever you were
+ * aiming at. Both angles come off the velocity now.
+ *
+ * The roll is what keeps it from vanishing: a crescent is paper thin, and one
+ * travelling level with no cant at all is invisible edge-on from a camera
+ * sitting at about its own height, which is where the camera always is.
+ */
+function orientWave(mesh, velocity, roll = 0.22) {
+  _e.set(aimPitch(velocity.x, velocity.y, velocity.z), aimYaw(velocity.x, velocity.z), 0, 'YXZ');
+  mesh.quaternion.setFromEuler(_e);
+  if (roll) mesh.quaternion.multiply(_roll.setFromAxisAngle(FORWARD, roll));
+}
 
 const SPHERE = new THREE.SphereGeometry(1, 10, 8);
 const RING = (() => { const g = new THREE.RingGeometry(0.82, 1, 32); g.rotateX(-Math.PI / 2); return g; })();
@@ -158,10 +180,7 @@ export class ProjectileManager {
     if (p.wave) {
       const w = p.wave.width ?? p.radius * 1.4;
       mesh.scale.set(w, 1, w);
-      mesh.rotation.y = Math.atan2(p.velocity.x, p.velocity.z);
-      // A crescent lying dead flat is invisible edge-on; a little roll gives
-      // the camera something to catch.
-      mesh.rotation.z = 0.22;
+      orientWave(mesh, p.velocity);
     }
     this.group.add(mesh);
     p.mesh = mesh;
@@ -340,7 +359,10 @@ export class ProjectileManager {
         const k = p.life / p.maxLife;
         const w = (p.wave.width ?? p.radius * 1.4) * (1 + (1 - k) * 0.5);
         p.mesh.scale.set(w, 1, w);
-        p.mesh.rotation.y = Math.atan2(p.velocity.x, p.velocity.z);
+        // Re-aimed every frame, not just at spawn: gravity and drag bend the
+        // path, and a cut that keeps its launch angle while falling reads as a
+        // dropped object rather than as a cut still travelling.
+        orientWave(p.mesh, p.velocity);
       }
 
       // Trail

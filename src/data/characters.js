@@ -261,9 +261,15 @@ export const CHARACTERS = [
       damage: 12.8, damagePerLevel: 2.55, moveSpeed: 8.8, armor: 2, crit: 0.05, jumps: 1,
     },
     utility: {
-      name: 'Lance Dash', key: 'SHIFT', icon: '➤', cooldown: 4.5, charges: 1,
+      /* Ten seconds, and the mark is how you get out of paying it.
+         A cheap dash that refunds itself on a hit is just a dash — you take it
+         on cooldown and the mark is a bonus you sometimes notice. Priced this
+         high, the refund *is* the ability: land it on something painted and you
+         keep moving, miss and you are walking for ten seconds. The spear stops
+         being setup and starts being the thing that keeps the dash alive. */
+      name: 'Lance Dash', key: 'SHIFT', icon: '➤', cooldown: 10, charges: 1,
       anim: 'thrust',
-      desc: 'Dash straight through everything in the way for 360% damage. Hit a marked enemy and the dash comes straight back.',
+      desc: 'Dash straight through everything in the way for 360% damage. Ten second cooldown — but land it on a marked enemy and you get the whole thing back.',
       fire(ctx) {
         ctx.lanceDash({
           speed: 40, duration: 0.3, damage: ctx.dmg * 3.6, radius: 2.4,

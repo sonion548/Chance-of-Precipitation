@@ -11,6 +11,24 @@ export const damp = (a, b, lambda, dt) => lerp(a, b, 1 - Math.exp(-lambda * dt))
 
 export const TAU = Math.PI * 2;
 
+/*
+ * Yaw and pitch that swing +Z onto a direction, for anything modelled facing
+ * forward. Feed them to a `YXZ` Euler in that order and a third angle of your
+ * own is a roll about the direction itself.
+ *
+ * Split into two scalar calls rather than one that returns a pair: these run
+ * per effect per frame, and an object per call is garbage the frame does not
+ * need. Neither wants a normalised input.
+ *
+ * The pitch is `atan2` against the horizontal length rather than `asin(y)`, so
+ * it stays exact for an unnormalised vector and stays defined when the
+ * direction is straight up. That is also the case with no yaw to recover —
+ * `atan2(0, 0)` is zero rather than an error, but it is zero by luck, so the
+ * yaw says so explicitly instead of reading noise out of two zeroes.
+ */
+export const aimYaw = (x, z) => (Math.abs(x) + Math.abs(z) > 1e-5 ? Math.atan2(x, z) : 0);
+export const aimPitch = (x, y, z) => -Math.atan2(y, Math.hypot(x, z));
+
 export function wrapAngle(a) {
   while (a > Math.PI) a -= TAU;
   while (a < -Math.PI) a += TAU;

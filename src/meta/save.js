@@ -85,11 +85,21 @@ function migrate(p) {
   merged.itemsSeen = { ...(p.itemsSeen || {}) };
   merged.enemiesSeen = { ...(p.enemiesSeen || {}) };
   merged.stagesEverCleared = { ...(p.stagesEverCleared || {}) };
-  merged.settings = { ...base.settings, ...(p.settings || {}) };
-  // Guarantee the default unlocks are always present.
-  merged.unlockedItems = [...new Set([...base.unlockedItems, ...(p.unlockedItems || [])])];
-  merged.unlockedWeapons = [...new Set([...base.unlockedWeapons, ...(p.unlockedWeapons || [])])];
-  merged.unlockedCharacters = [...new Set([...base.unlockedCharacters, ...(p.unlockedCharacters || [])])];
+  // Guarantee the default unlocks are always present, and drop ids that no
+  // longer exist. A retired weapon left in the list is not harmless: the
+  // "everything unlocked" test counts entries against the catalogue, so one
+  // phantom makes a partly-unlocked account claim to be complete.
+  const known = (list, catalogue) => {
+    const ids = new Set(catalogue.map((e) => e.id));
+    return list.filter((id) => ids.has(id));
+  };
+  merged.unlockedItems = known([...new Set([...base.unlockedItems, ...(p.unlockedItems || [])])], ITEMS);
+  merged.unlockedWeapons = known([...new Set([...base.unlockedWeapons, ...(p.unlockedWeapons || [])])], WEAPONS);
+  merged.unlockedCharacters = known([...new Set([...base.unlockedCharacters, ...(p.unlockedCharacters || [])])], CHARACTERS);
+  // Settings moved out to their own store and their own storage key. The
+  // spread above would otherwise carry an old profile's copy forward for ever,
+  // where it reads like a second source of truth that nothing actually obeys.
+  delete merged.settings;
   merged.version = VERSION;
   return merged;
 }

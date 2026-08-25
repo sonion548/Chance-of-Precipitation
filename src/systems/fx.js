@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { fx as rng } from '../core/rng.js';
 import { audio } from '../core/audio.js';
+import { aimYaw, aimPitch } from '../core/mathx.js';
 
 const MAX_PARTICLES = 2600;
 const MAX_BEAMS = 90;
@@ -254,8 +255,17 @@ export class FX {
     if (!slot) { slot = this.slashes[this.slCursor]; this.slCursor = (this.slCursor + 1) % MAX_SLASHES; }
     slot.active = true;
     slot.pos.copy(pos);
-    const yaw = Math.atan2(dir.x, dir.z);
-    _e.set(0, yaw, 0, 'YXZ');
+    /* The cut is angled by the direction it was thrown, not merely turned to
+       face it. It used to take only the yaw, so every crescent lay flat in the
+       ground plane however steeply you were aiming: swing up at something
+       overhead and the damage went up while the cut stayed at your feet. Both
+       angles now come off `dir`, so a swing up a slope leaves a cut lying up
+       the slope and one at a flyer is a cut through the air above you.
+
+       `tilt` is the roll about that direction — the cant of the stroke — and
+       is applied afterwards, in the cut's own frame, so it keeps meaning the
+       same thing whichever way the swing is pointed. */
+    _e.set(aimPitch(dir.x, dir.y, dir.z), aimYaw(dir.x, dir.z), 0, 'YXZ');
     slot.quat.setFromEuler(_e);
     if (tilt) slot.quat.multiply(_q2.setFromAxisAngle(FORWARD, tilt));
     slot.radius = radius;

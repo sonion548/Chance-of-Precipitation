@@ -59,22 +59,21 @@ across the head and chest.
   **Halcyon** (flies; low health, negative armour, slightly softer damage, impact bombs),
   **Javelin** (0-damage marking spear + a piercing dash that refunds itself on a marked hit).
   A character sets base stats plus utility, special and ultimate; weapons are independent.
+- **A flight pose**, not an airborne walk. `poseFlight` in `entities/characterRig.js` runs
+  after the gait and blends over it by `rig.fly`, driven by `flying` / `flightClimb` off the
+  player. Legs trail and scissor, ankles point, the trunk pitches with the throttle, and the
+  arms yield to aiming and to attack animations rather than fighting them.
 - **Ultimates** — one per character, with **no cooldown**. A meter fills from kills
   (3 / 9 / 26 per normal / elite / boss) and from damage taken (0.6 per 1% of max health
   lost), plus a 0.35/s trickle; spending empties it. Tuning lives in `ULTIMATE` in
   `core/config.js`. They are meant to be run-swinging, not routine.
-- **9 weapons** — MK-4 Sidearm, Breach Scattergun, Arc Emitter, Rivet Driver, Seeker
-  Launcher, Photon Lance, Void Reaper, **Sundered Gauntlets**, **Siege Gauntlets**. Tuned to
-  near-identical single-target DPS (~64–84 at base damage) so the choice is about *how* you
-  fight. Every ability names an `anim` and the rig acts it out (slash / punch / thrust /
-  pump / lob).
-- **Sundered Gauntlets** is the melee-only option: a ~3m punch that detonates whatever it
-  connects with for a further 120% in 5m, plus a lunge into the swing. Its secondary is a
-  ground slam whose damage and radius scale with the height you fell from, up to double.
-  Implemented as `ctx.punch()` and `ctx.groundSlam()` in `systems/combat.js`.
-- **Siege Gauntlets** is the other melee option, and reaches where the Sundered ones do not:
-  each punch is a 9m compression cone (`ctx.shockwave()`) and the secondary fires both
-  gauntlets at the floor to ride the blast straight up (`ctx.jetBoost()`), jumps refunded.
+- **8 weapons** — MK-4 Sidearm, Breach Scattergun, Arc Emitter, Rivet Driver, Seeker
+  Launcher, Photon Lance, Void Reaper, **Siege Gauntlets**. Tuned to near-identical
+  single-target DPS (~64–84 at base damage) so the choice is about *how* you fight. Every
+  ability names an `anim` and the rig acts it out (slash / punch / thrust / pump / lob).
+- **Siege Gauntlets** is the melee option, and it reaches: each punch is a 9m compression
+  cone (`ctx.shockwave()`) and the secondary fires both gauntlets at the floor to ride the
+  blast straight up (`ctx.jetBoost()`), jumps refunded.
 - **81 items** across 5 rarities. 49 unlocked on a fresh profile — 19/18/6/4/2 by tier, so a
   new account can find a Legendary. Each has a procedurally drawn icon.
 - **4 pet species** — lizard, beetle, wisp, shell — hatched from eggs with gold. No cap on
@@ -320,6 +319,26 @@ dynamic lights are the first thing dropped.
   appeared to hold its gun out flat to the left. This has now shipped three separate times
   (the missing head, the flat weapon, a chest lid), so **`npm run check` greps for it** and
   fails the build. Do not delete that lint.
+- **The walk was knock-kneed, and the pelvis was why.** Two faults compounding. The rest
+  splay had the wrong sign — a positive Z rotation swings a limb toward +X, so the leg at
+  negative X needed a negative angle, and positive on both made a V where the comment above
+  it promised an A. On top of that the pelvis twisted 0.3 rad into every step, about double a
+  real running gait, and because both legs hang rigidly off it that did not read as hip
+  rotation: it swung the forward leg bodily across the centreline. Measured on the Vanguard,
+  the knees tracked 0.25 apart against hips 0.39 apart and closed to 0.15 at worst, and each
+  foot reached up to 0.29 past its own hip. The Wraith was worse — knees to 0.08. The splay
+  is the right way round now, the twist is 0.15, and `poseLegs` counter-rotates each hip by
+  `LEG_TRACK` of it, which is what a femur does and why people's feet land in a line. Same
+  measurement now: knees 0.40 apart, 0.35 at worst, feet within 0.10. The side-step still
+  crosses on purpose — that one is a gait, not a defect.
+- **Slashes were drawn flat however you swung them.** `FX.slash` took only the yaw off the
+  direction it was handed, so every crescent lay in the ground plane with a fixed roll on
+  top; the travelling wave did the same with its velocity. Swing up at something overhead and
+  the damage went up — `melee` has always used the full 3D aim vector — while the cut stayed
+  at your feet. Both take yaw and pitch now, via `aimYaw` / `aimPitch` in `core/mathx.js`,
+  and the roll is applied afterwards in the cut's own frame so it keeps meaning the same
+  thing whichever way the swing points. The wave is re-aimed every frame rather than only at
+  spawn, because gravity and drag bend the path.
 - **Elbows bent backwards.** Arm and leg joints both used positive `rotation.x` on the lower
   segment, but an elbow flexes forward and a knee flexes back, so one of them had to be
   negative. Arms are now negative, and the joint pad moved to the outside of the joint
@@ -449,7 +468,7 @@ headlessly (canvas stubbed, since nothing it draws reaches a collider) and asser
 peers on one seed agree on every collider and on ground height across 400 sample points.
 
 Suites in use: all item hooks (all 81 items at 3 stacks each, in a live firefight with a
-brood out), all 9 weapons (damage benchmark), all 6 characters (ability displacement/damage
+brood out), all 8 weapons (damage benchmark), all 6 characters (ability displacement/damage
 vs spec), collision correctness vs brute force, a full menu→run→boss→descend→summary pass, a
 two-peer co-op pass (lobby, stage sync, damage prediction, item arbitration, revive, stage
 advance), a 10-minute leak soak, and shader-program stability.
