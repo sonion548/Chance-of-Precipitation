@@ -40,6 +40,20 @@ export function createRig(yaw = 0) {
     recoil: 0,
     flinch: 0,
     flinchDir: 0,
+    // Attack playback: which move, how far through it, and which way the last
+    // swing went (so a held attack alternates instead of repeating one stroke).
+    attackKind: null,
+    attackTime: 0,
+    attackDur: 0.25,
+    attackPower: 1,
+    attackSide: 1,
+    attack: 0,
+    // Damped bases for the limbs the attack poses add on top of. Keeping these
+    // apart from the Object3D rotations is what stops a swing from feeding its
+    // own offset back into the smoothing every frame and over-rotating.
+    armRX: 0, armRY: 0, armRZ: 0, armRLower: 0,
+    armLX: 0, armLY: 0, armLZ: 0, armLLower: 0,
+    torsoY: 0, torsoZ: 0, torsoX: 0,
     ready: 0,
     land: 0,
     airTime: 0,
@@ -55,6 +69,40 @@ export function createRig(yaw = 0) {
 /** Kick the whole upper body — called when a shot goes off. */
 export function rigRecoil(rig, amount) {
   rig.recoil = Math.min(2.6, rig.recoil + amount);
+}
+
+/**
+ * Play a weapon's attack move.
+ *
+ * `kind` is the `anim` a weapon ability declares: 'slash', 'punch', 'thrust',
+ * 'pump', 'lob', 'beam' or 'shoot'. Melee kinds get a real body movement; the
+ * shooting kinds are a shoulder punch on top of the existing recoil, which is
+ * what they always were.
+ */
+export function rigAttack(rig, kind = 'shoot', power = 1) {
+  if (!kind) return;
+  rig.attackKind = kind;
+  rig.attackTime = 0;
+  rig.attackPower = 0.5 + 0.5 * (power ?? 1);
+  rig.attackDur = ATTACK_DURATION[kind] ?? 0.2;
+  // Alternate the swing direction so holding attack reads as a sequence of
+  // strokes rather than one shape stuttering.
+  rig.attackSide = -(rig.attackSide || 1);
+}
+
+const ATTACK_DURATION = {
+  slash: 0.34, punch: 0.26, thrust: 0.24, pump: 0.3, lob: 0.28, beam: 0.16, shoot: 0.16,
+};
+
+/**
+ * Attack envelope: snaps out, eases back. 0 → 1 by a third of the way through,
+ * then down to 0 at the end — the shape of something being swung, not a sine.
+ */
+function attackEnvelope(t) {
+  if (t <= 0 || t >= 1) return 0;
+  return t < 0.34
+    ? Math.sin((t / 0.34) * Math.PI * 0.5)
+    : Math.cos(((t - 0.34) / 0.66) * Math.PI * 0.5);
 }
 
 /** Take-a-hit flinch. `side` is -1..1 in the body's own frame. */
@@ -118,8 +166,19 @@ export function updateRig(model, rig, dt, s) {
   rig.recoil = damp(rig.recoil, 0, 11, dt);
   rig.flinch = Math.max(0, rig.flinch - dt * 3.2);
 
+  // Attack playback.
+  if (rig.attackKind) {
+    rig.attackTime += dt;
+    const t = rig.attackTime / rig.attackDur;
+    rig.attack = attackEnvelope(t) * rig.attackPower;
+    if (t >= 1) { rig.attackKind = null; rig.attack = 0; }
+  } else {
+    rig.attack = 0;
+  }
+
   // Weapon readiness. Rises almost instantly (you snap a gun up), falls slowly.
-  const wantUp = s.weaponUp ? 1 : 0;
+  // Mid-swing the weapon is up by definition, whatever the situation says.
+  const wantUp = (s.weaponUp || rig.attack > 0.02) ? 1 : 0;
   rig.ready = wantUp > rig.ready
     ? Math.min(1, rig.ready + dt * 16)
     : damp(rig.ready, wantUp, 2.6, dt);
@@ -219,14 +278,37 @@ function poseTorso(ud, rig, dt, s, o) {
   // Shoulders counter-rotate against the hips; a lean into the turn on top.
   const counter = Math.sin(ph) * 0.28 * stride;
   const bank = -rig.strafe * 0.2 - rig.turnRate * 0.12;
-  torso.rotation.y = damp(torso.rotation.y, counter - rig.turnRate * 0.22 + rig.flinch * rig.flinchDir * 0.2, 14, dt);
-  torso.rotation.z = damp(torso.rotation.z, -Math.sin(ph) * 0.11 * stride + bank, 12, dt);
+  rig.torsoY = damp(rig.torsoY, counter - rig.turnRate * 0.22 + rig.flinch * rig.flinchDir * 0.2, 14, dt);
+  rig.torsoZ = damp(rig.torsoZ, -Math.sin(ph) * 0.11 * stride + bank, 12, dt);
 
   // Spine pitch: follows the aim, leans into a run, folds on recoil and impacts.
   const lean = clamp(rig.forward * 0.22, -0.14, 0.22);
   const target = -s.pitch * 0.38 + lean - rig.recoil * 0.12 - rig.flinch * 0.16
     + land * 0.34 + airborne * 0.12;
-  torso.rotation.x = damp(torso.rotation.x, target, 12, dt);
+  rig.torsoX = damp(rig.torsoX, target, 12, dt);
+
+  /* A swing is a whole-body movement or it is a wrist flick. The trunk leads
+     the arm round on a slash, drops a shoulder into a punch, and squares up
+     behind a thrust — added on top of the damped bases rather than into them,
+     so the smoothing never inherits its own offset. */
+  const atk = rig.attack;
+  const side = rig.attackSide;
+  let twist = 0;
+  let fold = 0;
+  let roll = 0;
+  if (atk > 0.001) {
+    switch (rig.attackKind) {
+      case 'slash': twist = side * 0.52 * atk; roll = side * 0.14 * atk; fold = 0.1 * atk; break;
+      case 'punch': twist = -side * 0.3 * atk; fold = 0.24 * atk; roll = side * 0.1 * atk; break;
+      case 'thrust': twist = -0.18 * atk; fold = 0.2 * atk; break;
+      case 'pump': twist = 0.16 * atk; fold = 0.12 * atk; break;
+      case 'lob': twist = -side * 0.2 * atk; fold = -0.14 * atk; break;
+      default: fold = 0.06 * atk; break;
+    }
+  }
+  torso.rotation.y = rig.torsoY + twist;
+  torso.rotation.z = rig.torsoZ + roll;
+  torso.rotation.x = rig.torsoX + fold;
 
   // The chest itself swells with the breath cycle. Tiny, but it kills the
   // "statue with moving legs" read more than any of the big rotations do.
@@ -259,6 +341,16 @@ function poseHead(ud, rig, dt, s, o) {
 function poseArms(ud, rig, dt, s, o) {
   if (!ud.armR || !ud.armL) return;
   const { stride, ph, airborne, breath, idle } = o;
+
+  // Seed the damped bases from the pose the model was built in, or the first
+  // frame snaps the arms to zero and then eases back — a visible flinch at spawn.
+  if (!rig._armsInit) {
+    rig._armsInit = true;
+    rig.armRX = ud.armR.rotation.x; rig.armRY = ud.armR.rotation.y; rig.armRZ = ud.armR.rotation.z;
+    rig.armLX = ud.armL.rotation.x; rig.armLY = ud.armL.rotation.y; rig.armLZ = ud.armL.rotation.z;
+    rig.armRLower = ud.armR.userData.lower?.rotation.x ?? 0;
+    rig.armLLower = ud.armL.userData.lower?.rotation.x ?? 0;
+  }
   const ready = rig.ready;
   const aimLift = -s.pitch * 0.55;
 
@@ -270,37 +362,100 @@ function poseArms(ud, rig, dt, s, o) {
   /* ---- right arm: the weapon hand ---- */
   const bracedR = (-1.15 + aimLift) - rig.recoil * 0.55;
   const loweredR = -0.16 + swingR;
-  ud.armR.rotation.x = damp(ud.armR.rotation.x,
+  rig.armRX = damp(rig.armRX,
     lerp(loweredR, bracedR + swingR * 0.5, ready) - airborne * 0.2, 18, dt);
-  ud.armR.rotation.z = damp(ud.armR.rotation.z, lerp(0.06, -0.12, ready), 12, dt);
-  ud.armR.rotation.y = damp(ud.armR.rotation.y, -rig.turnRate * 0.2 * ready, 12, dt);
+  rig.armRZ = damp(rig.armRZ, lerp(0.06, -0.12, ready), 12, dt);
+  rig.armRY = damp(rig.armRY, -rig.turnRate * 0.2 * ready, 12, dt);
 
   /* ---- left arm: supports the weapon, or reaches out on a grapple ---- */
   const bracedL = (-0.95 + aimLift) - rig.recoil * 0.28;
   const loweredL = -0.16 + swingL;
   const supportPose = s.grapple ? -1.5 : lerp(loweredL, bracedL - swingL * 0.5, ready);
-  ud.armL.rotation.x = damp(ud.armL.rotation.x, supportPose - airborne * 0.2, 18, dt);
-  ud.armL.rotation.z = damp(ud.armL.rotation.z,
-    s.grapple ? 0.1 : lerp(-0.06, 0.34, ready), 12, dt);
-  ud.armL.rotation.y = damp(ud.armL.rotation.y, s.grapple ? 0 : lerp(0.04, -0.28, ready), 12, dt);
+  rig.armLX = damp(rig.armLX, supportPose - airborne * 0.2, 18, dt);
+  rig.armLZ = damp(rig.armLZ, s.grapple ? 0.1 : lerp(-0.06, 0.34, ready), 12, dt);
+  rig.armLY = damp(rig.armLY, s.grapple ? 0 : lerp(0.04, -0.28, ready), 12, dt);
 
   // Elbows.
   // Elbows pump either way: a braced arm still absorbs the stride, it just does
   // it with the forearm instead of the shoulder.
-  if (ud.armR.userData.lower) {
-    ud.armR.userData.lower.rotation.x = damp(ud.armR.userData.lower.rotation.x,
-      lerp(0.34, 0.5 + rig.recoil * 0.5, ready) + Math.abs(swingR) * lerp(0.3, 0.22, ready), 18, dt);
-  }
-  if (ud.armL.userData.lower) {
-    ud.armL.userData.lower.rotation.x = damp(ud.armL.userData.lower.rotation.x,
-      s.grapple ? -0.35 : lerp(0.3, 0.85, ready) + Math.abs(swingL) * lerp(0.3, 0.22, ready), 14, dt);
-  }
+  rig.armRLower = damp(rig.armRLower,
+    lerp(0.34, 0.5 + rig.recoil * 0.5, ready) + Math.abs(swingR) * lerp(0.3, 0.22, ready), 18, dt);
+  rig.armLLower = damp(rig.armLLower,
+    s.grapple ? -0.35 : lerp(0.3, 0.85, ready) + Math.abs(swingL) * lerp(0.3, 0.22, ready), 14, dt);
+
+  const atk = poseAttackArms(rig);
+  ud.armR.rotation.x = rig.armRX + atk.rx;
+  ud.armR.rotation.y = rig.armRY + atk.ry;
+  ud.armR.rotation.z = rig.armRZ + atk.rz;
+  ud.armL.rotation.x = rig.armLX + atk.lx;
+  ud.armL.rotation.y = rig.armLY + atk.ly;
+  ud.armL.rotation.z = rig.armLZ + atk.lz;
+  if (ud.armR.userData.lower) ud.armR.userData.lower.rotation.x = rig.armRLower + atk.rElbow;
+  if (ud.armL.userData.lower) ud.armL.userData.lower.rotation.x = rig.armLLower + atk.lElbow;
 
   // Shoulders shrug with the breath and rock with the stride.
   const shrug = breath * 0.03 * idle * (1 - ready * 0.6);
   const rock = Math.sin(ph) * 0.035 * stride;
   ud.armR.position.y = (ud.armRBaseY ??= ud.armR.position.y) + shrug - rock;
   ud.armL.position.y = (ud.armLBaseY ??= ud.armL.position.y) + shrug + rock;
+}
+
+/**
+ * How far each arm joint is pushed out of its resting pose by the current
+ * attack, in the arm's own frame. Returns offsets, never absolute angles —
+ * the caller adds them to the damped bases.
+ *
+ * The moves themselves:
+ *   slash   the weapon arm sweeps across the body, elbow opening through it
+ *   punch   the shoulder drives forward and the elbow snaps straight
+ *   thrust  a shorter, straighter version of the punch, both hands on the line
+ *   pump    the support hand racks the action back and lets it go
+ *   lob     an overarm throw: the arm comes up and over
+ */
+function poseAttackArms(rig) {
+  const out = { rx: 0, ry: 0, rz: 0, lx: 0, ly: 0, lz: 0, rElbow: 0, lElbow: 0 };
+  const a = rig.attack;
+  if (a <= 0.001) return out;
+  const side = rig.attackSide;
+  switch (rig.attackKind) {
+    case 'slash':
+      out.ry = side * 1.35 * a;
+      out.rx = -0.6 * a;
+      out.rz = -side * 0.45 * a;
+      out.rElbow = -0.4 * a;
+      out.ly = side * 0.7 * a;
+      out.lx = -0.25 * a;
+      out.lElbow = -0.3 * a;
+      break;
+    case 'punch':
+      out.rx = -0.95 * a;
+      out.rz = -0.18 * a;
+      out.rElbow = -0.75 * a;
+      out.lx = 0.5 * a;
+      out.lElbow = 0.5 * a;
+      break;
+    case 'thrust':
+      out.rx = -0.6 * a;
+      out.rElbow = -0.55 * a;
+      out.lx = -0.35 * a;
+      out.lElbow = -0.35 * a;
+      break;
+    case 'pump':
+      out.lx = 0.55 * a;
+      out.lElbow = 0.7 * a;
+      out.rx = -0.16 * a;
+      break;
+    case 'lob':
+      out.rx = -0.85 * a;
+      out.rElbow = 0.6 * a;
+      out.rz = -0.2 * a;
+      break;
+    default:
+      out.rx = -0.2 * a;
+      out.rElbow = 0.16 * a;
+      break;
+  }
+  return out;
 }
 
 /* ---------------------------------------------------------------- weapon */
@@ -336,6 +491,27 @@ function poseWeapon(ud, rig, dt, s) {
   _basis.makeBasis(_right, _up, _aimDir);
   _aimQuat.setFromRotationMatrix(_basis);
 
+  // The weapon itself moves with the attack: a blade rolls over through its
+  // arc, a fist and a spear are driven forward out of the hand's rest position.
+  const a = rig.attack;
+  let swingRoll = 0;
+  let swingPitch = 0;
+  let reach = 0;
+  if (a > 0.001) {
+    switch (rig.attackKind) {
+      case 'slash': swingRoll = rig.attackSide * 1.15 * a; swingPitch = -0.3 * a; break;
+      case 'punch': reach = 0.34 * a; swingPitch = -0.12 * a; break;
+      case 'thrust': reach = 0.42 * a; break;
+      case 'pump': swingPitch = 0.22 * a; reach = -0.1 * a; break;
+      case 'lob': swingPitch = -0.4 * a; break;
+      default: break;
+    }
+  }
+  ud.mountBaseZ ??= mount.position.z;
+  ud.mountBaseY ??= mount.position.y;
+  mount.position.z = ud.mountBaseZ + reach;
+  mount.position.y = ud.mountBaseY + reach * 0.18;
+
   // Local offsets, in the weapon's own frame: a natural cant, muzzle rise from
   // recoil, walking sway, and the barrel dropping when the weapon is stowed.
   const lower = 1 - rig.ready;
@@ -343,9 +519,9 @@ function poseWeapon(ud, rig, dt, s) {
   // crosshair at all, or precise shots feel like the game is lying to you.
   const sway = (1 - rig.ready * 0.7) * clamp01(rig.stride * 1.4);
   _euler.set(
-    -rig.recoil * 0.45 + lower * 0.95 + Math.sin(rig.walkPhase) * 0.035 * sway,
+    -rig.recoil * 0.45 + lower * 0.95 + Math.sin(rig.walkPhase) * 0.035 * sway + swingPitch,
     lower * 0.34 + Math.sin(rig.walkPhase * 0.5) * 0.045 * sway,
-    -0.07 - lower * 0.22 + Math.sin(rig.walkPhase + 1.2) * 0.03 * sway,
+    -0.07 - lower * 0.22 + Math.sin(rig.walkPhase + 1.2) * 0.03 * sway + swingRoll,
     'XYZ',
   );
   _offsetQuat.setFromEuler(_euler);

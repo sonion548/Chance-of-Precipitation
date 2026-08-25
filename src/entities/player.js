@@ -63,9 +63,11 @@ export class Player {
 
     this.dashTime = 0;
     this.dashDir = new THREE.Vector3();
+    this.dashSpec = null;         // { damage, radius, onHit, hit:Set } for a piercing dash
     // Movement states driven by character abilities.
     this.grapple = null;          // { anchor, time, enemy }
     this.shieldCharge = null;     // { dir, time, hit:Set }
+    this.flight = null;           // { time, riseSpeed, hoverSpeed, speedMult, color }
 
     this.buffs = new Map();
     this.statuses = new Map();
@@ -247,6 +249,8 @@ export class Player {
     this.game.ui.flashHurt(Math.min(1, dmg / (this.stats.maxHealth * 0.22)));
     this.game.engine.addShake(Math.min(0.34, 0.06 + dmg / this.stats.maxHealth * 0.9));
     this.game.inventory.trigger('onDamaged', { amount: dmg, source: opts.source });
+    // Half the ultimate meter is bought with your own health.
+    this.game.combat?.noteDamageTaken(dmg);
 
     const hpFrac = this.health / this.stats.maxHealth;
     if (hpFrac <= 0.25 && hpFrac > 0) this.game.inventory.trigger('onLowHealth', {});
@@ -263,6 +267,7 @@ export class Player {
     if (this.dead) return;
     this.dead = true;
     this.health = 0;
+    this.flight = null;
     this.game.fx.deathBurst(this.chestPosition, 0xff4d5e, 2.2);
     this.game.engine.addShake(1.4);
     this.game.onPlayerDeath(source);
@@ -340,6 +345,9 @@ export class Player {
     if (this.grapple) { this._tickGrapple(dt, world); return; }
     if (this.shieldCharge) { this._tickShieldCharge(dt, world); return; }
 
+    // --- Flight: a whole different relationship with the floor ---
+    if (this.flight) this._tickFlight(dt);
+
     // --- Horizontal acceleration ---
     const wish = _v.set(0, 0, 0)
       .addScaledVector(_fwd, axis.y)
@@ -347,8 +355,11 @@ export class Player {
     const wishLen = wish.length();
     if (wishLen > 0.001) wish.divideScalar(wishLen);
 
-    const targetSpeed = this.stats.moveSpeed * (wishLen > 0 ? 1 : 0);
-    const accel = this.grounded ? 62 : 62 * PLAYER.airControl;
+    // Flying keeps full authority over your own direction — an aircraft that
+    // handles like a thrown rock is not a flying character, it is a jump.
+    const flightSpeed = this.flight ? (this.flight.speedMult ?? 1) : 1;
+    const targetSpeed = this.stats.moveSpeed * flightSpeed * (wishLen > 0 ? 1 : 0);
+    const accel = (this.grounded || this.flight) ? 62 : 62 * PLAYER.airControl;
     this.velocity.x = damp(this.velocity.x, wish.x * targetSpeed, accel / 6, dt);
     this.velocity.z = damp(this.velocity.z, wish.z * targetSpeed, accel / 6, dt);
 
@@ -358,18 +369,26 @@ export class Player {
       this.velocity.z = damp(this.velocity.z, 0, fr, dt);
     }
 
-    // --- Jump ---
-    if (input.justPressed('Space')) {
-      if (this.grounded) { this.velocity.y = PLAYER.jumpVelocity; this.jumpsUsed = 1; this.grounded = false; }
-      else if (this.jumpsUsed < this.stats.maxJumps) {
-        this.velocity.y = PLAYER.jumpVelocity * 0.94;
-        this.jumpsUsed++;
-        this.game.fx.ring(this.position, 0.3, 2.4, 0xb8c8ff, 0.35, 0.55);
+    if (this.flight) {
+      // Hold Space to climb, hold nothing to sink gently. Gravity is off.
+      const rise = input.down('Space')
+        ? (this.flight.riseSpeed ?? 11)
+        : (this.flight.hoverSpeed ?? -1.4);
+      this.velocity.y = damp(this.velocity.y, rise, 7, dt);
+    } else {
+      // --- Jump ---
+      if (input.justPressed('Space')) {
+        if (this.grounded) { this.velocity.y = PLAYER.jumpVelocity; this.jumpsUsed = 1; this.grounded = false; }
+        else if (this.jumpsUsed < this.stats.maxJumps) {
+          this.velocity.y = PLAYER.jumpVelocity * 0.94;
+          this.jumpsUsed++;
+          this.game.fx.ring(this.position, 0.3, 2.4, 0xb8c8ff, 0.35, 0.55);
+        }
       }
-    }
 
-    this.velocity.y += PLAYER.gravity * dt;
-    this.velocity.y = Math.max(this.velocity.y, -62);
+      this.velocity.y += PLAYER.gravity * dt;
+      this.velocity.y = Math.max(this.velocity.y, -62);
+    }
 
     _v.set(this.velocity.x * dt, this.velocity.y * dt, this.velocity.z * dt);
     const res = moveWithCollision(this, _v, world);
@@ -378,6 +397,9 @@ export class Player {
       if (this.velocity.y < -14) this.game.fx.ring(this.position, 0.3, 2.2, 0xffffff, 0.28, 0.3);
       this.jumpsUsed = 0;
     }
+    // Touching down puts the thrusters out, and hands back half of whatever
+    // flight time you did not spend — landing early is rewarded, not punished.
+    if (res.grounded && this.flight && this.flight.grace <= 0) this.endFlight(true);
     this.grounded = res.grounded;
     if (this.grounded) this.jumpsUsed = 0;
 
@@ -404,6 +426,11 @@ export class Player {
     duration = PLAYER.dashDuration,
     iframes = PLAYER.iframesOnDash,
     dir = null,
+    damage = 0,
+    radius = 0,
+    onHit = null,
+    source = 'Dash',
+    color = 0x8fd8ff,
   } = {}) {
     const basis = this.moveBasis;
     const d = dir ? dir.clone() : new THREE.Vector3();
@@ -419,14 +446,19 @@ export class Player {
     this.dashSpeed = speed;
     this.dashTime = duration;
     this.dashIFrames = iframes;
+    // A dash that hurts carries its own hit set: it goes *through* people, so
+    // each one has to be remembered rather than the dash ending on the first.
+    this.dashSpec = damage > 0 || onHit
+      ? { damage, radius: radius || 2.2, onHit, source, color, hit: new Set() }
+      : null;
     this.velocity.y = Math.max(this.velocity.y, 0);
-    this.game.fx.ring(this.position, 0.4, 3.2, 0x8fd8ff, 0.32, 0.6);
+    this.game.fx.ring(this.position, 0.4, 3.2, color, 0.32, 0.6);
     for (let i = 0; i < 8; i++) {
       this.game.fx.spawnParticle(
         this.chestPosition,
         this.dashDir.clone().multiplyScalar(-6).add(
           new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(3)),
-        { color: 0x8fd8ff, size: 0.16, life: 0.32, gravity: -2 },
+        { color, size: 0.16, life: 0.32, gravity: -2 },
       );
     }
   }
@@ -437,12 +469,79 @@ export class Player {
     _v.y = this.velocity.y * dt * 0.25;
     const res = moveWithCollision(this, _v, world);
     this.grounded = res.grounded;
+    this._dashDamage();
     if (this.dashTime <= 0) {
       this.velocity.x = this.dashDir.x * this.dashSpeed * 0.42;
       this.velocity.z = this.dashDir.z * this.dashSpeed * 0.42;
+      this.dashSpec = null;
     }
     this._updateAim(world);
     this._updateModel(dt);
+  }
+
+  /** Everything the lance passes through, once each, on the way past. */
+  _dashDamage() {
+    const spec = this.dashSpec;
+    if (!spec) return;
+    for (const e of this.game.enemies.inRadius(this.chestPosition, spec.radius)) {
+      if (spec.hit.has(e)) continue;
+      spec.hit.add(e);
+      // The callback runs before the damage so an ability keyed to a status —
+      // the Javelin's mark — still sees it on an enemy the dash is about to kill.
+      spec.onHit?.(e);
+      if (spec.damage > 0) {
+        this.game.combat.damageEnemy(e, spec.damage, {
+          proc: 1, source: spec.source,
+          knockback: 8, knockbackDir: this.dashDir.clone().setY(0.3).normalize(),
+        });
+      }
+      this.game.fx.slash(this.chestPosition, this.dashDir, {
+        color: spec.color, radius: spec.radius * 1.3, life: 0.16, tilt: 0.3,
+      });
+    }
+  }
+
+  /* ---------------------------------------------------------------- flight */
+
+  /**
+   * Thrusters on.
+   *
+   * Flight is not a long jump: gravity stops applying entirely, Space becomes a
+   * throttle, and the body keeps full ground-level control of its direction.
+   * The grace window exists so taking off from the floor does not immediately
+   * count as landing on it.
+   */
+  startFlight({ duration = 6, riseSpeed = 11, hoverSpeed = -1.4, speedMult = 1.1, color = 0x7fe0ff } = {}) {
+    this.flight = { time: duration, maxTime: duration, riseSpeed, hoverSpeed, speedMult, color, grace: 0.45 };
+    this.grounded = false;
+    this.jumpsUsed = 0;
+    this.velocity.y = Math.max(this.velocity.y, 7);
+    this.game.fx.ring(this.position, 0.4, 4.2, color, 0.45, 0.9);
+    this.game.ui.toast('THRUSTERS', '#7fe0ff');
+  }
+
+  _tickFlight(dt) {
+    const f = this.flight;
+    f.grace = Math.max(0, f.grace - dt);
+    f.time -= dt;
+    if (f.time <= 0) { this.endFlight(false); return; }
+    // Exhaust. Cheap, and it is the only thing that says "this is costing fuel".
+    if (this.game.frame % 2 === 0) {
+      this.game.fx.spawnParticle(
+        _v2.set(this.position.x, this.position.y + 0.3, this.position.z),
+        _v.set((Math.random() - 0.5) * 2.2, -4 - Math.random() * 3, (Math.random() - 0.5) * 2.2),
+        { color: f.color, size: 0.13, life: 0.3, gravity: -2, drag: 0.93 },
+      );
+    }
+  }
+
+  /** Cuts the thrusters. Landing early pays half the unspent time back. */
+  endFlight(landed = false) {
+    const f = this.flight;
+    if (!f) return;
+    this.flight = null;
+    this.game.fx.ring(this.position, 0.3, 3, f.color, 0.35, 0.7);
+    if (landed && f.time > 0) this.game.combat?.reduceCooldowns(f.time * 0.5);
   }
 
   /**

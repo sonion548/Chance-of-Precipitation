@@ -27,6 +27,13 @@ function freshProfile() {
     runMode: 'storm',
     playerName: '',
     lastLobbyCode: '',
+    // Player-facing options. Kept in the profile rather than in their own key
+    // so a wipe takes them with it — "reset account" has to mean all of it.
+    settings: {
+      sensitivity: 1,        // × the base look sensitivity
+      screenShake: 1,        // × engine shake
+      damageNumbers: true,
+    },
     stagesEverCleared: {},        // stageIndex -> true (for first-clear bonuses)
     stats: {
       runs: 0,
@@ -83,6 +90,7 @@ function migrate(p) {
   merged.itemsSeen = { ...(p.itemsSeen || {}) };
   merged.enemiesSeen = { ...(p.enemiesSeen || {}) };
   merged.stagesEverCleared = { ...(p.stagesEverCleared || {}) };
+  merged.settings = { ...base.settings, ...(p.settings || {}) };
   // Guarantee the default unlocks are always present.
   merged.unlockedItems = [...new Set([...base.unlockedItems, ...(p.unlockedItems || [])])];
   merged.unlockedWeapons = [...new Set([...base.unlockedWeapons, ...(p.unlockedWeapons || [])])];
@@ -163,6 +171,14 @@ export class Profile {
 
   setRunMode(id) { this.data.runMode = id; this.save(); }
 
+  /** Writes one option and persists. Unknown keys are ignored on purpose. */
+  setSetting(key, value) {
+    if (!(key in this.data.settings)) return false;
+    this.data.settings[key] = value;
+    this.save();
+    return true;
+  }
+
   setPlayerName(name) { this.data.playerName = String(name).slice(0, 18); this.save(); }
   setLastLobbyCode(code) { this.data.lastLobbyCode = String(code || '').toUpperCase().slice(0, 6); this.save(); }
 
@@ -193,6 +209,13 @@ export class Profile {
     this.save();
   }
 
+  /**
+   * Erases the account: Echoes, unlocks, records, options, the lot.
+   *
+   * Both storage keys go, not just the current one — leaving the pre-rename
+   * profile behind would resurrect it on the next boot and make the reset look
+   * like it silently failed.
+   */
   wipe() {
     this.data = freshProfile();
     memoryFallback = null;

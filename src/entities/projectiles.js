@@ -9,6 +9,38 @@ const SPHERE = new THREE.SphereGeometry(1, 10, 8);
 const RING = (() => { const g = new THREE.RingGeometry(0.82, 1, 32); g.rotateX(-Math.PI / 2); return g; })();
 
 /**
+ * A crescent, lying flat, opening along +Z.
+ *
+ * This is what a thrown melee arc looks like in flight: the cut itself, still
+ * travelling. Built once and shared — the alternative was a glowing ball, which
+ * is what a horizontal slash absolutely does not leave behind.
+ */
+const CRESCENT = (() => {
+  const arc = 2.0;
+  const start = -Math.PI / 2 - arc / 2;
+  const g = new THREE.RingGeometry(0.5, 1, 36, 1, start, arc);
+  const pos = g.attributes.position;
+  // Taper the band to a point at both tips, same trick the FX slashes use.
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const r = Math.hypot(x, y);
+    if (r < 1e-6) continue;
+    let theta = Math.atan2(y, x) - start;
+    while (theta < 0) theta += Math.PI * 2;
+    const u = Math.min(1, theta / arc);
+    const taper = Math.pow(Math.sin(u * Math.PI), 0.6);
+    const innerNow = 1 - 0.5 * taper;
+    const t = (r - 0.5) / 0.5;
+    const rNew = innerNow + t * (1 - innerNow);
+    pos.setXY(i, (x / r) * rNew, (y / r) * rNew);
+  }
+  pos.needsUpdate = true;
+  g.rotateX(-Math.PI / 2);
+  return g;
+})();
+
+/**
  * Materials are cached by colour and shared.
  *
  * Every fresh material is a new shader program compile on first draw; a boss
@@ -85,7 +117,12 @@ export class ProjectileManager {
       homingRadius: spec.homingRadius ?? 0,
       homingStrength: spec.homingStrength ?? 0,
       target: spec.target || null,
-      harpoon: !!spec.harpoon,
+      // A harpoon spec is the winch itself: { time, speed }. `true` still works
+      // and takes the defaults, so nothing that passed a flag has to change.
+      harpoon: spec.harpoon ? (spec.harpoon === true ? { time: 0.9, speed: 34 } : spec.harpoon) : null,
+      wave: spec.wave ? { ...spec.wave, hits: new Set() } : null,
+      onLand: spec.onLand || null,
+      landed: false,
       detonateOnGround: !!spec.detonateOnGround,
       trail: spec.trail ?? 0,
       chill: spec.chill ?? 0,
@@ -107,10 +144,20 @@ export class ProjectileManager {
     };
 
     const scale = p.radius * (spec.glow ?? 1);
-    const mesh = new THREE.Mesh(SPHERE, glowMaterial(p.color));
+    const mesh = p.wave
+      ? new THREE.Mesh(CRESCENT, hazardMaterial(p.color))
+      : new THREE.Mesh(SPHERE, glowMaterial(p.color));
     mesh.scale.setScalar(scale);
     mesh.position.copy(p.position);
     if (p.disc) mesh.scale.set(scale * 2.6, scale * 0.5, scale * 2.6);
+    if (p.wave) {
+      const w = p.wave.width ?? p.radius * 1.4;
+      mesh.scale.set(w, 1, w);
+      mesh.rotation.y = Math.atan2(p.velocity.x, p.velocity.z);
+      // A crescent lying dead flat is invisible edge-on; a little roll gives
+      // the camera something to catch.
+      mesh.rotation.z = 0.22;
+    }
     this.group.add(mesh);
     p.mesh = mesh;
 
@@ -183,6 +230,7 @@ export class ProjectileManager {
       p.life -= dt;
       if (p.life <= 0 || p.dead) {
         if (p.splash && !p.dead) this._detonate(p, _v.copy(p.velocity).normalize());
+        if (!p.dead) this._land(p);
         this._destroy(p, i);
         continue;
       }
@@ -237,10 +285,27 @@ export class ProjectileManager {
       } else if (worldHit && worldHit.distance <= step + p.radius) {
         p.position.addScaledVector(dir, Math.max(0, worldHit.distance - 0.02));
         this._detonate(p, dir);
+        this._land(p);
         this._destroy(p, i);
         continue;
       } else {
         p.position.add(_v);
+      }
+
+      // Slash waves cut everything they sweep across, once each. A raycast
+      // down the centre line would let a wave the width of a car pass through
+      // a body standing half a metre off its axis.
+      if (p.wave) {
+        const w = p.wave;
+        for (const e of this.game.enemies.inRadius(p.position, w.width ?? p.radius * 1.4)) {
+          if (w.hits.has(e)) continue;
+          w.hits.add(e);
+          this.game.combat.damageEnemy(e, w.damage, {
+            proc: w.proc ?? 0.6, source: p.source, lifesteal: w.lifesteal ?? 0,
+            hitPoint: e.center.clone(),
+          });
+          this.game.fx.impact(e.center, _v2.copy(p.velocity).normalize().negate(), w.color ?? p.color, 1.2);
+        }
       }
 
       // Aura damage (Overload Sphere)
@@ -259,6 +324,14 @@ export class ProjectileManager {
 
       p.mesh.position.copy(p.position);
       if (p.disc) p.mesh.rotation.y += dt * 26;
+      if (p.wave) {
+        // Fade and spread as it goes, so a wave reads as losing coherence
+        // rather than as a solid object that suddenly stops existing.
+        const k = p.life / p.maxLife;
+        const w = (p.wave.width ?? p.radius * 1.4) * (1 + (1 - k) * 0.5);
+        p.mesh.scale.set(w, 1, w);
+        p.mesh.rotation.y = Math.atan2(p.velocity.x, p.velocity.z);
+      }
 
       // Trail
       if (p.trail > 0) {
@@ -303,14 +376,17 @@ export class ProjectileManager {
     this.game.fx.impact(p.position, dir.clone().negate(), p.color, 1);
 
     if (p.harpoon && !entity.dead) {
-      // Drag the target toward the player.
-      _v.copy(player.position).sub(entity.position).setY(0).normalize().multiplyScalar(24);
-      entity.velocity.add(_v);
-      entity.velocity.y = 6;
+      // The winch, not a shove. A single impulse was the old behaviour and it
+      // barely moved anything heavy — the target is now reeled in under power
+      // for the whole duration, which is what a harpoon is for.
+      entity.applyStatus('pulled', p.harpoon.time ?? 0.9, {
+        target: player, speed: p.harpoon.speed ?? 34, color: p.harpoon.color ?? p.color,
+      });
       entity.grounded = false;
       this.game.fx.beam(player.chestPosition, entity.center, p.color, 0.3, 0.07);
     }
     if (p.onHit) p.onHit(entity, p);
+    this._land(p);
 
     if (p.pierce > 0) { p.pierce--; return false; }
     return true;
@@ -340,6 +416,13 @@ export class ProjectileManager {
         chill: p.chill, freeze: p.freeze, burn: p.burn,
       });
     }
+  }
+
+  /** Fires a projectile's `onLand` exactly once, wherever it ended up. */
+  _land(p) {
+    if (!p.onLand || p.landed) return;
+    p.landed = true;
+    p.onLand(p.position.clone(), p);
   }
 
   _destroy(p, index) {

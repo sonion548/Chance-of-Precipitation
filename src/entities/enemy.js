@@ -212,6 +212,17 @@ export class Enemy {
         }
         if (this.health <= 0) { this.die({ source: 'Burning' }); return; }
       }
+      // A mark has to be visible from across the arena or the Javelin is
+      // guessing. One glow every few frames is enough and costs nothing.
+      if (id === 'marked') {
+        st.data.blink = (st.data.blink ?? 0) - dt;
+        if (st.data.blink <= 0) {
+          st.data.blink = 0.45;
+          _v.copy(this.center);
+          _v.y += this.height * 0.75;
+          this.game.fx.glow(_v, { color: st.data.color ?? 0x9dff6a, size: 0.9, life: 0.4, grow: 0.5 });
+        }
+      }
       if (st.time <= 0) this.statuses.delete(id);
     }
 
@@ -222,6 +233,12 @@ export class Enemy {
 
     const slow = this.slowFactor;
     if (slow > 0) this._runAI(dt * slow, player, world, toPlayer, distXZ);
+
+    // Being winched in overrides whatever the AI decided this frame. It is the
+    // last word on velocity precisely because a charger sprinting away from the
+    // line would otherwise win the tug of war against it.
+    const pulled = this.statuses.get('pulled');
+    if (pulled) this._tickPull(dt, pulled);
 
     // Physics
     const flying = this.def.ai === 'flyer' || this.def.model === 'leviathan' || this.def.model === 'harbinger' || this.def.model === 'warden';
@@ -245,6 +262,32 @@ export class Enemy {
 
     this._eliteTick(dt, player);
     this._updateModel(dt, player);
+  }
+
+  /**
+   * Reels this enemy toward whoever harpooned it.
+   *
+   * Heavy things resist in proportion to their knockback resistance rather than
+   * being immune, so a Brute comes in slowly and a boss barely shifts — but the
+   * line is never simply ignored.
+   */
+  _tickPull(dt, st) {
+    const target = st.data.target || this.game.player;
+    if (!target) return;
+    const resist = Math.min(0.92, this.def.knockbackResist ?? 0);
+    const speed = (st.data.speed ?? 34) * (1 - resist);
+    _v.copy(target.position).sub(this.position);
+    const d = _v.length();
+    if (d < 1.8) { this.statuses.delete('pulled'); return; }
+    _v.divideScalar(d);
+    this.velocity.x = _v.x * speed;
+    this.velocity.z = _v.z * speed;
+    // A little lift so the winch drags things over lips and debris instead of
+    // grinding them into the first kerb between here and the player.
+    if (this.grounded) { this.velocity.y = Math.max(this.velocity.y, 4.5); this.grounded = false; }
+    if (this.game.frame % 3 === 0) {
+      this.game.fx.beam(target.chestPosition, this.center, st.data.color ?? 0x7ad4ff, 0.09, 0.05);
+    }
   }
 
   /**

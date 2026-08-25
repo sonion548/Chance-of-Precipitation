@@ -120,29 +120,57 @@ export const RARITY = {
 export const RARITY_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
 
 // Brood lizards: bought from eggs with gold, they inherit the owner's items.
+//
+// These numbers were re-cut once it became clear a lizard was priced like a
+// small item and fought like a decoration. An egg now costs roughly what a
+// chest does rather than double it, the brood is bigger, and each lizard hits
+// hard enough that three of them read as a second gun rather than as ambience.
+// The proc coefficient stayed low on purpose — see below.
 export const MINIONS = {
-  baseCap: 3,               // more from Brood Totem
-  eggBaseCost: 48,
+  baseCap: 4,               // more from Brood Totem
+  eggBaseCost: 30,
   eggCostExponent: 1.02,    // cost = base * difficulty^exp * (1 + owned * perOwned)
-  eggCostPerOwned: 0.85,
-  eggsPerStage: [1, 2],     // inclusive range
-  health: 0.42,             // × owner max health
-  damage: 0.60,             // × owner damage, per fireball
-  attackCooldown: 1.35,     // ÷ owner attack speed
-  attackRange: 27,
+  eggCostPerOwned: 0.42,
+  eggsPerStage: [2, 3],     // inclusive range
+  health: 0.75,             // × owner max health
+  damage: 1.35,             // × owner damage, per fireball
+  attackCooldown: 0.85,     // ÷ owner attack speed
+  attackRange: 32,
   minRange: 4.5,            // backs off if something gets this close
-  projectileSpeed: 33,
-  splashRadius: 2.7,
-  burnDps: 0.18,            // × owner damage, per second
-  burnTime: 3.0,
+  projectileSpeed: 44,
+  splashRadius: 3.6,
+  burnDps: 0.34,            // × owner damage, per second
+  burnTime: 3.5,
   // Proc coefficient. Low, because a fireball is an area hit and a full brood
   // firing into a crowd resolves far more hit events per second than your gun
   // does — at 1.0 the lizards would be procing your items harder than you are.
-  proc: 0.15,
+  // Raised with the damage, but nowhere near proportionally.
+  proc: 0.22,
+  regen: 0.11,              // × own max health per second, out of combat
   followRadius: 5.0,
   leash: 30,                // teleports back past this
-  speed: 1.08,              // × owner move speed
-  reviveTime: 15,
+  speed: 1.16,              // × owner move speed
+  reviveTime: 8,
+};
+
+/**
+ * Ultimates: one enormous ability per character, bought with violence.
+ *
+ * The meter fills from two sources on purpose — kills and damage taken — so it
+ * pays out both to the player clearing a room and to the one being ground down
+ * in it. Neither alone fills it quickly; a fight does. The trickle exists only
+ * so a long walk between fights is not dead time.
+ */
+export const ULTIMATE = {
+  max: 100,
+  perKill: 3.0,
+  perEliteKill: 9,
+  perBossKill: 26,
+  // Per 1% of your max health actually lost. Losing a third of your bar is
+  // worth about a fifth of the meter.
+  perHealthPercent: 0.6,
+  perSecond: 0.35,
+  startCharge: 0,
 };
 
 // Co-op. Send rates are a compromise: high enough that a teammate strafing

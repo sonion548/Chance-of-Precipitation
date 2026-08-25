@@ -137,7 +137,11 @@ export class Engine {
    * as punchy without taking the camera away from the player.
    */
   addShake(amount) {
-    this.shakeAmount = Math.min(SHAKE_CEILING, this.shakeAmount + amount * SHAKE_GAIN);
+    // `shakeScale` is the player's own setting; zero turns the whole effect off
+    // rather than merely quieting it, which is what people who need it off want.
+    const scale = this.shakeScale ?? 1;
+    if (scale <= 0) return;
+    this.shakeAmount = Math.min(SHAKE_CEILING, this.shakeAmount + amount * SHAKE_GAIN * scale);
   }
 
   /** Applies decaying positional shake to the camera. Call after camera placement. */

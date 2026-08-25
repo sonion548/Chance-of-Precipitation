@@ -199,6 +199,22 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: none; ba
 .ability .charge-bar { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); width: 0%; }
 .ability .stacks { position: absolute; top: 2px; left: 4px; font-family: var(--mono); font-size: 10px; color: var(--accent-2); }
 
+/* --- ultimate slot: a meter that fills, not a cooldown that drains --- */
+.ability.ult { border-color: #6a5620; }
+.ability.ult .cd-mask { background: rgba(4,6,10,.86); }
+.ability.ult .charge-bar { height: 100%; background: linear-gradient(0deg, rgba(255,207,92,.30), rgba(255,207,92,.06)); }
+.ability.ult .cd-num { font-size: 12px; color: var(--gold); }
+.ability.ult.ready {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px rgba(255,207,92,.45) inset, 0 0 14px rgba(255,207,92,.4);
+  animation: ultPulse 1.4s ease-in-out infinite;
+}
+.ability.ult.ready .ico { filter: drop-shadow(0 0 6px rgba(255,207,92,.9)); }
+@keyframes ultPulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(255,207,92,.45) inset, 0 0 10px rgba(255,207,92,.3); }
+  50%      { box-shadow: 0 0 0 1px rgba(255,207,92,.7) inset,  0 0 20px rgba(255,207,92,.6); }
+}
+
 /* --- right side --- */
 #hud-right { position: absolute; right: 22px; bottom: 20px; text-align: right; }
 #gold-wrap {
@@ -583,6 +599,39 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: none; ba
 }
 .stat-row span { color: var(--muted); font-size: 13.5px; letter-spacing: 1px; }
 .stat-row b { font-family: var(--mono); font-size: 16px; }
+
+.wd-ability.ult { border: 1px solid rgba(255,207,92,.35); background: #14120c; }
+.wd-ability.ult .wa-key { color: var(--gold); border-color: rgba(255,207,92,.5); }
+
+/* settings */
+.set-rows { display: grid; gap: 4px; }
+.set-row {
+  display: grid; grid-template-columns: 1fr 200px 62px; align-items: center; gap: 16px;
+  padding: 11px 0; border-bottom: 1px solid var(--line-soft); cursor: pointer;
+}
+.set-row > span { color: var(--muted); font-size: 13.5px; letter-spacing: 1px; }
+.set-row > b { font-family: var(--mono); font-size: 14px; color: var(--accent-2); text-align: right; }
+.set-row input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+.set-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; justify-self: start; }
+.set-warn {
+  margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--danger);
+  background: rgba(255,77,94,.07); color: var(--muted); font-size: 13px; line-height: 1.6;
+}
+.danger-btn {
+  padding: 10px 22px; border-radius: 6px; border: 1px solid rgba(255,77,94,.5);
+  font-size: 13px; letter-spacing: 2.5px; text-transform: uppercase;
+  color: #ff8f9a; background: rgba(255,77,94,.07); transition: .15s;
+}
+.danger-btn:hover { border-color: var(--danger); background: rgba(255,77,94,.16); color: #ffc4ca; }
+.danger-btn.armed {
+  letter-spacing: 1.5px; color: #fff; background: var(--danger); border-color: var(--danger);
+  animation: armedPulse .9s ease-in-out infinite;
+}
+@keyframes armedPulse { 0%,100% { opacity: 1; } 50% { opacity: .72; } }
+
+@media (max-width: 720px) {
+  .set-row { grid-template-columns: 1fr 120px 54px; gap: 10px; }
+}
 
 /* help */
 #help-body h4 { font-size: 15px; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); margin: 20px 0 10px; }

@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import { weaponById } from '../data/weapons.js';
 import { characterById } from '../data/characters.js';
 import { buildWeaponModel } from '../entities/models.js';
+import { rigAttack } from '../entities/characterRig.js';
 import { raycastWorld } from '../systems/physics.js';
-import { clamp01, damp } from '../core/mathx.js';
+import { clamp01, damp, TAU } from '../core/mathx.js';
+import { ULTIMATE } from '../core/config.js';
 
 /**
  * Where a teleport puts you, and whether you are still airborne when it lands.
@@ -28,6 +30,7 @@ const _ray = new THREE.Vector3();   // hitscan direction — must survive item p
 export const SECONDARY_KEY = 'KeyQ';
 export const UTILITY_KEYS = ['ShiftLeft', 'ShiftRight'];
 export const SPECIAL_KEY = 'KeyR';
+export const ULTIMATE_KEY = 'KeyF';
 
 /**
  * Weapon handling and damage resolution.
@@ -47,6 +50,11 @@ export class Combat {
     this.utilityCharges = 1;
     this.specialTimer = 0;
     this.bastionTimer = 0;
+    this.lastStandTimer = 0;
+    // The ultimate meter, 0..ULTIMATE.max. Never a cooldown — see config.
+    this.ultimateCharge = ULTIMATE.startCharge;
+    this._ultimateAnnounced = false;
+    this._pendingSlam = null;
     this.chargeTime = 0;
     this.charging = false;
     this.heat = 0;
@@ -60,6 +68,55 @@ export class Combat {
     this.utilityCharges = this.character.utility.charges ?? 1;
     this.utilityTimer = 0;
     this.specialTimer = 0;
+    this.ultimateCharge = ULTIMATE.startCharge;
+    this._ultimateAnnounced = false;
+  }
+
+  /* ------------------------------------------------------------------ ultimate */
+  get hasUltimate() { return !!this.character?.ultimate; }
+  get ultimateFraction() { return clamp01(this.ultimateCharge / ULTIMATE.max); }
+  get ultimateReady() { return this.hasUltimate && this.ultimateCharge >= ULTIMATE.max; }
+
+  /**
+   * Feeds the meter. Everything that fills it comes through here so the
+   * "READY" announcement fires exactly once per fill, wherever the charge
+   * came from.
+   */
+  addUltimateCharge(amount) {
+    if (!this.hasUltimate || amount <= 0 || this.game.player?.dead) return;
+    const before = this.ultimateCharge;
+    this.ultimateCharge = Math.min(ULTIMATE.max, this.ultimateCharge + amount);
+    if (before < ULTIMATE.max && this.ultimateCharge >= ULTIMATE.max && !this._ultimateAnnounced) {
+      this._ultimateAnnounced = true;
+      this.game.ui.toast(`${this.character.ultimate.name.toUpperCase()} READY — F`, '#ffcf5c');
+      this.game.fxApi.ring(this.game.player.position, 0.5, 5, 0xffcf5c, 0.6, 0.9);
+    }
+  }
+
+  /** An enemy died: elites and bosses are worth a great deal more than a husk. */
+  noteKill(enemy) {
+    this.addUltimateCharge(
+      enemy?.boss ? ULTIMATE.perBossKill
+        : enemy?.elite ? ULTIMATE.perEliteKill
+        : ULTIMATE.perKill,
+    );
+  }
+
+  /** Taking a beating is the other half of the meter. `amount` is health lost. */
+  noteDamageTaken(amount) {
+    const max = this.game.player?.stats.maxHealth || 1;
+    this.addUltimateCharge((amount / max) * 100 * ULTIMATE.perHealthPercent);
+  }
+
+  /** Hands one utility charge back and restarts its regeneration cleanly. */
+  refundUtility() {
+    const max = this.maxUtilityCharges;
+    this.utilityCharges = Math.min(max, this.utilityCharges + 1);
+    const stats = this.game.player.stats;
+    const cd = (this.character?.utility.cooldown ?? 3) * stats.cooldownMult * stats.dashCooldownMult;
+    // Setting the timer to zero here would hand out a *second* free charge on
+    // the next frame, because that is exactly the condition the regen ticks on.
+    this.utilityTimer = this.utilityCharges >= max ? 0 : cd;
   }
 
   /** Max utility charges: the character's own plus anything items grant. */
@@ -131,8 +188,12 @@ export class Combat {
         this.utilityTimer = 0;
       }
       if (canAct && this.utilityCharges > 0 && UTILITY_KEYS.some((k) => input.justPressed(k))) {
-        this.utilityCharges--;
-        if (this.utilityTimer <= 0) this.utilityTimer = cd;
+        // Impaling Storm suspends the cost entirely rather than shortening it,
+        // so a dash taken during it is genuinely free rather than merely cheap.
+        if (!player.buffs.has('freedash')) {
+          this.utilityCharges--;
+          if (this.utilityTimer <= 0) this.utilityTimer = cd;
+        }
         this._fireAbility(util, 1, false, 'utility');
       }
     }
@@ -147,8 +208,23 @@ export class Combat {
       }
     }
 
-    // ---- Bastion field pulses while the buff is up ----
+    // ---- Ultimate (F): paid for in kills and in blood ----
+    const ult = this.character?.ultimate;
+    if (ult) {
+      this.addUltimateCharge(ULTIMATE.perSecond * dt);
+      if (canAct && this.ultimateReady && input.justPressed(ULTIMATE_KEY)) {
+        this.ultimateCharge = 0;
+        this._ultimateAnnounced = false;
+        this.game.ui.toast(ult.name.toUpperCase(), '#ffcf5c');
+        this.game.engine.addShake(0.4);
+        this._fireAbility(ult, 1, false, 'ultimate');
+      }
+    }
+
+    // ---- Fields and multi-frame ultimates tick while their buffs are up ----
     this._tickBastion(dt, player);
+    this._tickLastStand(dt, player);
+    this._tickSlam(dt, player);
 
     // ---- Primary ----
     const wantPrimary = primary.hold ? input.mouse.left : input.mouse.leftPressed;
@@ -183,6 +259,10 @@ export class Combat {
     this.ctx.aimPoint = player.aimPoint;
     this.ctx.chargeRatio = chargeRatio;
 
+    // The body acts the ability out: a swing swings, a punch punches. The rig
+    // owns what that looks like; all that is decided here is which one to play.
+    if (ability.anim) rigAttack(player.rig, ability.anim, chargeRatio);
+
     try {
       ability.fire(this.ctx, chargeRatio);
     } catch (err) {
@@ -207,6 +287,102 @@ export class Combat {
     for (const e of this.game.enemies.inRadius(player.position, radius)) {
       e.applyStatus('chill', 1.2, { slow: 0.4 });
     }
+  }
+
+  /**
+   * Last Stand: six seconds of standing there while the plate does the work.
+   * Same shape as Bastion — a buff the ability system pulses — because the
+   * alternative is an ability that owns a timer nothing else can see.
+   */
+  _tickLastStand(dt, player) {
+    const buff = player.buffs.get('laststand');
+    if (!buff) { this.lastStandTimer = 0; return; }
+    const extra = buff.extra || {};
+    // Immunity is refreshed from the buff so a mid-ultimate death is impossible
+    // even if something else clears the invulnerability window.
+    player.invulnerable = Math.max(player.invulnerable, Math.min(buff.time, 0.3));
+    this.lastStandTimer -= dt;
+    if (this.lastStandTimer > 0) return;
+    this.lastStandTimer = extra.interval ?? 0.5;
+    const radius = extra.radius ?? 16;
+    const color = extra.color ?? 0x6fd0ff;
+    this.areaDamage(player.position, radius, extra.damage ?? 0, {
+      proc: 0.5, source: 'Last Stand', force: extra.knockback ?? 18,
+    });
+    this.game.fxApi.ring(player.position, 1.5, radius, color, 0.42, 1);
+    this.game.fxApi.glow(player.chestPosition, { color, size: 2.4, life: 0.2, grow: 3 });
+    this.game.engine.addShake(0.12);
+  }
+
+  /**
+   * Terminal Velocity, in two acts: the launch, then the landing.
+   *
+   * It is a state machine rather than a single call because the whole point of
+   * the ability is the hang time — the player leaves the floor, the camera
+   * catches up, and only then does the ground arrive.
+   */
+  _tickSlam(dt, player) {
+    const slam = this._pendingSlam;
+    if (!slam) return;
+    slam.timer -= dt;
+    if (slam.phase === 'rise') {
+      player.invulnerable = Math.max(player.invulnerable, 0.4);
+      if (this.game.frame % 2 === 0) {
+        this.game.fxApi.glow(player.position, { color: slam.spec.color, size: 1.6, life: 0.25, grow: 2 });
+      }
+      if (slam.timer > 0) return;
+      // Come down on what you were looking at, within reach of the leap.
+      const aim = this.game.player.aimPoint;
+      const to = _v.copy(aim).sub(player.position).setY(0);
+      const dist = Math.min(to.length(), slam.spec.reach ?? 30);
+      to.setLength(dist);
+      const land = player.position.clone().add(to);
+      land.y = this.game.arena.groundHeightAt(land.x, land.z) + 16;
+      player.position.copy(land);
+      player.velocity.set(0, -78, 0);
+      player.grounded = false;
+      player.snapCamera();
+      slam.phase = 'fall';
+      slam.timer = 0.6;
+      return;
+    }
+    player.invulnerable = Math.max(player.invulnerable, 0.2);
+    if (!player.grounded && slam.timer > 0) return;
+    this._pendingSlam = null;
+    this._slamImpact(player.position.clone(), slam.spec);
+  }
+
+  _slamImpact(pos, spec) {
+    const game = this.game;
+    this.areaDamage(pos, spec.radius, spec.damage, {
+      proc: 1, source: 'Terminal Velocity', force: spec.knockback ?? 30,
+    });
+    game.fxApi.explosion(pos, spec.radius, spec.color, 2.2);
+    game.fxApi.ring(pos, 1, spec.radius * 1.6, spec.color, 0.9, 1);
+    game.engine.addShake(1.3);
+    for (let i = 0; i < (spec.aftershocks ?? 0); i++) {
+      const a = game.rng.next() * TAU;
+      const r = spec.radius * (0.3 + game.rng.next() * 0.6);
+      const p = pos.clone();
+      p.x += Math.cos(a) * r;
+      p.z += Math.sin(a) * r;
+      game.projectiles.spawnHazard(p, {
+        radius: spec.radius * 0.42, damage: spec.aftershockDamage ?? spec.damage * 0.25,
+        delay: 0.4 + i * 0.28, color: spec.color, hostile: false, source: 'Terminal Velocity',
+      });
+    }
+  }
+
+  /** Paints everything in a radius. Each enemy owns its own mark. */
+  markEnemies(position, radius, duration, color = 0x9dff6a) {
+    let count = 0;
+    for (const e of this.game.enemies.inRadius(position, radius)) {
+      e.applyStatus('marked', duration, { color, blink: 0 });
+      this.game.fxApi.glow(e.center, { color, size: 1.5, life: 0.35, grow: 1.8 });
+      count++;
+    }
+    this.game.fxApi.ring(position, 0.8, radius, color, 0.7, 0.9);
+    return count;
   }
 
   reduceCooldowns(seconds) {
@@ -292,7 +468,10 @@ export class Combat {
     const game = this.game;
     const self = this;
 
-    return {
+    // Named rather than returned anonymously: several of the helpers below are
+    // built out of the others (a slash wave is a melee swing plus a projectile),
+    // and composing them beats copying them.
+    const api = {
       dmg: 0,
       origin: new THREE.Vector3(),
       dir: new THREE.Vector3(),
@@ -447,13 +626,142 @@ export class Combat {
         // One crescent along the swing, alternating which way it cuts so a held
         // attack reads as a sequence of strokes rather than one stuttering shape.
         self._slashSide = -(self._slashSide || 1);
+        // `tilt` is how far out of the horizontal the cut is rolled. A weapon
+        // that swings flat asks for a small one and gets a flat crescent.
+        const tilt = spec.tilt ?? 0.5;
         game.fxApi.slash(origin.clone().setY(origin.y - 0.15), dir, {
           color: spec.color ?? 0xa15bff,
           radius: (spec.range ?? 5) * 0.92,
           life: 0.2,
-          tilt: 0.5 * self._slashSide,
+          tilt: tilt * self._slashSide,
         });
         if (any) game.engine.addShake(0.08);
+        return any;
+      },
+
+      /**
+       * A flat horizontal cut that keeps going.
+       *
+       * The swing itself is an ordinary melee arc; what makes it a Reaper swing
+       * is that the crescent leaves the blade and travels. The wave is its own
+       * damage event with its own proc coefficient, so a held attack is not
+       * secretly double-dipping every on-hit item you own.
+       */
+      slashWave(spec) {
+        api.melee({ ...spec, tilt: spec.tilt ?? 0.16 });
+        const w = spec.wave;
+        if (!w) return;
+        const player = game.player;
+        const dir = self.ctx.dir.clone();
+        const speed = w.speed ?? 32;
+        const range = w.range ?? 24;
+        const origin = player.chestPosition.clone().addScaledVector(dir, 1.2);
+        game.projectiles.spawn({
+          position: origin,
+          velocity: dir.clone().multiplyScalar(speed),
+          damage: 0,
+          radius: w.radius ?? 2.4,
+          life: range / speed,
+          color: spec.color ?? 0xa15bff,
+          gravity: 0,
+          // The wave is light, not matter: it sweeps through walls and bodies
+          // alike and resolves its damage from the sweep, once per enemy.
+          ghost: true,
+          wave: {
+            width: (w.radius ?? 2.4) * 1.35,
+            damage: w.damage ?? 0,
+            proc: w.proc ?? 0.6,
+            lifesteal: w.lifesteal ?? 0,
+            color: spec.color ?? 0xa15bff,
+          },
+          source: self.weapon?.name,
+        });
+        game.coop?.onLocalShot({
+          kind: 'bullet', x: origin.x, y: origin.y, z: origin.z,
+          dx: dir.x, dy: dir.y, dz: dir.z, sp: speed,
+          r: w.radius ?? 2.4, l: range / speed, g: 0, c: spec.color ?? 0xa15bff, tr: 1, gl: 1.6,
+        });
+      },
+
+      /**
+       * A compression charge punched out in front of the knuckles.
+       *
+       * Short, wide and immediate — the gauntlets have no muzzle, so the reach
+       * is the ability rather than a property of the projectile.
+       */
+      shockwave(spec) {
+        const player = game.player;
+        const origin = player.chestPosition.clone();
+        const dir = self.ctx.dir.clone().setY(0);
+        if (dir.lengthSq() < 1e-6) dir.set(Math.sin(player.yaw), 0, Math.cos(player.yaw));
+        dir.normalize();
+        const range = spec.range ?? 9;
+        const cosLimit = Math.cos(spec.angle ?? 0.95);
+        const color = spec.color ?? 0xffb347;
+
+        for (const e of game.enemies.inRadius(origin, range)) {
+          _v.copy(e.center).sub(origin).setY(0);
+          const d = _v.length();
+          if (d > 0.001) _v.divideScalar(d);
+          if (_v.dot(dir) < cosLimit) continue;
+          // The front loses a little punch on the way out, but not much: this
+          // is a wall of air, not a bullet.
+          const falloff = 1 - clamp01(d / range) * 0.3;
+          self.damageEnemy(e, spec.damage * falloff, {
+            proc: spec.proc ?? 0.8, source: self.weapon?.name,
+            knockback: spec.knockback ?? 12,
+            knockbackDir: _v.clone().setY(0.3).normalize(),
+          });
+        }
+
+        // Three crescents standing upright, marching away from the fist.
+        for (let i = 0; i < 3; i++) {
+          const p = origin.clone().addScaledVector(dir, range * (0.28 + i * 0.26));
+          game.fxApi.slash(p, dir, {
+            color, radius: range * (0.3 + i * 0.16), life: 0.13 + i * 0.03,
+            tilt: Math.PI / 2, grow: 2,
+          });
+        }
+        game.fxApi.glow(origin.clone().addScaledVector(dir, 1.4), { color, size: 1.3, life: 0.12, grow: 2.2 });
+        game.fxApi.ring(player.position, 0.5, range * 0.6, color, 0.24, 0.5);
+        game.engine.addShake(0.14);
+      },
+
+      /**
+       * Both gauntlets fired at the floor.
+       *
+       * Jumps are refunded rather than spent: the boost is the mobility, and
+       * taking your double jump for using it would make it a worse jump.
+       */
+      jetBoost(spec) {
+        const player = game.player;
+        const color = spec.color ?? 0xffb347;
+        const ground = player.position.clone();
+        ground.y += 0.4;
+
+        if (spec.damage) {
+          self.areaDamage(ground, spec.radius ?? 6, spec.damage, {
+            proc: 0.7, source: self.weapon?.name, force: 10,
+          });
+        }
+
+        // Cancel any fall first, or boosting mid-drop barely lifts you.
+        player.velocity.y = Math.max(player.velocity.y, 0);
+        const forward = player.moveDirection(_v2.set(0, 0, 0));
+        player.applyImpulse(
+          forward.clone().multiplyScalar(spec.forward ?? 0).setY(spec.up ?? 20),
+        );
+        player.jumpsUsed = 0;
+
+        game.fxApi.explosion(ground, (spec.radius ?? 6) * 0.7, color, 0.9);
+        game.fxApi.ring(player.position, 0.5, (spec.radius ?? 6) * 1.4, color, 0.4, 0.9);
+        for (let i = 0; i < 14; i++) {
+          game.fxApi.spawnParticle(ground, new THREE.Vector3(
+            (game.rng.next() - 0.5) * 9, -game.rng.next() * 6, (game.rng.next() - 0.5) * 9,
+          ), { color, size: 0.16, life: 0.4, gravity: -6, drag: 0.94 });
+        }
+        game.engine.addShake(0.3);
+        player.addRecoil(3);
       },
 
       /** Teleporting slash that damages everything along the path. */
@@ -655,7 +963,213 @@ export class Combat {
         game.fxApi.ring(player.position, 1, spec.radius, spec.color, 0.8, 1);
         game.ui.toast('BASTION', '#6fd0ff');
       },
+
+      /** Bulwark's ultimate: six seconds of simply not being killable. */
+      lastStand(spec) {
+        const player = game.player;
+        player.invulnerable = Math.max(player.invulnerable, spec.duration);
+        player.grantBarrier(player.stats.maxHealth * (spec.barrier ?? 0.5));
+        player.addBuff('laststand', spec.duration, 1, 1, '🛡️ Last Stand', {
+          radius: spec.radius, color: spec.color, damage: spec.damage,
+          interval: spec.interval, knockback: spec.knockback,
+        });
+        self.lastStandTimer = 0;
+        game.fxApi.ring(player.position, 1, spec.radius, spec.color, 0.9, 1);
+        game.engine.addShake(0.5);
+      },
+
+      /* ---------------- flight ---------------- */
+
+      /** Halcyon's identity: leave the floor and stay off it. */
+      flight(spec) { game.player.startFlight(spec); },
+
+      /** Bombs on a ballistic arc that go off on whatever they touch first. */
+      bombVolley(spec) {
+        const player = game.player;
+        const base = player.aimDirection(new THREE.Vector3());
+        const color = spec.color ?? 0x7fe0ff;
+        for (let i = 0; i < spec.count; i++) {
+          const v = base.clone();
+          const spread = spec.spread ?? 0.08;
+          v.x += (game.rng.next() - 0.5) * spread * 2;
+          v.y += (game.rng.next() - 0.5) * spread + 0.03;
+          v.z += (game.rng.next() - 0.5) * spread * 2;
+          v.normalize().multiplyScalar(spec.speed ?? 44);
+          game.projectiles.spawn({
+            position: player.muzzlePosition.clone(), velocity: v,
+            damage: 0, radius: 0.26, life: 5, color, gravity: spec.gravity ?? -20,
+            trail: 1.2, glow: 1.9, detonateOnGround: true,
+            splash: { radius: spec.radius ?? 7, damage: spec.damage, proc: 1, color, force: 12 },
+            source: 'Bomb Cluster',
+          });
+        }
+        player.addRecoil(2.2);
+        game.engine.addShake(0.14);
+      },
+
+      /* ---------------- marks and lances ---------------- */
+
+      /**
+       * A spear that does nothing at all on the way in.
+       *
+       * Zero damage is the point: what it buys is the mark on everything near
+       * where it sticks, and the mark is what the dash is looking for.
+       */
+      markSpear(spec) {
+        const player = game.player;
+        const dir = player.aimDirection(new THREE.Vector3());
+        const color = spec.color ?? 0x9dff6a;
+        const radius = spec.radius ?? 13;
+        const duration = spec.duration ?? 10;
+        game.projectiles.spawn({
+          position: player.muzzlePosition.clone(),
+          velocity: dir.clone().multiplyScalar(spec.speed ?? 78),
+          damage: 0, proc: 0, radius: 0.22, life: 3, color,
+          gravity: -6, trail: 1.3, glow: 1.6,
+          onLand: (position) => {
+            const n = self.markEnemies(position, radius, duration, color);
+            game.fxApi.explosion(position, radius * 0.35, color, 0.6);
+            if (n > 0) game.ui.toast(`${n} MARKED`, '#9dff6a');
+          },
+          source: 'Marking Spear',
+        });
+        player.addRecoil(1.4);
+      },
+
+      /**
+       * A dash that goes *through* people.
+       *
+       * The refund is the whole design: land it on something the spear painted
+       * and the dash comes straight back, so a well-thrown spear turns into a
+       * chain of dashes across a crowd. Only the enemy actually struck spends
+       * its mark — everything else the spear painted stays painted — and the
+       * refund is capped at one per dash so a line of marked targets is a
+       * bonus rather than infinite movement.
+       */
+      lanceDash(spec) {
+        const player = game.player;
+        const color = spec.color ?? 0x9dff6a;
+        let refunded = false;
+        player.startDash({
+          speed: spec.speed ?? 40,
+          duration: spec.duration ?? 0.3,
+          iframes: spec.iframes ?? 0.2,
+          damage: spec.damage ?? 0,
+          radius: spec.radius ?? 2.4,
+          color,
+          source: 'Lance Dash',
+          onHit: (enemy) => {
+            if (refunded || !enemy.statuses.has('marked')) return;
+            enemy.statuses.delete('marked');
+            refunded = true;
+            self.refundUtility();
+            game.fxApi.ring(enemy.position, 0.5, 5, color, 0.4, 0.9);
+            game.ui.toast('MARK CONSUMED — DASH READY', '#9dff6a');
+          },
+        });
+      },
+
+      /* ---------------- ultimates ---------------- */
+
+      /** Vanguard: shells walked onto the aim point, one after another. */
+      mortarStorm(spec) {
+        const target = self.ctx.aimPoint.clone();
+        for (let i = 0; i < spec.count; i++) {
+          game.projectiles.spawnMortar({
+            target, scatter: spec.spread ?? 14, delay: i * (spec.interval ?? 0.09),
+            color: spec.color,
+            splash: {
+              radius: spec.radius ?? 8, damage: spec.damage, proc: 0.6,
+              color: spec.color, force: 10,
+            },
+            source: 'Fire Mission',
+          });
+        }
+        game.engine.addShake(0.3);
+      },
+
+      /** Unloader: up, then very suddenly down. Resolved over several frames. */
+      meteorSlam(spec) {
+        const player = game.player;
+        player.endGrapple();
+        player.velocity.y = Math.max(player.velocity.y, spec.riseSpeed ?? 26);
+        player.grounded = false;
+        player.invulnerable = Math.max(player.invulnerable, 0.5);
+        self._pendingSlam = { spec, phase: 'rise', timer: 0.75 };
+        game.fxApi.ring(player.position, 0.5, 8, spec.color, 0.5, 0.9);
+        game.engine.addShake(0.3);
+      },
+
+      /** Wraith: holes in the world, and something thrown into each of them. */
+      voidStorm(spec) {
+        const centre = self.ctx.aimPoint.clone();
+        const count = spec.singularities ?? 3;
+        for (let i = 0; i < count; i++) {
+          const a = (i / count) * TAU;
+          const p = centre.clone();
+          p.x += Math.cos(a) * spec.radius * 0.45;
+          p.z += Math.sin(a) * spec.radius * 0.45;
+          p.y = game.arena.groundHeightAt(p.x, p.z);
+          game.projectiles.spawnSingularity(p, spec.radius, spec.singularityDamage);
+        }
+        api.homingVolley({
+          count: spec.shades ?? 24, damage: spec.shadeDamage, color: spec.color, spread: 1.7,
+        });
+        game.fxApi.ring(game.player.position, 1, spec.radius, spec.color, 0.8, 1);
+        game.engine.addShake(0.5);
+      },
+
+      /** Halcyon: a bombing run walked out along the line you are looking down. */
+      carpetBomb(spec) {
+        const player = game.player;
+        const dir = self.ctx.dir.clone().setY(0);
+        if (dir.lengthSq() < 1e-6) dir.set(Math.sin(player.yaw), 0, Math.cos(player.yaw));
+        dir.normalize();
+        const start = player.position.clone();
+        for (let i = 0; i < spec.count; i++) {
+          const t = i / Math.max(1, spec.count - 1);
+          const p = start.clone().addScaledVector(dir, 7 + t * (spec.length ?? 60));
+          p.x += (game.rng.next() - 0.5) * (spec.width ?? 10);
+          p.z += (game.rng.next() - 0.5) * (spec.width ?? 10);
+          game.projectiles.spawnMortar({
+            target: p, scatter: 0, delay: i * (spec.interval ?? 0.07), color: spec.color,
+            splash: {
+              radius: spec.radius ?? 8, damage: spec.damage, proc: 0.5,
+              color: spec.color, force: 12,
+            },
+            source: 'Carpet Bombing',
+          });
+        }
+        game.engine.addShake(0.35);
+      },
+
+      /** Javelin: everything painted at once, then the sky falls on it. */
+      spearStorm(spec) {
+        const player = game.player;
+        const color = spec.color ?? 0x9dff6a;
+        const marked = self.markEnemies(player.position, spec.markRadius, spec.markDuration, color);
+        const targets = game.enemies.inRadius(player.position, spec.markRadius);
+        for (let i = 0; i < spec.count; i++) {
+          // Spears land on what is actually there; with nothing in range they
+          // still come down around you rather than vanishing.
+          const t = targets.length
+            ? targets[i % targets.length].position
+            : player.position;
+          game.projectiles.spawnMortar({
+            target: t, scatter: targets.length ? 3 : 14, delay: i * (spec.interval ?? 0.08),
+            color,
+            splash: { radius: spec.radius ?? 6, damage: spec.damage, proc: 0.6, color, force: 8 },
+            source: 'Impaling Storm',
+          });
+        }
+        player.addBuff('freedash', spec.freeDashTime ?? 8, 1, 1, '➤ Free Dash');
+        self.refundUtility();
+        game.ui.toast(`${marked} MARKED`, '#9dff6a');
+        game.engine.addShake(0.4);
+      },
     };
+
+    return api;
   }
 }
 

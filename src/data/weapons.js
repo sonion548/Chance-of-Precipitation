@@ -13,6 +13,11 @@
  *   ctx.recoil(n) / ctx.shake(n) / ctx.impulse(vec) / ctx.fx
  *
  * `proc` is the proc coefficient — how strongly a hit triggers on-hit items.
+ *
+ * `anim` names the body animation the ability plays: 'shoot' (a recoil punch
+ * through the shoulder), 'pump', 'slash', 'punch', 'thrust', 'beam' or 'lob'.
+ * It is a hint to the rig, not a state machine — see entities/characterRig.js.
+ * An ability with no `anim` still recoils; it just does not act out a swing.
  */
 
 export const WEAPONS = [
@@ -30,6 +35,7 @@ export const WEAPONS = [
     displayStats: { Damage: '100%', 'Fire Rate': '5.9/s', Range: 'Long', Proc: '1.0' },
     primary: {
       name: 'Service Round', key: 'M1', icon: '•', hold: true,
+      anim: 'shoot',
       desc: 'Fire a round for 100% damage.',
       cooldown: 0.17, scalesWithAttackSpeed: true,
       fire(ctx) {
@@ -39,6 +45,7 @@ export const WEAPONS = [
     },
     secondary: {
       name: 'Focused Shot', key: 'Q', icon: '◎',
+      anim: 'shoot',
       desc: 'Charge up to 1s, then fire a piercing round for up to 480% damage.',
       cooldown: 3.0, charge: 1.0, minCharge: 0.18,
       fire(ctx, t) {
@@ -64,6 +71,7 @@ export const WEAPONS = [
     displayStats: { Damage: '10 × 44%', 'Fire Rate': '1.4/s', Range: 'Short', Proc: '0.4' },
     primary: {
       name: 'Buckshot', key: 'M1', icon: '⁘', hold: true,
+      anim: 'pump',
       desc: 'Fire 10 pellets for 44% damage each.',
       cooldown: 0.72, scalesWithAttackSpeed: true,
       fire(ctx) {
@@ -78,6 +86,7 @@ export const WEAPONS = [
     },
     secondary: {
       name: 'Concussive Blast', key: 'Q', icon: '💨',
+      anim: 'pump',
       desc: 'Blast a shockwave for 380% damage, launching enemies away — and you backwards.',
       cooldown: 5.0,
       fire(ctx) {
@@ -103,6 +112,7 @@ export const WEAPONS = [
     displayStats: { Damage: '95% ×4', 'Fire Rate': '2.8/s', Range: 'Medium', Proc: '0.6' },
     primary: {
       name: 'Arc Bolt', key: 'M1', icon: '⌁', hold: true,
+      anim: 'shoot',
       desc: 'Zap a target for 95% damage, chaining to 3 more for 70% each.',
       cooldown: 0.36, scalesWithAttackSpeed: true,
       fire(ctx) {
@@ -113,6 +123,7 @@ export const WEAPONS = [
     },
     secondary: {
       name: 'Overload Sphere', key: 'Q', icon: '🔆',
+      anim: 'lob',
       desc: 'Launch a slow orb that zaps everything within 14m for 70% damage 12 times.',
       cooldown: 8.0,
       fire(ctx) {
@@ -139,6 +150,7 @@ export const WEAPONS = [
     displayStats: { Damage: '42%', 'Fire Rate': '13/s', Range: 'Medium', Proc: '0.25' },
     primary: {
       name: 'Rivet', key: 'M1', icon: '│', hold: true,
+      anim: 'shoot',
       desc: 'Drive a rivet for 42% damage that pierces 2 enemies.',
       cooldown: 0.077, scalesWithAttackSpeed: true,
       fire(ctx) {
@@ -151,12 +163,16 @@ export const WEAPONS = [
     },
     secondary: {
       name: 'Harpoon', key: 'Q', icon: '🪝',
-      desc: 'Fire a barbed line for 420% damage that drags the target to you and chills it.',
+      anim: 'thrust',
+      desc: 'Fire a barbed line for 420% damage, then winch the target all the way in — it is dragged to your feet over 0.9s and chilled when it lands.',
       cooldown: 4.0,
       fire(ctx) {
         ctx.spawnBullet({
           speed: 78, damage: ctx.dmg * 4.2, proc: 1.0, radius: 0.3, life: 1.6, color: 0x7ad4ff,
-          trail: 1, pierce: 0, harpoon: true, chill: 3,
+          trail: 1, pierce: 0, chill: 3,
+          // The winch, not a shove: `reel` runs the target in on a line for its
+          // whole duration. Heavy things resist it, bosses barely move.
+          harpoon: { time: 0.9, speed: 34, color: 0x7ad4ff },
         });
         ctx.recoil(1.6);
       },
@@ -177,6 +193,7 @@ export const WEAPONS = [
     displayStats: { Damage: '260% AoE', 'Fire Rate': '1.2/s', Range: 'Medium', Proc: '1.0' },
     primary: {
       name: 'Seeker Charge', key: 'M1', icon: '◆', hold: true,
+      anim: 'lob',
       desc: 'Lob a charge that detonates for 260% damage in 8m.',
       cooldown: 0.85, scalesWithAttackSpeed: true,
       fire(ctx) {
@@ -190,6 +207,7 @@ export const WEAPONS = [
     },
     secondary: {
       name: 'Cluster Barrage', key: 'Q', icon: '☄️',
+      anim: 'lob',
       desc: 'Call down 9 mortars around your aim point for 220% damage each.',
       cooldown: 9.0,
       fire(ctx) {
@@ -218,6 +236,7 @@ export const WEAPONS = [
     displayStats: { Damage: '58%/tick →170%', 'Tick Rate': '11/s', Range: 'Long', Proc: '0.15' },
     primary: {
       name: 'Coherent Beam', key: 'M1', icon: '━', hold: true, beam: true,
+      anim: 'beam',
       desc: 'Sustained beam dealing 58% damage per tick, ramping to 170% after 3s on target.',
       cooldown: 0.09, scalesWithAttackSpeed: true,
       fire(ctx) {
@@ -234,6 +253,7 @@ export const WEAPONS = [
     },
     secondary: {
       name: 'Prism Burst', key: 'Q', icon: '✳️',
+      anim: 'beam',
       desc: 'Discharge stored light in a piercing lance for 620% damage, scaled by beam heat.',
       cooldown: 7.0,
       fire(ctx) {
@@ -259,23 +279,72 @@ export const WEAPONS = [
     unlocked: false,
     echoCost: 1000,
     desc: 'A blade folded out of a collapsed star. Every swing feeds you a little of what it takes. Requires getting uncomfortably close.',
-    displayStats: { Damage: '245% arc', 'Swing Rate': '2.2/s', Range: 'Melee', Proc: '1.0' },
+    displayStats: { Damage: '245% arc + 130% wave', 'Swing Rate': '2.2/s', Range: 'Melee → 26m', Proc: '1.0' },
     primary: {
       name: 'Reaping Arc', key: 'M1', icon: '◜', hold: true,
-      desc: 'A wide slash for 245% damage that heals you for 8% of what it deals.',
+      anim: 'slash',
+      desc: 'A flat horizontal slash for 245% damage that heals you for 8% of what it deals — and throws the cut itself out as a crescent wave for another 130%, cleaving through everything it passes.',
       cooldown: 0.45, scalesWithAttackSpeed: true,
       fire(ctx) {
-        ctx.melee({ damage: ctx.dmg * 2.45, proc: 1.0, range: 6.4, angle: 1.5, lifesteal: 0.08, color: 0xa15bff });
+        ctx.slashWave({
+          damage: ctx.dmg * 2.45, proc: 1.0, range: 6.4, angle: 1.5, lifesteal: 0.08,
+          color: 0xa15bff,
+          // The wave is the swing leaving the blade: same cut, still travelling.
+          wave: {
+            damage: ctx.dmg * 1.3, proc: 0.6, speed: 34, range: 26, radius: 2.6,
+            pierce: 99, lifesteal: 0.08,
+          },
+        });
         ctx.recoil(0.9);
       },
     },
     secondary: {
       name: 'Blink Slash', key: 'Q', icon: '⟿',
+      anim: 'slash',
       desc: 'Phase 14m forward at your own altitude, cutting everything on the path for 560% damage.',
       cooldown: 4.5,
       fire(ctx) {
         ctx.blinkSlash({ distance: 14, damage: ctx.dmg * 5.6, proc: 1.0, radius: 3.2, lifesteal: 0.12, color: 0xc98aff });
         ctx.shake(0.3);
+      },
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'siege_gauntlets',
+    name: 'Siege Gauntlets',
+    icon: '🥊',
+    tag: 'Melee · Shockwave · Mobility',
+    color: 0xffb347,
+    model: 'gauntlet',
+    unlocked: false,
+    echoCost: 800,
+    desc: 'Two demolition drivers worn on the hands. Each punch fires a compression charge a few metres out in front of the knuckles, and the same charge, pointed downward, will put you on a rooftop.',
+    lore: 'Rated for load-bearing walls. Nobody wrote down what else.',
+    displayStats: { Damage: '210% wave', 'Punch Rate': '2.9/s', Range: '9m cone', Proc: '0.8' },
+    primary: {
+      name: 'Shock Jab', key: 'M1', icon: '🥊', hold: true,
+      anim: 'punch',
+      desc: 'Punch a compression wave 9m out in front of you for 210% damage, knocking everything it catches backwards.',
+      cooldown: 0.35, scalesWithAttackSpeed: true,
+      fire(ctx) {
+        ctx.shockwave({
+          damage: ctx.dmg * 2.1, proc: 0.8, range: 9, angle: 0.95,
+          knockback: 15, color: 0xffb347,
+        });
+        ctx.recoil(1.6);
+      },
+    },
+    secondary: {
+      name: 'Jet Boost', key: 'Q', icon: '🚀',
+      anim: 'punch',
+      desc: 'Fire both gauntlets at the floor and ride the blast straight up, refunding your jumps and blasting anything underneath for 260% damage.',
+      cooldown: 4.5,
+      fire(ctx) {
+        ctx.jetBoost({
+          up: 21, forward: 6, damage: ctx.dmg * 2.6, radius: 6.5, color: 0xffb347,
+        });
       },
     },
   },

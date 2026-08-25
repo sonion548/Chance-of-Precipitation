@@ -551,7 +551,12 @@ export function buildPlayerModel(char) {
     unloader: { w: 0.86, d: 0.52, torso: 0.72, hipY: 0.9, headR: 0.24, armR: [0.16, 0.14, 0.12], legR: [0.19, 0.16, 0.13], shoulder: 0.5 },
     wraith:   { w: 0.5,  d: 0.34, torso: 0.7, hipY: 0.92, headR: 0.21, armR: [0.085, 0.075, 0.065], legR: [0.11, 0.095, 0.08], shoulder: 0.3 },
     bulwark:  { w: 0.8,  d: 0.5, torso: 0.66, hipY: 0.84, headR: 0.23, armR: [0.14, 0.125, 0.11], legR: [0.18, 0.155, 0.13], shoulder: 0.46 },
-  }[build];
+    halcyon:  { w: 0.54, d: 0.36, torso: 0.66, hipY: 0.9, headR: 0.22, armR: [0.095, 0.085, 0.072], legR: [0.12, 0.1, 0.085], shoulder: 0.33 },
+    javelin:  { w: 0.58, d: 0.38, torso: 0.7, hipY: 0.9, headR: 0.22, armR: [0.1, 0.09, 0.078], legR: [0.13, 0.11, 0.092], shoulder: 0.34 },
+  }[build] || {
+    w: 0.62, d: 0.4, torso: 0.68, hipY: 0.86, headR: 0.23,
+    armR: [0.11, 0.095, 0.085], legR: [0.14, 0.12, 0.1], shoulder: 0.36,
+  };
 
   // --- legs (parented to a pelvis so the hips can counter-rotate) ---
   const pelvis = new THREE.Group();
@@ -695,6 +700,85 @@ export function buildPlayerModel(char) {
       backplate.scale.z = 0.4;
       backplate.position.set(0, P.torso * 0.6, -P.d * 0.78);
       torso.add(backplate);
+      break;
+    }
+    case 'halcyon': {
+      // Everything about this silhouette is thrust: a backpack with two
+      // gimballed nozzles, wing vanes off the shoulders, and a bomb rack.
+      const pack = new THREE.Mesh(new THREE.BoxGeometry(P.w * 0.78, P.torso * 0.62, 0.24), m.trim);
+      pack.position.set(0, P.torso * 0.62, -P.d * 0.72);
+      pack.castShadow = true;
+      torso.add(pack);
+
+      for (const sx of [-1, 1]) {
+        // Nozzle: a cone pointing down, with the flame plate inside it lit.
+        const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 0.26, 8, 1, true), m.trim);
+        nozzle.position.set(sx * P.w * 0.34, P.torso * 0.3, -P.d * 0.74);
+        nozzle.rotation.x = -0.24;
+        nozzle.castShadow = true;
+        torso.add(nozzle);
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.2, 7), m.glow);
+        flame.position.set(sx * P.w * 0.34, P.torso * 0.18, -P.d * 0.72);
+        flame.rotation.x = Math.PI;
+        torso.add(flame);
+
+        // Wing vane: a swept blade off the shoulder, canted for lift.
+        const vane = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.03, 0.17), m.accent);
+        vane.position.set(sx * (P.shoulder + 0.26), P.torso * 0.86, -P.d * 0.3);
+        vane.rotation.set(0.1, sx * 0.34, sx * -0.42);
+        vane.castShadow = true;
+        torso.add(vane);
+        const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.24, 5), m.trim);
+        strut.position.set(sx * (P.shoulder + 0.1), P.torso * 0.84, -P.d * 0.2);
+        strut.rotation.z = Math.PI / 2;
+        torso.add(strut);
+      }
+
+      // Bomb rack across the belly: three little ordnance eggs.
+      for (let i = 0; i < 3; i++) {
+        const bomb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 7, 6), m.accent);
+        bomb.position.set((i - 1) * 0.17, P.torso * 0.22, P.d * 0.52);
+        bomb.scale.z = 1.5;
+        torso.add(bomb);
+      }
+
+      // Flight visor: a wraparound band rather than a slit.
+      const band = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 0.95, 0.03, 4, 12, Math.PI), m.glow);
+      band.rotation.set(0, 0, Math.PI);
+      band.position.set(0, 0.02, P.headR * 0.3);
+      head.add(band);
+      break;
+    }
+    case 'javelin': {
+      // A quiver of spears across the back and light running plate: the
+      // silhouette has to say "throws things and then chases them".
+      const quiver = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.62, 7), m.trim);
+      quiver.position.set(-P.w * 0.3, P.torso * 0.62, -P.d * 0.6);
+      quiver.rotation.set(0.2, 0, -0.42);
+      quiver.castShadow = true;
+      torso.add(quiver);
+      for (let i = 0; i < 3; i++) {
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.95, 5), m.suit);
+        shaft.position.set(-P.w * 0.3 + (i - 1) * 0.045, P.torso * 0.88, -P.d * 0.66);
+        shaft.rotation.set(0.2, 0, -0.42);
+        torso.add(shaft);
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.14, 5), m.glow);
+        tip.position.set(-P.w * 0.3 + (i - 1) * 0.045 + 0.2, P.torso * 1.32, -P.d * 0.56);
+        tip.rotation.set(0.2, 0, -0.42);
+        torso.add(tip);
+      }
+
+      // Sprinter's greaves — lit strips down the shins say "this one dashes".
+      for (const leg of [legL, legR]) {
+        const greave = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.03), m.glow);
+        greave.position.set(0, -0.2, P.legR[2] * 1.5);
+        leg.userData.lower.add(greave);
+      }
+      // Trailing sash: reads as speed even when standing still.
+      const sash = new THREE.Mesh(new THREE.ConeGeometry(P.w * 0.4, 0.72, 6, 1, true), m.accent);
+      sash.position.set(0, P.torso * 0.42, -P.d * 0.46);
+      sash.rotation.x = 0.3;
+      torso.add(sash);
       break;
     }
     default: {
@@ -1036,6 +1120,69 @@ export function buildWeaponModel(weapon) {
       }
       boltRow(g, steel, { from: [0, -0.085, 0.0], to: [0, -0.085, 0.3], count: 4, r: 0.009 });
       muzzle.position.set(0, 0, 0.92);
+      break;
+    }
+    case 'gauntlet': {
+      /*
+       * Not a gun: a demolition driver worn on the hand.
+       *
+       * The mount sits at the wrist and the weapon has to read as an extension
+       * of the fist rather than as something held, so the mass is packed tight
+       * around the origin and the only thing sticking out along +Z is the
+       * compression port the shockwave leaves through.
+       */
+      const plateMat = mat(0x3b414d, { roughness: 0.42, metalness: 0.8 });
+      const hot = mat(weapon.color, {
+        emissive: weapon.color, emissiveIntensity: 1.6, roughness: 0.3, metalness: 0.5,
+      });
+
+      // Forearm sleeve, tapering toward the wrist.
+      const sleeve = cyl(0.11, 0.135, 0.34, 8, plateMat, 0, 0, -0.2);
+      sleeve.rotation.x = Math.PI / 2;
+      g.add(sleeve);
+      for (let i = 0; i < 3; i++) {
+        const band = new THREE.Mesh(new THREE.TorusGeometry(0.125, 0.014, 4, 12), steel);
+        band.position.z = -0.32 + i * 0.1;
+        g.add(band);
+      }
+
+      // Knuckle block and four knuckles, each with a lit vent behind it.
+      g.add(box(0.22, 0.15, 0.16, plateMat, 0, 0, 0.05));
+      for (let k = 0; k < 4; k++) {
+        const x = (k - 1.5) * 0.055;
+        g.add(sphere(0.032, steel, x, 0.03, 0.13, 6));
+        g.add(box(0.03, 0.02, 0.05, hot, x, -0.03, 0.1));
+      }
+
+      // Compression port: the ring the wave actually leaves through.
+      const port = cyl(0.085, 0.105, 0.09, 10, plateMat, 0, 0, 0.16);
+      port.rotation.x = Math.PI / 2;
+      g.add(port);
+      const iris = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.018, 4, 14), hot);
+      iris.position.z = 0.2;
+      g.add(iris);
+
+      // Piston pack on top of the forearm, and the pressure bottle under it.
+      for (const sx of [-1, 1]) {
+        const piston = cyl(0.026, 0.026, 0.28, 6, steel, sx * 0.075, 0.09, -0.16);
+        piston.rotation.x = Math.PI / 2;
+        g.add(piston);
+        const cap = sphere(0.032, accent, sx * 0.075, 0.09, -0.02, 6);
+        g.add(cap);
+      }
+      const bottle = cyl(0.05, 0.05, 0.22, 8, dark, 0, -0.1, -0.18);
+      bottle.rotation.x = Math.PI / 2;
+      g.add(bottle);
+      g.add(box(0.04, 0.03, 0.04, hot, 0, -0.1, -0.06));
+
+      // Vent slots down both sides — the jet boost has to come out somewhere.
+      for (const sx of [-1, 1]) {
+        for (let i = 0; i < 3; i++) {
+          g.add(box(0.012, 0.05, 0.03, hot, sx * 0.115, -0.03, -0.1 + i * 0.07));
+        }
+      }
+
+      muzzle.position.set(0, 0, 0.28);
       break;
     }
     case 'scythe':

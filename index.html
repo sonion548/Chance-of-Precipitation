@@ -106,6 +106,7 @@
           <button class="nav-btn" data-goto="codex"><span class="nb-key">✦</span> Codex</button>
           <button class="nav-btn" data-goto="stats"><span class="nb-key">⌁</span> Records</button>
           <button class="nav-btn" data-goto="help"><span class="nb-key">?</span> How to Play</button>
+          <button class="nav-btn" data-goto="settings"><span class="nb-key">⚙</span> Settings</button>
         </nav>
         <footer class="menu-foot"><span id="menu-version"></span></footer>
       </div>
@@ -170,7 +171,15 @@
       <div class="panel">
         <div class="panel-head"><h2>Records</h2><button class="x-btn" data-goto="menu">✕</button></div>
         <div class="panel-body" id="stats-body"></div>
-        <div class="panel-foot"><button class="ghost-btn" id="wipe-btn">Erase All Progress</button></div>
+        <div class="panel-foot"><button class="ghost-btn" data-goto="settings">Settings</button></div>
+      </div>
+    </div>
+
+    <div id="screen-settings" class="screen panel-screen">
+      <div class="panel">
+        <div class="panel-head"><h2>Settings</h2><button class="x-btn" data-goto="menu">✕</button></div>
+        <div class="panel-body" id="settings-body"></div>
+        <div class="panel-foot"><button class="danger-btn" id="reset-btn">Reset Account</button></div>
       </div>
     </div>
 

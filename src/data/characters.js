@@ -1,11 +1,16 @@
 /**
  * Playable characters.
  *
- * A character supplies base stats, a model build, and two signature abilities:
- * a **utility** on Shift (replacing the generic dash) and a **special** on R.
- * Weapons remain independent and cover primary (M1) and secondary (Q), so a
- * character defines how you move and commit, while the weapon defines how you
- * shoot.
+ * A character supplies base stats, a model build, and three signature abilities:
+ * a **utility** on Shift (replacing the generic dash), a **special** on R, and
+ * an **ultimate** on F. Weapons remain independent and cover primary (M1) and
+ * secondary (Q), so a character defines how you move and commit, while the
+ * weapon defines how you shoot.
+ *
+ * The ultimate is not on a cooldown. It is bought with a charge meter that
+ * fills from kills and from damage taken (see `ULTIMATE` in core/config.js), so
+ * it is the one ability the game hands you for having been in a fight rather
+ * than for having waited. They are deliberately, unapologetically enormous.
  *
  * Ability `fire` receives the same combat context weapons use, plus the
  * character-specific helpers documented in systems/combat.js.
@@ -44,6 +49,19 @@ export const CHARACTERS = [
         ctx.toast('OVERCLOCK', '#ffb347');
       },
     },
+    ultimate: {
+      name: 'Fire Mission', key: 'F', icon: '☄️',
+      anim: 'lob',
+      desc: 'Paint the ground and call in 26 shells for 420% damage each, then run hot: 120% attack speed and 50% movement for 12s.',
+      fire(ctx) {
+        ctx.mortarStorm({
+          count: 26, spread: 17, damage: ctx.dmg * 4.2, radius: 8, interval: 0.09, color: 0xffb347,
+        });
+        ctx.addBuff('warcry', 12, 1.2, 1, '☄️ Fire Mission', { move: 0.5 });
+        ctx.fx.ring(ctx.player.position, 1, 14, 0xffb347, 0.8, 1);
+        ctx.shake(0.5);
+      },
+    },
   },
 
   /* ------------------------------------------------------------------ */
@@ -64,6 +82,7 @@ export const CHARACTERS = [
     },
     utility: {
       name: 'Grapple Gun', key: 'SHIFT', icon: '🪝', cooldown: 4.5, charges: 2,
+      anim: 'thrust',
       desc: 'Fire a cargo hook. Anchors to terrain or enemies and reels you in fast, building the speed that powers your fist.',
       fire(ctx) {
         ctx.fireGrapple({ range: 46, pullSpeed: 40, damage: ctx.dmg * 1.6, color: 0xffd24b });
@@ -71,11 +90,23 @@ export const CHARACTERS = [
     },
     special: {
       name: 'Overcharged Fist', key: 'R', icon: '🤜', cooldown: 5.5,
+      anim: 'punch',
       desc: 'A colossal punch. Damage scales with how fast you are moving — up to 1800% at full tilt — and detonates in a shockwave.',
       fire(ctx) {
         ctx.momentumPunch({
           baseDamage: ctx.dmg * 4.5, maxDamage: ctx.dmg * 18, radius: 9,
           reference: 30, knockback: 30, color: 0xffd24b,
+        });
+      },
+    },
+    ultimate: {
+      name: 'Terminal Velocity', key: 'F', icon: '💥',
+      anim: 'punch',
+      desc: 'Launch skyward, then come down on the aim point for 2600% damage in 20m — and four aftershocks that finish what the crater started.',
+      fire(ctx) {
+        ctx.meteorSlam({
+          damage: ctx.dmg * 26, radius: 20, riseSpeed: 26, aftershocks: 4,
+          aftershockDamage: ctx.dmg * 6, knockback: 42, color: 0xffd24b,
         });
       },
     },
@@ -112,6 +143,18 @@ export const CHARACTERS = [
         ctx.fx.ring(ctx.player.position, 0.5, 7, 0xd94bff, 0.6, 0.9);
       },
     },
+    ultimate: {
+      name: 'Event Horizon', key: 'F', icon: '🕳️',
+      desc: 'Tear three singularities open around your aim, hurl 30 shades into them, and phase out: 6s of 70% damage reduction and 40% more speed.',
+      fire(ctx) {
+        ctx.voidStorm({
+          singularities: 3, singularityDamage: ctx.dmg * 9, radius: 13,
+          shades: 30, shadeDamage: ctx.dmg * 2.4, color: 0xd94bff,
+        });
+        ctx.addBuff('cloak', 6, 1, 1, '🕳️ Event Horizon');
+        ctx.toast('EVENT HORIZON', '#d94bff');
+      },
+    },
   },
 
   /* ------------------------------------------------------------------ */
@@ -142,6 +185,108 @@ export const CHARACTERS = [
       desc: 'Plant a bastion field for 8s: 45% damage reduction, a barrier worth 40% of your health, and enemies inside are chilled.',
       fire(ctx) {
         ctx.bastion({ duration: 8, radius: 12, reduction: 0.45, barrier: 0.4, color: 0x6fd0ff });
+      },
+    },
+    ultimate: {
+      name: 'Last Stand', key: 'F', icon: '🛡️',
+      desc: 'Become untouchable for 6s. Every half-second the plate discharges for 380% damage in 18m, and the shockwaves shove everything out of the ring.',
+      fire(ctx) {
+        ctx.lastStand({
+          duration: 6, radius: 18, interval: 0.5, damage: ctx.dmg * 3.8,
+          knockback: 20, barrier: 1.0, color: 0x6fd0ff,
+        });
+      },
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'halcyon',
+    name: 'Halcyon',
+    title: 'Aerial Bombardier',
+    icon: '🕊️',
+    build: 'halcyon',
+    unlocked: false,
+    echoCost: 900,
+    color: 0x2f5d78, accent: 0x7fe0ff, visor: 0xd8f4ff,
+    desc: 'Thrusters where the armour should be. Thin, brittle and a little short on punch — and the only thing in the descent that never has to touch the floor.',
+    lore: 'The airframe was salvage. The pilot did not ask what from.',
+    stats: {
+      health: 84, healthPerLevel: 24, regen: 0.9, regenPerLevel: 0.18,
+      damage: 10.8, damagePerLevel: 2.15, moveSpeed: 8.6, armor: -10, crit: 0.03, jumps: 2,
+    },
+    utility: {
+      name: 'Thruster Flight', key: 'SHIFT', icon: '🕊️', cooldown: 9, charges: 1,
+      desc: 'Ignite the thrusters and fly for 7s — hold Space to climb, release to drift down. Gravity does not apply and you keep full control. Touching down ends it early and refunds half the unused time.',
+      fire(ctx) {
+        ctx.flight({ duration: 7, riseSpeed: 11, hoverSpeed: -1.4, speedMult: 1.15, color: 0x7fe0ff });
+      },
+    },
+    special: {
+      name: 'Bomb Cluster', key: 'R', icon: '💣', cooldown: 3.2,
+      anim: 'lob',
+      desc: 'Shoot a cluster of three bombs that detonate on impact for 340% damage in 7m.',
+      fire(ctx) {
+        ctx.bombVolley({ count: 3, damage: ctx.dmg * 3.4, radius: 7, speed: 44, spread: 0.09, color: 0x7fe0ff });
+      },
+    },
+    ultimate: {
+      name: 'Carpet Bombing', key: 'F', icon: '🛩️',
+      anim: 'lob',
+      desc: 'A bombing run down the line you are looking along: 28 bombs for 500% damage each, walked out across 70m.',
+      fire(ctx) {
+        ctx.carpetBomb({
+          count: 28, damage: ctx.dmg * 5.0, radius: 8, length: 70, width: 11,
+          interval: 0.07, color: 0x7fe0ff,
+        });
+      },
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'javelin',
+    name: 'Javelin',
+    title: 'Mark Runner',
+    icon: '🔱',
+    build: 'javelin',
+    unlocked: false,
+    echoCost: 850,
+    color: 0x3f5a4c, accent: 0x9dff6a, visor: 0xd6ffb0,
+    desc: 'Throws a spear that hurts nobody and then kills everything. The spear paints a crowd; the dash goes through it. Land the dash on something painted and you get the dash back.',
+    lore: 'The spear was never the weapon. It was the map.',
+    stats: {
+      health: 108, healthPerLevel: 31, regen: 1.0, regenPerLevel: 0.2,
+      damage: 12.8, damagePerLevel: 2.55, moveSpeed: 8.8, armor: 2, crit: 0.05, jumps: 1,
+    },
+    utility: {
+      name: 'Lance Dash', key: 'SHIFT', icon: '➤', cooldown: 4.5, charges: 1,
+      anim: 'thrust',
+      desc: 'Dash straight through everything in the way for 360% damage. Hit a marked enemy and the dash comes straight back.',
+      fire(ctx) {
+        ctx.lanceDash({
+          speed: 40, duration: 0.3, damage: ctx.dmg * 3.6, radius: 2.4,
+          iframes: 0.2, color: 0x9dff6a,
+        });
+      },
+    },
+    special: {
+      name: 'Marking Spear', key: 'R', icon: '🔱', cooldown: 7,
+      anim: 'lob',
+      desc: 'Throw a spear that deals no damage. Everything within 13m of where it lands is marked for 10s.',
+      fire(ctx) {
+        ctx.markSpear({ radius: 13, duration: 10, speed: 78, color: 0x9dff6a });
+      },
+    },
+    ultimate: {
+      name: 'Impaling Storm', key: 'F', icon: '⚡',
+      anim: 'lob',
+      desc: 'Mark everything within 45m for 14s, rain 22 spears for 460% damage each, and dash freely — the cooldown does not run for 10s.',
+      fire(ctx) {
+        ctx.spearStorm({
+          markRadius: 45, markDuration: 14, count: 22, damage: ctx.dmg * 4.6,
+          radius: 6.5, interval: 0.08, freeDashTime: 10, color: 0x9dff6a,
+        });
       },
     },
   },
