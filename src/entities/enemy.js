@@ -7,6 +7,7 @@ import { ENEMIES_BY_ID, AFFIX_BY_ID } from '../data/enemies.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+const _weak = new THREE.Vector3();   // weak-point world position — its own temp
 const _dir = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 
@@ -85,6 +86,9 @@ export class Enemy {
 
     if (this.elite) this._applyEliteVisuals();
     if (this.boss || this.elite) this._buildHealthBar();
+    // After the elite recolour on purpose: the seam is a fixed red whatever
+    // affix is painted over the rest of the body.
+    this._buildWeakPoint();
 
     // Spawn-in animation
     this.model.scale.setScalar(0.01);
@@ -109,6 +113,54 @@ export class Enemy {
     this.model.add(aura);
     this.aura = aura;
     this.maxHealth *= 1;
+  }
+
+  /**
+   * The one plate that never seated right.
+   *
+   * Somewhere on the body rather than at a fixed landmark, because a precision
+   * weapon that always aims at the head is not aiming — it is holding still.
+   * Placed on the surface and depth-tested like everything else, so a seam on
+   * the far side is a reason to move rather than a free shot through the body.
+   *
+   * Only drawn while somebody is actually looking through a scope; the hit
+   * test does not care whether it is drawn, because the plate is on the body
+   * either way and knowing where it sits should be worth something.
+   */
+  _buildWeakPoint() {
+    const size = Math.max(0.18, Math.min(0.75, this.radius * 0.42));
+    const angle = Math.random() * Math.PI * 2;
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(size * 2, size * 2, size * 2),
+      new THREE.MeshBasicMaterial({ color: 0xff2b3c, transparent: true, opacity: 0.9 }),
+    );
+    mesh.position.set(
+      Math.cos(angle) * this.radius * 0.86,
+      this.height * (0.32 + Math.random() * 0.46),
+      Math.sin(angle) * this.radius * 0.86,
+    );
+    mesh.visible = false;
+    this.model.add(mesh);
+    this.weakPoint = { size, mesh };
+  }
+
+  /**
+   * Did this ray pass through the seam?
+   *
+   * Read off the mesh's own world transform rather than recomputed from the
+   * body's yaw, so the answer is exactly where the box is drawn however the
+   * model is being animated. Sphere test around it: clipping a corner of the
+   * plate counts as much as a shot down the middle, which is what keeps a
+   * moving target's weak point hittable at all.
+   */
+  weakPointHit(origin, dir) {
+    const wp = this.weakPoint;
+    if (!wp || this.dead) return false;
+    wp.mesh.getWorldPosition(_weak).sub(origin);
+    const along = _weak.dot(dir);
+    if (along < 0) return false;
+    const r = wp.size * 1.05;
+    return _weak.lengthSq() - along * along <= r * r;
   }
 
   _buildHealthBar() {
@@ -199,6 +251,9 @@ export class Enemy {
   update(dt, player, world) {
     if (this.dead) return;
     this.currentTarget = player;
+    // One boolean, asked every frame, so the seams appear and vanish with the
+    // glass rather than being toggled from somewhere that has to remember to.
+    if (this.weakPoint) this.weakPoint.mesh.visible = !!this.game.combat?.scoped;
     if (this.netGhost) return this._updateGhost(dt, player);
     this.stateTime += dt;
     this.spawnTime += dt;
@@ -223,7 +278,7 @@ export class Enemy {
         }
         if (this.health <= 0) { this.die({ source: 'Burning' }); return; }
       }
-      // A mark has to be visible from across the arena or the Javelin is
+      // A mark has to be visible from across the arena or the Dasher is
       // guessing. One glow every few frames is enough and costs nothing.
       if (id === 'marked') {
         st.data.blink = (st.data.blink ?? 0) - dt;

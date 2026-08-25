@@ -91,6 +91,7 @@ export class Player {
 
     this.dashTime = 0;
     this.dashDir = new THREE.Vector3();
+    this.dashPitched = false;     // dash flies its own line, gravity suspended
     this.dashSpec = null;         // { damage, radius, onHit, hit:Set } for a piercing dash
     // Movement states driven by character abilities.
     this.grapple = null;          // { anchor, time, enemy }
@@ -105,6 +106,10 @@ export class Player {
     this.combatTimer = 0;
     this.aiming = false;
     this.aimBlend = 0;
+    // How far behind a scoped weapon's glass the camera currently is. Separate
+    // from `aimBlend` because aiming and scoping are different postures: one
+    // leans over the shoulder, the other collapses onto the eye.
+    this.scopeBlend = 0;
     this.rig = createRig(this.yaw);
     // Footfalls come from the rig rather than from a timer: the gait blend
     // changes cadence as you turn from a run into a shuffle, and a timer would
@@ -182,6 +187,18 @@ export class Player {
     const bastion = this.buffs.get('bastion');
     if (bastion) damageTakenMult *= 1 - bastion.power;
 
+    /* Precision weapons trade the dice for the multiplier.
+     *
+     * A weapon that never rolls a critical hit makes every point of crit
+     * chance you own worthless, which would quietly turn a third of the item
+     * pool into dead weight the moment you picked the thing up. So the chance
+     * is read as damage instead: the stat still does something, it just does
+     * it through the seam you aimed at rather than through a coin flip. */
+    const weapon = this.game.combat?.weapon;
+    const chance = clamp(base.crit + acc.addCrit, 0, 1);
+    const rolledCrit = weapon?.randomCrits === false ? 0 : chance;
+    const convertedCrit = weapon?.critChanceToDamage ? chance * weapon.critChanceToDamage : 0;
+
     // Statuses
     const chill = this.statuses.get('chill');
     if (chill) moveMult *= 1 - (chill.data.slow ?? 0.4);
@@ -194,8 +211,8 @@ export class Player {
       regen,
       attackSpeed: atkSpeed,
       moveSpeed: base.moveSpeed * moveMult,
-      crit: clamp(base.crit + acc.addCrit, 0, 1),
-      critDamage: PLAYER.baseCritDamage + acc.addCritDamage,
+      crit: rolledCrit,
+      critDamage: PLAYER.baseCritDamage + acc.addCritDamage + convertedCrit,
       armor: base.armor + acc.addArmor,
       cooldownMult: this.buffs.has('overclock') ? 0 : acc.multCooldown,
       dashCooldownMult: acc.multDashCooldown,
@@ -382,7 +399,13 @@ export class Player {
     // difference between waiting to be revived and staring at the dirt.
     if (input.locked) {
       const look = input.lookDelta(this.aiming);
-      const sens = CAMERA.sensitivity;
+      // A scope that magnifies eight times and turns at full speed is unusable.
+      // The optic's own multiplier scales in with the zoom, so the transition
+      // is as smooth as the field of view it belongs to.
+      const scopeSens = this.scopeBlend > 0.002
+        ? THREE.MathUtils.lerp(1, this.game.combat?.weapon?.scope?.sensitivity ?? 0.45, this.scopeBlend)
+        : 1;
+      const sens = CAMERA.sensitivity * scopeSens;
       this.camYaw -= look.x * sens;
       this.camPitch -= look.y * sens;
       this.camPitch = clamp(this.camPitch, CAMERA.minPitch, CAMERA.maxPitch);
@@ -463,7 +486,9 @@ export class Player {
     }
     // Touching down puts the thrusters out, and hands back half of whatever
     // flight time you did not spend — landing early is rewarded, not punished.
-    if (res.grounded && this.flight && this.flight.grace <= 0) this.endFlight(true);
+    // Endless flight is the exception: its window is the ability, so touching
+    // the floor mid-override is a place to stand rather than the end of it.
+    if (res.grounded && this.flight && !this.flight.endless && this.flight.grace <= 0) this.endFlight(true);
     this.grounded = res.grounded;
     if (this.grounded) this.jumpsUsed = 0;
 
@@ -532,6 +557,10 @@ export class Player {
     duration = PLAYER.dashDuration,
     iframes = PLAYER.iframesOnDash,
     dir = null,
+    // A pitched dash keeps the vertical component of its direction instead of
+    // flattening it. Every dash in the game is a ground move except the one
+    // whose whole promise is that it goes wherever you are looking.
+    pitched = false,
     damage = 0,
     radius = 0,
     proc = 1,
@@ -550,7 +579,8 @@ export class Player {
         d.set(Math.sin(this.camYaw), 0, Math.cos(this.camYaw));
       }
     }
-    this.dashDir.copy(d.setY(0).normalize());
+    this.dashPitched = pitched && !!dir;
+    this.dashDir.copy(this.dashPitched ? d.normalize() : d.setY(0).normalize());
     this.dashSpeed = speed;
     this.dashTime = duration;
     this.dashIFrames = iframes;
@@ -559,7 +589,9 @@ export class Player {
     this.dashSpec = damage > 0 || onHit
       ? { damage, radius: radius || 2.2, proc, knockback, onHit, source, color, hit: new Set() }
       : null;
-    this.velocity.y = Math.max(this.velocity.y, 0);
+    // A climbing dash must not be fighting a fall it inherited; a level one
+    // still refuses to carry downward momentum into the burst.
+    this.velocity.y = this.dashPitched ? 0 : Math.max(this.velocity.y, 0);
     this.game.fx.ring(this.position, 0.4, 3.2, color, 0.32, 0.6);
     audio.dash(this.position);
     for (let i = 0; i < 8; i++) {
@@ -575,13 +607,19 @@ export class Player {
   _tickDash(dt, world) {
     this.dashTime -= dt;
     _v.copy(this.dashDir).multiplyScalar(this.dashSpeed * dt);
-    _v.y = this.velocity.y * dt * 0.25;
+    // A flat dash drifts with whatever vertical velocity it already had; a
+    // pitched one flies its own line and ignores gravity for its duration.
+    if (!this.dashPitched) _v.y = this.velocity.y * dt * 0.25;
     const res = moveWithCollision(this, _v, world);
     this.grounded = res.grounded;
     this._dashDamage();
     if (this.dashTime <= 0) {
       this.velocity.x = this.dashDir.x * this.dashSpeed * 0.42;
       this.velocity.z = this.dashDir.z * this.dashSpeed * 0.42;
+      // Carrying a little of the climb out keeps a dash up onto a ledge from
+      // stopping dead in the air a metre below it.
+      if (this.dashPitched) this.velocity.y = this.dashDir.y * this.dashSpeed * 0.35;
+      this.dashPitched = false;
       this.dashSpec = null;
     }
     this._updateAim(world);
@@ -596,7 +634,7 @@ export class Player {
       if (spec.hit.has(e)) continue;
       spec.hit.add(e);
       // The callback runs before the damage so an ability keyed to a status —
-      // the Javelin's mark — still sees it on an enemy the dash is about to kill.
+      // Dasher's mark — still sees it on an enemy the dash is about to kill.
       spec.onHit?.(e);
       if (spec.damage > 0) {
         this.game.combat.damageEnemy(e, spec.damage, {
@@ -620,8 +658,8 @@ export class Player {
    * The grace window exists so taking off from the floor does not immediately
    * count as landing on it.
    */
-  startFlight({ duration = 6, riseSpeed = 11, hoverSpeed = -1.4, speedMult = 1.1, color = 0x7fe0ff } = {}) {
-    this.flight = { time: duration, maxTime: duration, riseSpeed, hoverSpeed, speedMult, color, grace: 0.45 };
+  startFlight({ duration = 6, riseSpeed = 11, hoverSpeed = -1.4, speedMult = 1.1, color = 0x7fe0ff, endless = false } = {}) {
+    this.flight = { time: duration, maxTime: duration, riseSpeed, hoverSpeed, speedMult, color, grace: 0.45, endless };
     this.grounded = false;
     this.jumpsUsed = 0;
     this.velocity.y = Math.max(this.velocity.y, 7);
@@ -650,7 +688,7 @@ export class Player {
     if (!f) return;
     this.flight = null;
     this.game.fx.ring(this.position, 0.3, 3, f.color, 0.35, 0.7);
-    if (landed && f.time > 0) this.game.combat?.reduceCooldowns(f.time * 0.5);
+    if (landed && !f.endless && f.time > 0) this.game.combat?.reduceCooldowns(f.time * 0.5);
   }
 
   /**
@@ -882,8 +920,24 @@ export class Player {
     const cam = this.game.engine.camera;
     this.aimBlend = damp(this.aimBlend, aiming ? 1 : 0, 12, dt);
 
-    const dist = THREE.MathUtils.lerp(CAMERA.distance, CAMERA.aimDistance, this.aimBlend);
-    const fov = THREE.MathUtils.lerp(CAMERA.fov, CAMERA.aimFov, this.aimBlend);
+    /* Behind the glass the camera stops being a boom and becomes the optic.
+     *
+     * A third-person boom and a sixteen-degree field of view do not coexist:
+     * at that magnification the character's own shoulder is most of the frame.
+     * So the arm collapses onto the eye, the shoulder offset goes with it, and
+     * the body stops drawing — which is also what makes the scope overlay read
+     * as a lens rather than as a sticker over a shot of someone's back. */
+    const scope = this.game.combat?.weapon?.scope;
+    this.scopeBlend = damp(this.scopeBlend, this.game.combat?.scoped ? 1 : 0, 13, dt);
+    const sb = this.scopeBlend;
+
+    let dist = THREE.MathUtils.lerp(CAMERA.distance, CAMERA.aimDistance, this.aimBlend);
+    let fov = THREE.MathUtils.lerp(CAMERA.fov, CAMERA.aimFov, this.aimBlend);
+    if (sb > 0.001) {
+      dist = THREE.MathUtils.lerp(dist, scope?.distance ?? 0.3, sb);
+      fov = THREE.MathUtils.lerp(fov, scope?.fov ?? 16, sb);
+    }
+    this.model.visible = sb < 0.7;
     if (Math.abs(cam.fov - fov) > 0.01) { cam.fov = fov; cam.updateProjectionMatrix(); }
 
     /* Pitch moves the pivot as well as the boom.
@@ -901,7 +955,9 @@ export class Player {
     this.camLift = damp(this.camLift, up * CAMERA.pitchLift - down * CAMERA.pitchDrop, 10, dt);
 
     // Ideal pivot: head height, offset over the player's right shoulder.
-    const shoulder = THREE.MathUtils.lerp(CAMERA.shoulder, CAMERA.shoulder * 1.25, this.aimBlend);
+    const shoulder = THREE.MathUtils.lerp(
+      THREE.MathUtils.lerp(CAMERA.shoulder, CAMERA.shoulder * 1.25, this.aimBlend), 0.1, sb,
+    );
     _camWant.set(
       this.position.x - Math.cos(this.camYaw) * shoulder,
       this.position.y + CAMERA.height + PLAYER.eyeHeight * 0.35 + this.camLift,
@@ -949,7 +1005,14 @@ export class Player {
 
     cam.position.copy(_camPos);
     this._snapCamera = false;
-    cam.lookAt(pivot.x, pivot.y + 0.12, pivot.z);
+    /* The look-at is aimed a little above the pivot, which frames the character
+     * nicely on a seven-metre boom and is catastrophic on a thirty-centimetre
+     * one: the same 12cm offset is under a degree at full extension and about
+     * twenty-three degrees with the camera at the eye, which pointed a scoped
+     * shot at the sky. It is an angle, not a distance, so it scales with the
+     * arm it is being applied to. */
+    const lookLift = 0.12 * clamp01(this.camDistance / CAMERA.distance);
+    cam.lookAt(pivot.x, pivot.y + lookLift, pivot.z);
   }
 
   /**

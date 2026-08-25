@@ -18,6 +18,27 @@
     <div id="dmg-layer"></div>
     <div id="crosshair"><i></i><i></i><i></i><i></i><b></b></div>
 
+    <!-- Sniper optic. The lens is a hole punched in a very large box-shadow,
+         so the surround covers any aspect ratio without a second element. -->
+    <div id="scope" class="hidden">
+      <div class="sc-lens">
+        <div class="sc-ret">
+          <i class="up"></i><i class="down"></i><i class="left"></i><i class="right"></i>
+          <b></b>
+          <span class="lad"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active reload. Only ever shown for weapons that ask for it. -->
+    <div id="reload" class="hidden">
+      <div class="rl-track">
+        <div class="rl-zone"></div>
+        <div class="rl-marker"></div>
+      </div>
+      <div class="rl-label">RELOAD</div>
+    </div>
+
     <div id="hud-top">
       <div class="clock-wrap">
         <div id="run-clock">00:00</div>

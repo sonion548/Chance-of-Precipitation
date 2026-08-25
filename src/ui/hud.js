@@ -42,6 +42,11 @@ export class HUD {
       toasts: $('toasts'),
       dmgLayer: $('dmg-layer'),
       crosshair: $('crosshair'),
+      scope: $('scope'),
+      reload: $('reload'),
+      reloadZone: document.querySelector('#reload .rl-zone'),
+      reloadMarker: document.querySelector('#reload .rl-marker'),
+      reloadLabel: document.querySelector('#reload .rl-label'),
       hurt: $('hurt-vignette'),
       heal: $('heal-vignette'),
       objective: $('objective'),
@@ -75,11 +80,15 @@ export class HUD {
     this.pickupTimer = 0;
     this.bossTarget = null;
     this.bossLagValue = 1;
+    this.scopeOn = null;
+    this.reloadOn = false;
   }
 
   show() { this.el.hud.classList.remove('hidden'); }
   hide() {
     this.el.hud.classList.add('hidden');
+    this._setScope(false);
+    this._setReload(false);
     this.setBoss(null);
     this.el.pickupCard.classList.add('hidden');
     this.pickupTimer = 0;
@@ -162,6 +171,8 @@ export class HUD {
     el.gold.textContent = formatNumber(p.gold);
 
     this._updateBossBar(dt);
+    this._updateScope();
+    this._updateReload();
     this._updateAbilities(p);
     this._updateParty();
     this._updateBrood(p);
@@ -193,6 +204,54 @@ export class HUD {
     }
   }
 
+  /**
+   * The optic overlay follows the one boolean the camera follows.
+   *
+   * Toggled on change rather than written every frame: this is two class
+   * flips a second at most, and the alternative is touching the DOM sixty
+   * times a second to say nothing.
+   */
+  _updateScope() {
+    const on = !!this.game.combat?.scoped;
+    if (on === this.scopeOn) return;
+    this.scopeOn = on;
+    this._setScope(on);
+  }
+
+  _setScope(on) {
+    this.el.scope.classList.toggle('hidden', !on);
+    this.el.scope.classList.toggle('on', on);
+    // The world crosshair is the wrong instrument behind a reticle.
+    this.el.crosshair.classList.toggle('scoped', on);
+  }
+
+  /**
+   * The reload bar, while a weapon is working its action.
+   *
+   * The panel outlives the result by a fraction of a second — combat holds the
+   * state open — so a miss reads as a miss rather than as the bar vanishing on
+   * the frame the player got it wrong.
+   */
+  _updateReload() {
+    const r = this.game.combat?.reload;
+    if (!r) { if (this.reloadOn) this._setReload(false); return; }
+    if (!this.reloadOn) this._setReload(true);
+    const el = this.el;
+    el.reload.classList.toggle('good', r.result === 'good');
+    el.reload.classList.toggle('bad', r.result === 'bad');
+    el.reloadZone.style.left = `${r.zoneStart * 100}%`;
+    el.reloadZone.style.width = `${(r.zoneEnd - r.zoneStart) * 100}%`;
+    el.reloadMarker.style.left = `${clamp01(r.t / r.time) * 100}%`;
+    el.reloadLabel.textContent = r.result === 'good' ? 'CHAMBERED'
+      : r.result === 'bad' ? 'JAMMED' : 'RELOAD';
+  }
+
+  _setReload(on) {
+    this.reloadOn = on;
+    this.el.reload.classList.toggle('hidden', !on);
+    if (!on) this.el.reload.classList.remove('good', 'bad');
+  }
+
   _updateAbilities(p) {
     if (!this.abilityEls) return;
     const combat = this.game.combat;
@@ -215,12 +274,18 @@ export class HUD {
       } else if (a.kind === 'utility') {
         const util = combat.character?.utility;
         total = Math.max(0.01, (util?.cooldown ?? 3) * p.stats.cooldownMult * p.stats.dashCooldownMult);
-        remaining = combat.utilityCharges > 0 ? 0 : Math.max(0, combat.utilityTimer);
-        if (combat.maxUtilityCharges > 1) stackText = `${combat.utilityCharges}`;
+        remaining = combat.utilityCharges > 0 || combat.dashResets > 0 ? 0 : Math.max(0, combat.utilityTimer);
+        // Banked resets read as what they are: dashes you already own, sat in
+        // front of the charge that is still regenerating behind them.
+        if (combat.maxUtilityCharges > 1 || combat.dashResets > 0) {
+          stackText = combat.dashResets > 0
+            ? `${combat.utilityCharges}+${combat.dashResets}`
+            : `${combat.utilityCharges}`;
+        }
       } else if (a.kind === 'special') {
-        const sp = combat.character?.special;
-        total = Math.max(0.01, (sp?.cooldown ?? 10) * p.stats.cooldownMult);
-        remaining = combat.specialTimer;
+        total = combat.specialCooldown(p);
+        remaining = combat.specialCharges > 0 ? 0 : Math.max(0, combat.specialTimer);
+        if (combat.maxSpecialCharges > 1) stackText = `${combat.specialCharges}`;
       } else {
         // Ultimate: the mask is the part still to earn, so a full meter is an
         // empty mask — the same shape as "off cooldown" on every other slot.

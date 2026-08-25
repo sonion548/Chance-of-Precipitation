@@ -57,7 +57,8 @@ across the head and chest.
 - **6 characters** — Vanguard (baseline), **Unloader** (grapple + momentum punch, the
   Loader-alike), Wraith (glass cannon, blink), Bulwark (tank, shield charge + bastion),
   **Halcyon** (flies; low health, negative armour, slightly softer damage, impact bombs),
-  **Javelin** (0-damage marking spear + a piercing dash that refunds itself on a marked hit).
+  **Dasher** (marking spear on two charges + a look-directed piercing dash that refunds
+  itself on a marked hit; the thinnest frame in the game, and the hardest hitting).
   A character sets base stats plus utility, special and ultimate; weapons are independent.
 - **A flight pose**, not an airborne walk. `poseFlight` in `entities/characterRig.js` runs
   after the gait and blends over it by `rig.fly`, driven by `flying` / `flightClimb` off the
@@ -67,13 +68,23 @@ across the head and chest.
   (3 / 9 / 26 per normal / elite / boss) and from damage taken (0.6 per 1% of max health
   lost), plus a 0.35/s trickle; spending empties it. Tuning lives in `ULTIMATE` in
   `core/config.js`. They are meant to be run-swinging, not routine.
-- **8 weapons** — MK-4 Sidearm, Breach Scattergun, Arc Emitter, Rivet Driver, Seeker
-  Launcher, Photon Lance, Void Reaper, **Siege Gauntlets**. Tuned to near-identical
-  single-target DPS (~64–84 at base damage) so the choice is about *how* you fight. Every
-  ability names an `anim` and the rig acts it out (slash / punch / thrust / pump / lob).
+- **9 weapons** — MK-4 Sidearm, Breach Scattergun, Arc Emitter, Rivet Driver, Seeker
+  Launcher, Photon Lance, Void Reaper, **Siege Gauntlets**, **Meridian Longrifle**. All but
+  the Longrifle are tuned to near-identical single-target DPS (~64–84 at base damage) so the
+  choice is about *how* you fight. Every ability names an `anim` and the rig acts it out
+  (slash / punch / thrust / pump / lob).
 - **Siege Gauntlets** is the melee option, and it reaches: each punch is a 9m compression
   cone (`ctx.shockwave()`) and the secondary fires both gauntlets at the floor to ride the
   blast straight up (`ctx.jetBoost()`), jumps refunded.
+- **Meridian Longrifle** is the precision option and the only weapon that takes the dice
+  away. `scope` on the weapon collapses the camera onto the eye at 15° FOV, hides the body
+  and draws a lens overlay; every enemy carries a red seam box (`Enemy._buildWeakPoint`) that
+  only draws while somebody is scoped, and a hitscan carrying `weakPoint: true` asks a second
+  ray-sphere question against it for a guaranteed crit. `randomCrits: false` kills the roll
+  outright and `critChanceToDamage: 2.5` reads crit-chance items as crit damage instead, so
+  the item pool does not go dead. `primary.activeReload` takes the fire button away after
+  each shot until the bar is answered — on the mark, chambered instantly; missed or run off
+  the end, jammed for 3s.
 - **81 items** across 5 rarities. 49 unlocked on a fresh profile — 19/18/6/4/2 by tier, so a
   new account can find a Legendary. Each has a procedurally drawn icon.
 - **4 pet species** — lizard, beetle, wisp, shell — hatched from eggs with gold. No cap on
@@ -380,7 +391,7 @@ dynamic lights are the first thing dropped.
 - **The Harpoon shoved instead of pulling.** It applied one impulse, which barely moved
   anything heavy. It is now a `pulled` status the enemy carries for 0.9s, overriding its AI
   velocity each frame and scaled by `knockbackResist` so bosses resist rather than ignore it.
-- **Marks had to survive being spent by somebody else.** Javelin's mark is a per-enemy status,
+- **Marks had to survive being spent by somebody else.** Dasher's mark is a per-enemy status,
   so consuming the one the dash struck cannot touch any other enemy's — and the dash refunds
   at most once per dash, so a line of marked targets is a bonus, not infinite movement.
 - **Refunding a utility charge used to hand out two.** Setting `utilityTimer = 0` is exactly

@@ -226,39 +226,51 @@ export const CHARACTERS = [
     special: {
       name: 'Bomb Cluster', key: 'R', icon: '💣', cooldown: 3.2,
       anim: 'lob',
-      desc: 'Shoot a cluster of three bombs that detonate on impact for 340% damage in 7m.',
+      desc: 'Shoot a cluster of three bombs that detonate on impact for 340% damage in 7m. Under Ordnance Override it becomes a single bunker charge dropped straight down for 1400% in 16m, every half second, for as long as the override holds.',
+      /* The rack is the same rack; the override just takes the limiter off it.
+         Returning the *final* number rather than a multiplier is deliberate —
+         half a second is the arming time of the bomb, not a cooldown, and it
+         should not shrink because somebody picked up a cooldown item. */
+      cooldownFor: (player, base) => (player.buffs.has('bombardier') ? 0.5 : base),
       fire(ctx) {
+        if (ctx.player.buffs.has('bombardier')) {
+          ctx.bunkerBomb({ damage: ctx.dmg * 14, radius: 16, color: 0x7fe0ff });
+          return;
+        }
         ctx.bombVolley({ count: 3, damage: ctx.dmg * 3.4, radius: 7, speed: 44, spread: 0.09, color: 0x7fe0ff });
       },
     },
     ultimate: {
-      name: 'Carpet Bombing', key: 'F', icon: '🛩️',
-      anim: 'lob',
-      desc: 'A bombing run down the line you are looking along: 28 bombs for 500% damage each, walked out across 70m.',
+      name: 'Ordnance Override', key: 'F', icon: '🛩️',
+      /* An ultimate that hands you no new button.
+         Halcyon already owns the two things the override touches — the
+         thrusters and the rack — and both of them are rationed. Taking the
+         ration away for fifteen seconds is a bigger ability than any single
+         enormous explosion would have been, because for those fifteen seconds
+         the character finally gets to be the thing the silhouette promises:
+         airborne, indefinitely, dropping ordnance on a timer. */
+      desc: 'Cut the limiters for 15s. Flight stops burning fuel and landing no longer ends it, and the bomb rack unlocks: Bomb Cluster becomes one bunker charge dropped straight down for 1400% damage in 16m, on nothing but a half-second arming delay.',
       fire(ctx) {
-        ctx.carpetBomb({
-          count: 28, damage: ctx.dmg * 5.0, radius: 8, length: 70, width: 11,
-          interval: 0.07, color: 0x7fe0ff,
-        });
+        ctx.ordnanceOverride({ duration: 15, color: 0x7fe0ff });
       },
     },
   },
 
   /* ------------------------------------------------------------------ */
   {
-    id: 'javelin',
-    name: 'Javelin',
-    title: 'Mark Runner',
-    icon: '🔱',
-    build: 'javelin',
+    id: 'dasher',
+    name: 'Dasher',
+    title: 'Skirmish Lancer',
+    icon: '➤',
+    build: 'dasher',
     unlocked: false,
     echoCost: 850,
-    color: 0x3f5a4c, accent: 0x9dff6a, visor: 0xd6ffb0,
-    desc: 'Throws a spear that hurts nobody and then kills everything. The spear paints a crowd; the dash goes through it. Land the dash on something painted and you get the dash back.',
-    lore: 'The spear was never the weapon. It was the map.',
+    color: 0x2d4a3e, accent: 0x3dffa5, visor: 0xc8ffe6,
+    desc: 'The fastest and hardest-hitting thing in the descent, wrapped in almost nothing. Paints a crowd with a spear, then travels through it — every dash that lands on paint is a dash you did not spend.',
+    lore: 'Armour is weight. Weight is time. Time is the only thing that kills you.',
     stats: {
-      health: 108, healthPerLevel: 31, regen: 1.0, regenPerLevel: 0.2,
-      damage: 12.8, damagePerLevel: 2.55, moveSpeed: 8.8, armor: 2, crit: 0.05, jumps: 1,
+      health: 76, healthPerLevel: 21, regen: 0.8, regenPerLevel: 0.16,
+      damage: 17.5, damagePerLevel: 3.5, moveSpeed: 9.8, armor: -8, crit: 0.06, jumps: 1,
     },
     utility: {
       /* Ten seconds, and the mark is how you get out of paying it.
@@ -269,30 +281,32 @@ export const CHARACTERS = [
          being setup and starts being the thing that keeps the dash alive. */
       name: 'Lance Dash', key: 'SHIFT', icon: '➤', cooldown: 10, charges: 1,
       anim: 'thrust',
-      desc: 'Dash straight through everything in the way for 360% damage. Ten second cooldown — but land it on a marked enemy and you get the whole thing back.',
+      desc: 'Dash along your line of sight — up a wall, down a drop, straight through a crowd — cutting everything on the way for 420% damage. Ten second cooldown, and landing it on a marked enemy hands the whole thing back.',
       fire(ctx) {
-        ctx.lanceDash({
-          speed: 40, duration: 0.3, damage: ctx.dmg * 3.6, radius: 2.4,
-          iframes: 0.2, color: 0x9dff6a,
+        ctx.markDash({
+          speed: 52, duration: 0.28, damage: ctx.dmg * 4.2, radius: 2.6,
+          iframes: 0.18, color: 0x3dffa5,
         });
       },
     },
     special: {
-      name: 'Marking Spear', key: 'R', icon: '🔱', cooldown: 7,
+      name: 'Marking Spear', key: 'R', icon: '🔱', cooldown: 3, charges: 2,
       anim: 'lob',
-      desc: 'Throw a spear that deals no damage. Everything within 13m of where it lands is marked for 10s.',
+      desc: 'Throw a spear that lands for 70% damage and marks everything within 15m for 10s. Two charges — the dash eats marks faster than one throw can paint them.',
       fire(ctx) {
-        ctx.markSpear({ radius: 13, duration: 10, speed: 78, color: 0x9dff6a });
+        ctx.markSpear({
+          radius: 15, duration: 10, speed: 78, damage: ctx.dmg * 0.7, color: 0x3dffa5,
+        });
       },
     },
     ultimate: {
-      name: 'Impaling Storm', key: 'F', icon: '⚡',
+      name: 'Skewer', key: 'F', icon: '🗡️',
       anim: 'lob',
-      desc: 'Mark everything within 45m for 14s, rain 22 spears for 460% damage each, and dash freely — the cooldown does not run for 10s.',
+      desc: 'Hurl a great spear at your aim point: 900% damage in 22m, everything caught is marked for 14s and dragged onto the shaft — and you bank three dashes that cost nothing at all.',
       fire(ctx) {
-        ctx.spearStorm({
-          markRadius: 45, markDuration: 14, count: 22, damage: ctx.dmg * 4.6,
-          radius: 6.5, interval: 0.08, freeDashTime: 10, color: 0x9dff6a,
+        ctx.greatSpear({
+          radius: 22, damage: ctx.dmg * 9, markDuration: 14, speed: 74,
+          pull: { time: 1.1, speed: 30 }, dashResets: 3, color: 0x3dffa5,
         });
       },
     },
