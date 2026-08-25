@@ -529,7 +529,7 @@ export class Menus {
       <div class="wd-ability">
         <span class="wa-key">R</span>
         <div class="wa-body"><h6>${esc(char.special.name)}
-          <span style="color:var(--dim);font-size:11px">${char.special.cooldown}s</span></h6>
+          <span style="color:var(--dim);font-size:11px">${char.special.cooldown}s${(char.special.charges ?? 1) > 1 ? ` · ${char.special.charges} charges` : ''}</span></h6>
           <p>${esc(char.special.desc)}</p></div>
       </div>
       ${char.ultimate ? `<div class="wd-ability ult">

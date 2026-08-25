@@ -248,8 +248,8 @@ you shoot.
 | Unloader | Heavy exosuit, 165 HP, slow but armoured | **Grapple Gun** | **Overcharged Fist** | Terminal Velocity |
 | Wraith | Glass cannon — 88 HP, negative armour, double jump | Blink (in the air too) | Umbral Volley | Event Horizon |
 | Bulwark | 200 HP and 16 armour, walks slowly at the problem | Shield Charge | Bastion | Last Stand |
-| Halcyon | 84 HP, −10 armour, slightly softer damage — and it **flies** | **Thruster Flight** | **Bomb Cluster** | Carpet Bombing |
-| Javelin | 108 HP runner built around marks | **Lance Dash** | **Marking Spear** | Impaling Storm |
+| Halcyon | 84 HP, −10 armour, slightly softer damage — and it **flies** | **Thruster Flight** | **Bomb Cluster** | Ordnance Override |
+| Dasher | 76 HP, −8 armour, the fastest and hardest-hitting frame in the descent | **Lance Dash** | **Marking Spear** (×2) | Skewer |
 
 **Ultimates** are the one ability the game gives you for having been in a fight rather than
 for having waited. There is no cooldown: the meter beside the ability bar fills from kills
@@ -261,9 +261,16 @@ with thirty shades thrown into them, six seconds of literal invulnerability.
 **Halcyon** is the flying character. Thruster Flight switches gravity off for seven seconds:
 hold `Space` to climb, release to drift down, full ground-level control of your direction the
 whole time. It is paid for in everything else — 84 HP, −10 armour and slightly less damage
-than the baseline — and its bombs (three per Bomb Cluster, twenty-eight per bombing run) go
-off on whatever they touch first. Landing early cuts the thrusters and refunds half the time
-you did not use.
+than the baseline — and its bombs (three per Bomb Cluster) go off on whatever they touch
+first. Landing early cuts the thrusters and refunds half the time you did not use.
+
+Its ultimate hands you no new button. **Ordnance Override** takes the limiter off the two
+things Halcyon already owns and rations: for fifteen seconds flight stops burning fuel and
+landing no longer ends it, and the bomb rack unlocks — Bomb Cluster becomes a single bunker
+charge dropped straight down for 1400% damage in 16m, on nothing but a half-second arming
+delay. Fifteen seconds of unlimited flight over an unlimited rack is a bigger ability than
+any one enormous explosion, because it is the character finally being what the silhouette
+has been promising.
 
 Under thrust it has a pose of its own rather than a walk cycle with the floor deleted. The
 throttle is what the whole body answers to: climbing stands it upright with the legs hanging
@@ -272,14 +279,24 @@ out behind, hovering leaves it loose and drifting. It blends in and out over abo
 second, so a takeoff eases out of the run rather than cutting, and it gives the arms straight
 back the moment you aim or use an ability — those poses have the weapon on them.
 
-**Javelin** is the one built around a weapon that deals no damage at all. The Marking Spear
-hurts nobody: what it buys is a mark on everything within 13m of where it sticks, for ten
-seconds. Lance Dash then goes *through* people for 360% damage — and if it strikes something
-marked, the dash comes straight back. On its own the dash is expensive, ten seconds, which is
-the point: the mark is not a bonus on top of a cheap ability, it is how you avoid paying for
-an expensive one. A dash into open air costs you the next ten seconds of mobility. Only the
-enemy actually struck spends its mark; everything else the spear painted stays painted, so
-one good throw is a chain of dashes across a crowd rather than a single reset.
+**Dasher** is the one built around a weapon that barely does any damage. The Marking Spear
+lands for 70% and paints everything within 15m of where it sticks for ten seconds; you carry
+two charges on a three-second clock, because the dash eats marks faster than one throw can
+put them down. Lance Dash then goes *through* people for 420% damage — down your line of
+sight, pitch included, so a ledge is somewhere you can go rather than something you arrive
+underneath — and if it strikes something marked, the dash comes straight back. On its own the
+dash is expensive, ten seconds, which is the point: the mark is not a bonus on top of a cheap
+ability, it is how you avoid paying for an expensive one. A dash into open air costs you the
+next ten seconds of mobility. Only the enemy actually struck spends its mark; everything else
+the spear painted stays painted, so one good throw is a chain of dashes across a crowd rather
+than a single reset. It is paid for in survivability — 76 HP and −8 armour is the thinnest
+frame in the game — against the highest damage and the highest top speed.
+
+**Skewer**, its ultimate, throws one great spear at the aim point: 900% in 22m, everything
+caught marked for fourteen seconds and dragged bodily onto the shaft. A crowd raked into a
+single point is a crowd one dash goes through end to end, and it comes with three banked
+dashes that cost nothing at all — spent before the charge is, so they survive a full cooldown
+and can be taken back to back.
 
 **Unloader** is the combo character. The grapple anchors to terrain *or* enemies and reels
 you in at 40 u/s, and — critically — it hands that momentum back on release instead of
@@ -341,9 +358,10 @@ tier is unlocked yet" fallback cannot drop below, so an expensive chest can neve
 hand back a white item. **Fortune Clover** rerolls every rarity roll and keeps the better
 result.
 
-**8 weapons**, one starting and seven unlockable, each with a distinct primary and secondary.
-They are deliberately tuned to near-identical single-target DPS (~64–84 at base damage) so
-the choice is about *how* you fight, not which is strongest:
+**9 weapons**, one starting and eight unlockable, each with a distinct primary and secondary.
+Most are deliberately tuned to near-identical single-target DPS (~64–84 at base damage) so
+the choice is about *how* you fight, not which is strongest; the Longrifle is the one that
+deliberately steps outside that, because what it trades is not damage:
 
 | Weapon | Identity | Secondary |
 | --- | --- | --- |
@@ -355,6 +373,7 @@ the choice is about *how* you fight, not which is strongest:
 | Photon Lance | Beam that ramps to 3× on a held target | Prism Burst — discharge stored heat |
 | Void Reaper | Flat horizontal slash that **throws the cut** as a crescent wave | Blink Slash — phase 14m along your line of sight, cutting the path |
 | Siege Gauntlets | Punches a 9m compression wave out of the knuckles | Jet Boost — ride the blast straight up |
+| Meridian Longrifle | Scoped bolt gun. Never rolls a crit — earns them off a visible seam | Sidearm Revolver — free to holster if it finishes the job |
 
 **Every weapon acts its attack out.** A weapon ability names an `anim` — `slash`, `punch`,
 `thrust`, `pump`, `lob`, `beam` or `shoot` — and the rig plays it: the blade sweeps across the
@@ -377,6 +396,29 @@ resistance rather than ignoring the line entirely.
 The **Siege Gauntlets** have no muzzle: the reach *is* the ability. Each punch resolves a 9m
 cone with three upright crescents marching away from the fist, and the secondary fires both
 gauntlets at the floor — straight up, jumps refunded, with a 260% blast under you.
+
+The **Meridian Longrifle** is the only weapon that takes the dice away. Right mouse puts you
+behind real glass: the camera collapses onto the eye, the field of view narrows to fifteen
+degrees, the body stops drawing and the HUD draws a lens with a reticle in it. Behind that
+glass every body in the arena — husk, elite or boss — shows the one plate it never got seated
+properly, drawn as a red box somewhere on its surface. Put a round through the box and the
+hit is critical, guaranteed; the seam is depth-tested like anything else, so one on the far
+side of a target is a reason to move rather than a free shot through its back.
+
+It never rolls a crit of its own. That is what makes the seam mean anything — a weapon that
+sometimes crits anyway turns aiming into a suggestion — and it is why every point of crit
+*chance* an item hands you is read as 2.5× that much crit *damage* instead, so a Glass Shard
+is still worth picking up.
+
+Each shot then takes the fire button away and gives you a bar with a marker sweeping across
+it. Click as the marker crosses the mark and the bolt is chambered instantly; click early,
+click late, or let the marker run off the right-hand end, and the action jams for three
+seconds. The mark moves every shot, because a fixed one is a rhythm you learn once and then
+stop reading.
+
+Its secondary is a revolver, and it prices itself on the outcome: 260% damage, and if the
+shot finishes something it holsters free. If the target is still standing, it is gone for ten
+seconds. It is a finisher, not a second primary.
 
 **13 enemy types** (7 regulars, 6 bosses) with melee, ranged, flying, charging and artillery
 behaviours, plus **4 elite affixes** — Blazing, Glacial, Overcharged, Voidtouched — that

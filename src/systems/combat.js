@@ -52,6 +52,15 @@ export class Combat {
     this.utilityTimer = 0;
     this.utilityCharges = 1;
     this.specialTimer = 0;
+    this.specialCharges = 1;
+    // Dashes that have already been paid for. Spent before charges are, so an
+    // ultimate that hands you three of them is three dashes rather than three
+    // seconds shaved off one cooldown.
+    this.dashResets = 0;
+    // The active-reload minigame, while one is running. Weapons opt in through
+    // `primary.activeReload`; everything else leaves this null forever.
+    this.reload = null;
+    this._secondaryRefund = false;
     this.bastionTimer = 0;
     this.lastStandTimer = 0;
     // The ultimate meter, 0..ULTIMATE.max. Never a cooldown — see config.
@@ -71,6 +80,8 @@ export class Combat {
     this.utilityCharges = this.character.utility.charges ?? 1;
     this.utilityTimer = 0;
     this.specialTimer = 0;
+    this.specialCharges = this.character.special.charges ?? 1;
+    this.dashResets = 0;
     this.ultimateCharge = ULTIMATE.startCharge;
     this._ultimateAnnounced = false;
   }
@@ -128,6 +139,46 @@ export class Combat {
     return (this.character?.utility.charges ?? 1) + extra;
   }
 
+  /**
+   * Banks dashes that cost nothing.
+   *
+   * A reset is not a refund and not a cooldown reduction: it is a dash you
+   * already own, spent ahead of the charge, so three of them survive a full
+   * cooldown and can be taken back to back.
+   */
+  grantDashResets(count) {
+    this.dashResets += count;
+    this.refundUtility();
+  }
+
+  /** Max special charges. Ability-defined; nothing grants extras yet. */
+  get maxSpecialCharges() { return this.character?.special.charges ?? 1; }
+
+  /**
+   * What one use of the special costs in seconds.
+   *
+   * An ability may override it outright — Halcyon's rack drops to a flat
+   * arming delay while the override is up — so the base, cooldown items and
+   * all, is handed in rather than recomputed by the ability.
+   */
+  specialCooldown(player) {
+    const sp = this.character?.special;
+    if (!sp) return 0.01;
+    const base = sp.cooldown * player.stats.cooldownMult;
+    return Math.max(0.01, sp.cooldownFor ? sp.cooldownFor(player, base) : base);
+  }
+
+  /**
+   * True while the player is actually behind a scoped weapon's glass.
+   *
+   * One question, asked by the camera, the HUD overlay and every enemy
+   * deciding whether to show its seam — so they can never disagree.
+   */
+  get scoped() {
+    return !!(this.weapon?.scope && this.game.player?.aiming
+      && !this.game.player.dead && !this.game.paused);
+  }
+
   equip(weaponId) {
     const player = this.game.player;
     const mount = player.model.userData.weaponMount;
@@ -145,6 +196,10 @@ export class Combat {
     this.primaryTimer = 0;
     this.secondaryTimer = 0;
     this.heat = 0;
+    this.reload = null;
+    // A precision weapon rewrites what crit chance is worth, so the stat block
+    // has to be rebuilt the moment the weapon in the hands changes.
+    player.markStatsDirty();
   }
 
   // ------------------------------------------------------------------ per-frame
@@ -154,7 +209,11 @@ export class Combat {
     this.secondaryTimer = Math.max(0, this.secondaryTimer - dt);
     this.firing = false;
 
-    if (player.dead || !this.weapon) return;
+    if (player.dead || !this.weapon) {
+      // Dying mid-reload must not leave the bar on screen for the next run.
+      this.reload = null;
+      return;
+    }
 
     const primary = this.weapon.primary;
     const secondary = this.weapon.secondary;
@@ -190,10 +249,12 @@ export class Combat {
       } else {
         this.utilityTimer = 0;
       }
-      if (canAct && this.utilityCharges > 0 && input.actionPressed(UTILITY_ACTION)) {
-        // Impaling Storm suspends the cost entirely rather than shortening it,
-        // so a dash taken during it is genuinely free rather than merely cheap.
-        if (!player.buffs.has('freedash')) {
+      const canDash = this.utilityCharges > 0 || this.dashResets > 0;
+      if (canAct && canDash && input.actionPressed(UTILITY_ACTION)) {
+        // A banked reset is spent before the charge is, so three of them are
+        // three genuinely free dashes rather than a shorter cooldown.
+        if (this.dashResets > 0) this.dashResets--;
+        else {
           this.utilityCharges--;
           if (this.utilityTimer <= 0) this.utilityTimer = cd;
         }
@@ -201,12 +262,23 @@ export class Combat {
       }
     }
 
-    // ---- Special (R) ----
+    // ---- Special (R): charge-based, like the utility ----
     const special = this.character?.special;
     if (special) {
-      this.specialTimer = Math.max(0, this.specialTimer - dt);
-      if (canAct && this.specialTimer <= 0 && input.actionPressed(SPECIAL_ACTION)) {
-        this.specialTimer = special.cooldown * stats.cooldownMult;
+      const maxSpecial = this.maxSpecialCharges;
+      const scd = this.specialCooldown(player);
+      if (this.specialCharges < maxSpecial) {
+        this.specialTimer -= dt;
+        if (this.specialTimer <= 0) {
+          this.specialCharges = Math.min(maxSpecial, this.specialCharges + 1);
+          this.specialTimer = scd;
+        }
+      } else {
+        this.specialTimer = Math.max(0, this.specialTimer - dt);
+      }
+      if (canAct && this.specialCharges > 0 && input.actionPressed(SPECIAL_ACTION)) {
+        this.specialCharges--;
+        if (this.specialTimer <= 0) this.specialTimer = scd;
         this._fireAbility(special, 1, false, 'special');
       }
     }
@@ -230,8 +302,12 @@ export class Combat {
     this._tickSlam(dt, player);
 
     // ---- Primary ----
+    // A weapon mid-reload owns the fire button: the click that lands on the
+    // mark is the reload, not the next shot, so the whole branch is skipped
+    // for the frame the minigame consumed.
+    const reloading = this._tickReload(dt, input, player, canAct);
     const wantPrimary = primary.hold ? input.actionDown('primary') : input.actionPressed('primary');
-    if (wantPrimary && this.primaryTimer <= 0 && canAct && !this.charging) {
+    if (wantPrimary && !reloading && this.primaryTimer <= 0 && canAct && !this.charging) {
       const interval = primary.cooldown / Math.max(0.05, stats.attackSpeed);
       this.primaryTimer = interval;
       this.firing = true;
@@ -273,6 +349,7 @@ export class Combat {
     // owns what that looks like; all that is decided here is which one to play.
     if (ability.anim) rigAttack(player.rig, ability.anim, chargeRatio);
 
+    this._secondaryRefund = false;
     try {
       ability.fire(this.ctx, chargeRatio);
     } catch (err) {
@@ -280,8 +357,79 @@ export class Combat {
     }
 
     if (kind === 'secondary') {
-      this.secondaryTimer = ability.cooldown * player.stats.cooldownMult;
+      // An ability may buy its own cooldown back out of what it just did — the
+      // revolver holsters free when the shot finishes something.
+      this.secondaryTimer = this._secondaryRefund ? 0 : ability.cooldown * player.stats.cooldownMult;
+      this._secondaryRefund = false;
       this.game.inventory.trigger('onSecondary', { ability });
+    }
+    if (kind === 'primary' && ability.activeReload) this._beginReload(ability.activeReload);
+  }
+
+  /* ------------------------------------------------------------------ active reload */
+  /**
+   * Opens the reload window.
+   *
+   * The mark moves every shot on purpose. A fixed window is a rhythm you learn
+   * once and then stop reading; a window that moves is a thing you have to
+   * actually watch, which is the entire point of taking the fire button away
+   * from you for a second and a quarter.
+   */
+  _beginReload(spec) {
+    const time = spec.time ?? 1.25;
+    const width = spec.window ?? 0.14;
+    // Never flush against either end: a mark you cannot miss and a mark you
+    // cannot hit are the same non-decision.
+    const start = 0.3 + this.game.rng.next() * (0.94 - width - 0.3);
+    this.reload = {
+      time, t: 0, zoneStart: start, zoneEnd: start + width,
+      cooldown: spec.cooldown ?? 3.0, result: null, hold: 0,
+    };
+    // Nothing fires until the bar resolves; the timer is what the HUD reads if
+    // the window is missed, so park it out of the way until then.
+    this.primaryTimer = time + 0.5;
+  }
+
+  /**
+   * Runs the reload bar. Returns true while it owns the fire button.
+   *
+   * The bar outlives its own result by a fraction of a second so the player
+   * sees *why* the bolt jammed rather than watching the panel vanish on the
+   * frame they got it wrong.
+   */
+  _tickReload(dt, input, player, canAct) {
+    const r = this.reload;
+    if (!r) return false;
+    if (r.result) {
+      r.hold -= dt;
+      if (r.hold <= 0) this.reload = null;
+      return true;
+    }
+    // A pause is not a miss: the marker stops with everything else.
+    if (!canAct) return true;
+    r.t += dt;
+    const frac = r.t / r.time;
+    if (input.actionPressed('primary')) {
+      this._resolveReload(frac >= r.zoneStart && frac <= r.zoneEnd, player);
+    } else if (frac >= 1) {
+      // Running the marker off the right-hand end is a miss like any other.
+      this._resolveReload(false, player);
+    }
+    return true;
+  }
+
+  _resolveReload(good, player) {
+    const r = this.reload;
+    r.result = good ? 'good' : 'bad';
+    r.t = Math.min(r.t, r.time);
+    r.hold = good ? 0.22 : 0.5;
+    if (good) {
+      this.primaryTimer = 0;
+      this.game.fxApi.ring(player.position, 0.4, 2.4, 0x46e0c0, 0.3, 0.7);
+      audio.uiClick('confirm');
+    } else {
+      this.primaryTimer = r.cooldown * player.stats.cooldownMult;
+      audio.denied();
     }
   }
 
@@ -503,6 +651,15 @@ export class Combat {
       shake(amount) { game.engine.addShake(amount); },
       impulse(vec) { game.player.applyImpulse(vec); },
 
+      /**
+       * Hands a secondary its cooldown back before it has been charged.
+       *
+       * Read once, immediately after the ability returns, so an ability can
+       * decide from what actually happened — the revolver only holsters free
+       * if the shot it just fired finished something.
+       */
+      refundSecondary() { self._secondaryRefund = true; },
+
       /** Instant-hit shot. Returns the enemy hit, or null. */
       hitscan(spec) {
         const dir = _ray.copy(self.ctx.dir);
@@ -548,11 +705,24 @@ export class Combat {
               game.fxApi.beam(travelled === 0 ? origin : from, point, spec.color ?? 0xffd58a, spec.beam ?? 0.09, spec.thick ?? 0.035);
             }
             const falloffMult = spec.falloff ? falloffScale(enemyHit.distance + travelled, spec.falloff) : 1;
+            /* The seam is a second question asked of the same ray.
+               A precision weapon does not roll for crits — it goes and finds
+               them, and the only place it can find one is the plate the scope
+               draws a box around. Asked against the plate's own volume rather
+               than against the hit point, so a shot that clips the corner of
+               the box counts exactly as much as one down the middle. */
+            const weak = spec.weakPoint && enemyHit.enemy.weakPointHit(from, dir);
             self.damageEnemy(enemyHit.enemy, spec.damage * falloffMult, {
               proc: spec.proc ?? 1, source: self.weapon?.name, hitPoint: point,
               knockback: spec.knockback ?? 0, knockbackDir: dir.clone(),
               lifesteal: spec.lifesteal ?? 0,
+              // `undefined` leaves the roll alone; only a seam hit forces it.
+              crit: weak || undefined,
             });
+            if (weak) {
+              game.fxApi.explosion(point, 1.7, 0xff2b3c, 0.7);
+              game.fxApi.ring(point, 0.3, 2.2, 0xff2b3c, 0.35, 0.9);
+            }
             game.fxApi.impact(point, dir.clone().negate(), spec.color ?? 0xffd58a, spec.thick ? 1.6 : 1);
             firstHit ??= enemyHit.enemy;
             excluded.add(enemyHit.enemy);
@@ -1068,17 +1238,19 @@ export class Combat {
       /* ---------------- marks and lances ---------------- */
 
       /**
-       * A spear that does nothing at all on the way in.
+       * A spear thrown for what it paints, not for what it hits.
        *
-       * Zero damage is the point: what it buys is the mark on everything near
-       * where it sticks, and the mark is what the dash is looking for.
+       * The damage is deliberately negligible: what the throw actually buys is
+       * the mark on everything near where it sticks, and the mark is what the
+       * dash is looking for.
        */
       markSpear(spec) {
         const player = game.player;
         const dir = player.aimDirection(new THREE.Vector3());
-        const color = spec.color ?? 0x9dff6a;
+        const color = spec.color ?? 0x3dffa5;
         const radius = spec.radius ?? 13;
         const duration = spec.duration ?? 10;
+        const damage = spec.damage ?? 0;
         game.projectiles.spawn({
           position: player.muzzlePosition.clone(),
           velocity: dir.clone().multiplyScalar(spec.speed ?? 78),
@@ -1086,8 +1258,11 @@ export class Combat {
           gravity: -6, trail: 1.3, glow: 1.6,
           onLand: (position) => {
             const n = self.markEnemies(position, radius, duration, color);
+            if (damage > 0) {
+              self.areaDamage(position, radius, damage, { proc: 0.4, source: 'Marking Spear' });
+            }
             game.fxApi.explosion(position, radius * 0.35, color, 0.6);
-            if (n > 0) game.ui.toast(`${n} MARKED`, '#9dff6a');
+            if (n > 0) game.ui.toast(`${n} MARKED`, '#3dffa5');
           },
           source: 'Marking Spear',
         });
@@ -1095,25 +1270,29 @@ export class Combat {
       },
 
       /**
-       * A dash that goes *through* people.
+       * A dash that goes *through* people, down the line you are looking along.
        *
-       * The refund is the whole design: land it on something the spear painted
-       * and the dash comes straight back, so a well-thrown spear turns into a
-       * chain of dashes across a crowd. Only the enemy actually struck spends
-       * its mark — everything else the spear painted stays painted — and the
-       * refund is capped at one per dash so a line of marked targets is a
-       * bonus rather than infinite movement.
+       * Two things make it Dasher's rather than anybody else's. It takes the
+       * camera's direction, pitch included, so a ledge is somewhere you can go
+       * rather than something you arrive underneath; and it refunds itself on
+       * a marked target. The refund is the whole design — land it on paint and
+       * you keep moving, miss and you are walking for ten seconds. Only the
+       * enemy actually struck spends its mark, and the refund is capped at one
+       * per dash so a line of marked targets is a bonus rather than infinite
+       * movement.
        */
-      lanceDash(spec) {
+      markDash(spec) {
         const player = game.player;
-        const color = spec.color ?? 0x9dff6a;
+        const color = spec.color ?? 0x3dffa5;
         let refunded = false;
         player.startDash({
-          speed: spec.speed ?? 40,
-          duration: spec.duration ?? 0.3,
-          iframes: spec.iframes ?? 0.2,
+          speed: spec.speed ?? 52,
+          duration: spec.duration ?? 0.28,
+          iframes: spec.iframes ?? 0.18,
           damage: spec.damage ?? 0,
-          radius: spec.radius ?? 2.4,
+          radius: spec.radius ?? 2.6,
+          dir: player.aimDirection(new THREE.Vector3()),
+          pitched: true,
           color,
           source: 'Lance Dash',
           onHit: (enemy) => {
@@ -1122,7 +1301,7 @@ export class Combat {
             refunded = true;
             self.refundUtility();
             game.fxApi.ring(enemy.position, 0.5, 5, color, 0.4, 0.9);
-            game.ui.toast('MARK CONSUMED — DASH READY', '#9dff6a');
+            game.ui.toast('MARK CONSUMED — DASH READY', '#3dffa5');
           },
         });
       },
@@ -1177,53 +1356,85 @@ export class Combat {
         game.engine.addShake(0.5);
       },
 
-      /** Halcyon: a bombing run walked out along the line you are looking down. */
-      carpetBomb(spec) {
+      /**
+       * Halcyon: the limiters come off, and nothing else changes.
+       *
+       * There is no new attack here on purpose. Halcyon already owns the two
+       * things this touches — the thrusters and the bomb rack — and both are
+       * rationed. Removing the ration for fifteen seconds is the ability; the
+       * buff is the whole payload, read by the flight tick and by the special's
+       * own `cooldownFor`.
+       */
+      ordnanceOverride(spec) {
         const player = game.player;
-        const dir = self.ctx.dir.clone().setY(0);
-        if (dir.lengthSq() < 1e-6) dir.set(Math.sin(player.yaw), 0, Math.cos(player.yaw));
-        dir.normalize();
-        const start = player.position.clone();
-        for (let i = 0; i < spec.count; i++) {
-          const t = i / Math.max(1, spec.count - 1);
-          const p = start.clone().addScaledVector(dir, 7 + t * (spec.length ?? 60));
-          p.x += (game.rng.next() - 0.5) * (spec.width ?? 10);
-          p.z += (game.rng.next() - 0.5) * (spec.width ?? 10);
-          game.projectiles.spawnMortar({
-            target: p, scatter: 0, delay: i * (spec.interval ?? 0.07), color: spec.color,
-            splash: {
-              radius: spec.radius ?? 8, damage: spec.damage, proc: 0.5,
-              color: spec.color, force: 12,
-            },
-            source: 'Carpet Bombing',
-          });
-        }
-        game.engine.addShake(0.35);
+        const duration = spec.duration ?? 15;
+        const color = spec.color ?? 0x7fe0ff;
+        player.startFlight({
+          duration, riseSpeed: 13, hoverSpeed: -1.2, speedMult: 1.25, color,
+          // Endless within its window: fuel does not tick down and touching the
+          // floor no longer cuts the thrusters, so the whole fifteen seconds is
+          // spent airborne whether or not you land in the middle of it.
+          endless: true,
+        });
+        player.addBuff('bombardier', duration, 1, 1, '🛩️ Ordnance Override');
+        game.fxApi.ring(player.position, 1, 14, color, 0.9, 1);
+        game.engine.addShake(0.45);
       },
 
-      /** Javelin: everything painted at once, then the sky falls on it. */
-      spearStorm(spec) {
+      /** One charge, straight down, and a crater underneath wherever you are. */
+      bunkerBomb(spec) {
         const player = game.player;
-        const color = spec.color ?? 0x9dff6a;
-        const marked = self.markEnemies(player.position, spec.markRadius, spec.markDuration, color);
-        const targets = game.enemies.inRadius(player.position, spec.markRadius);
-        for (let i = 0; i < spec.count; i++) {
-          // Spears land on what is actually there; with nothing in range they
-          // still come down around you rather than vanishing.
-          const t = targets.length
-            ? targets[i % targets.length].position
-            : player.position;
-          game.projectiles.spawnMortar({
-            target: t, scatter: targets.length ? 3 : 14, delay: i * (spec.interval ?? 0.08),
-            color,
-            splash: { radius: spec.radius ?? 6, damage: spec.damage, proc: 0.6, color, force: 8 },
-            source: 'Impaling Storm',
-          });
-        }
-        player.addBuff('freedash', spec.freeDashTime ?? 8, 1, 1, '➤ Free Dash');
-        self.refundUtility();
-        game.ui.toast(`${marked} MARKED`, '#9dff6a');
-        game.engine.addShake(0.4);
+        const color = spec.color ?? 0x7fe0ff;
+        game.projectiles.spawn({
+          position: player.position.clone().setY(player.position.y + 0.7),
+          velocity: new THREE.Vector3(0, -(spec.speed ?? 26), 0),
+          damage: 0, radius: 0.42, life: 6, color, gravity: -34,
+          trail: 1.8, glow: 2.6, detonateOnGround: true,
+          splash: { radius: spec.radius ?? 16, damage: spec.damage, proc: 1, color, force: 22 },
+          source: 'Bomb Cluster',
+        });
+        player.addRecoil(1.8);
+        game.engine.addShake(0.18);
+      },
+
+      /**
+       * Dasher: one spear, thrown properly, and everything it catches comes to it.
+       *
+       * The pull is what makes the dash resets worth having — a crowd raked
+       * into a single point is a crowd one dash goes through end to end, and
+       * every body in it is painted, so each pass hands the dash straight back.
+       */
+      greatSpear(spec) {
+        const player = game.player;
+        const color = spec.color ?? 0x3dffa5;
+        const radius = spec.radius ?? 20;
+        game.projectiles.spawn({
+          position: player.muzzlePosition.clone(),
+          velocity: player.aimDirection(new THREE.Vector3()).multiplyScalar(spec.speed ?? 74),
+          damage: 0, proc: 0, radius: 0.55, life: 4, color,
+          gravity: -3, trail: 2.4, glow: 2.8,
+          onLand: (position) => {
+            const marked = self.markEnemies(position, radius, spec.markDuration ?? 14, color);
+            self.areaDamage(position, radius, spec.damage, { proc: 0.7, source: 'Skewer', force: 4 });
+            // The shaft is the anchor. `pulled` reels toward whatever it is
+            // handed, so a bare point stands in for a body perfectly well.
+            const anchor = { position, chestPosition: position };
+            for (const e of game.enemies.inRadius(position, radius)) {
+              e.applyStatus('pulled', spec.pull?.time ?? 1.1, {
+                target: anchor, speed: spec.pull?.speed ?? 30, color,
+              });
+              e.grounded = false;
+            }
+            game.fxApi.explosion(position, radius * 0.5, color, 1.3);
+            game.fxApi.ring(position, 1, radius, color, 0.9, 1);
+            game.engine.addShake(0.5);
+            if (marked > 0) game.ui.toast(`${marked} SKEWERED`, '#3dffa5');
+          },
+          source: 'Skewer',
+        });
+        self.grantDashResets(spec.dashResets ?? 3);
+        game.ui.toast(`DASH ×${self.dashResets}`, '#3dffa5');
+        player.addRecoil(3);
       },
     };
 

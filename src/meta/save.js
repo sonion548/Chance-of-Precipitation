@@ -96,6 +96,11 @@ function migrate(p) {
   merged.unlockedItems = known([...new Set([...base.unlockedItems, ...(p.unlockedItems || [])])], ITEMS);
   merged.unlockedWeapons = known([...new Set([...base.unlockedWeapons, ...(p.unlockedWeapons || [])])], WEAPONS);
   merged.unlockedCharacters = known([...new Set([...base.unlockedCharacters, ...(p.unlockedCharacters || [])])], CHARACTERS);
+  // The same goes for what is *equipped*: a retired id here leaves the loadout
+  // screen with nothing selected and the run silently starting as somebody
+  // else, which reads as the save having been corrupted.
+  if (!WEAPONS.some((w) => w.id === merged.equippedWeapon)) merged.equippedWeapon = DEFAULT_WEAPON;
+  if (!CHARACTERS.some((c) => c.id === merged.equippedCharacter)) merged.equippedCharacter = DEFAULT_CHARACTER;
   // Settings moved out to their own store and their own storage key. The
   // spread above would otherwise carry an old profile's copy forward for ever,
   // where it reads like a second source of truth that nothing actually obeys.

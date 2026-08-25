@@ -73,6 +73,79 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: none; ba
 #crosshair.hit i { background: var(--danger); }
 #crosshair.kill i { background: var(--accent); }
 #crosshair.pulse { transform: translate(-50%,-50%) scale(1.35); }
+#crosshair.scoped { opacity: 0; }
+
+/* ---- sniper optic ----------------------------------------------------
+   The black surround is one enormous box-shadow spilling out of a round
+   element, which is how the lens gets a hard circular edge at any aspect
+   ratio without a mask image or a second layer to keep in step. */
+#scope { position: absolute; inset: 0; opacity: 0; transition: opacity .09s linear; }
+#scope.on { opacity: 1; }
+#scope .sc-lens {
+  position: absolute; left: 50%; top: 50%;
+  width: 82vmin; height: 82vmin; margin: -41vmin 0 0 -41vmin;
+  border-radius: 50%;
+  border: 2px solid #05070b;
+  box-shadow:
+    0 0 0 100vmax #04060a,
+    inset 0 0 12px 4px rgba(0,0,0,.9),
+    inset 0 0 90px 26px rgba(0,0,0,.55);
+}
+/* A faint warm ring just inside the glass: the edge of a coated lens. */
+#scope .sc-lens::before {
+  content: ''; position: absolute; inset: 3px; border-radius: 50%;
+  border: 1px solid rgba(255,106,77,.28);
+}
+#scope .sc-ret { position: absolute; inset: 0; }
+#scope .sc-ret i { position: absolute; background: rgba(226,238,255,.72); }
+/* Four segments rather than two lines, so the centre stays open. */
+#scope .sc-ret i.up    { left: 50%; top: 3%; height: 40%; width: 1px; margin-left: -.5px; }
+#scope .sc-ret i.down  { left: 50%; bottom: 3%; height: 40%; width: 1px; margin-left: -.5px; }
+#scope .sc-ret i.left  { top: 50%; left: 3%; width: 40%; height: 1px; margin-top: -.5px; }
+#scope .sc-ret i.right { top: 50%; right: 3%; width: 40%; height: 1px; margin-top: -.5px; }
+#scope .sc-ret b {
+  position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
+  background: #ff6a4d; border-radius: 50%; box-shadow: 0 0 6px rgba(255,106,77,.9);
+}
+/* Range ladder down the lower post. */
+#scope .sc-ret .lad {
+  position: absolute; left: 50%; top: 55%; width: 26px; height: 30%; margin-left: -13px;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(226,238,255,.55) 0 1px,
+    transparent 1px 14%);
+}
+
+/* ---- active reload --------------------------------------------------- */
+#reload {
+  position: absolute; left: 50%; bottom: 152px; transform: translateX(-50%);
+  width: 300px; text-align: center;
+}
+#reload .rl-track {
+  position: relative; height: 15px; overflow: hidden;
+  background: rgba(8,11,18,.88); border: 1px solid #2b3448; border-radius: 3px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.65);
+}
+#reload .rl-zone {
+  position: absolute; top: 0; bottom: 0;
+  background: linear-gradient(180deg, rgba(255,106,77,.85), rgba(255,106,77,.32));
+  box-shadow: 0 0 12px rgba(255,106,77,.5);
+}
+#reload .rl-marker {
+  position: absolute; top: -2px; bottom: -2px; width: 3px; margin-left: -1.5px;
+  background: #fff; box-shadow: 0 0 8px rgba(255,255,255,.9);
+}
+#reload .rl-label {
+  margin-top: 5px; font-family: var(--mono); font-size: 11px;
+  letter-spacing: .16em; color: var(--muted);
+  /* The bar sits inside the scope lens, which can be a bright sky. */
+  text-shadow: 0 1px 3px #000, 0 0 8px #000;
+}
+#reload.good .rl-track { border-color: var(--accent-2); }
+#reload.good .rl-label { color: var(--accent-2); }
+#reload.bad .rl-track { border-color: var(--danger); }
+#reload.bad .rl-zone { background: rgba(120,60,60,.5); box-shadow: none; }
+#reload.bad .rl-label { color: var(--danger); }
 
 /* --- top bar --- */
 #hud-top {

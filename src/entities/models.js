@@ -559,7 +559,7 @@ export function buildPlayerModel(char) {
     wraith:   { w: 0.5,  d: 0.34, torso: 0.7, hipY: 0.92, headR: 0.21, armR: [0.085, 0.075, 0.065], legR: [0.11, 0.095, 0.08], shoulder: 0.3 },
     bulwark:  { w: 0.8,  d: 0.5, torso: 0.66, hipY: 0.84, headR: 0.23, armR: [0.14, 0.125, 0.11], legR: [0.18, 0.155, 0.13], shoulder: 0.46 },
     halcyon:  { w: 0.54, d: 0.36, torso: 0.66, hipY: 0.9, headR: 0.22, armR: [0.095, 0.085, 0.072], legR: [0.12, 0.1, 0.085], shoulder: 0.33 },
-    javelin:  { w: 0.58, d: 0.38, torso: 0.7, hipY: 0.9, headR: 0.22, armR: [0.1, 0.09, 0.078], legR: [0.13, 0.11, 0.092], shoulder: 0.34 },
+    dasher:   { w: 0.54, d: 0.35, torso: 0.72, hipY: 0.94, headR: 0.21, armR: [0.092, 0.082, 0.07], legR: [0.125, 0.105, 0.086], shoulder: 0.32 },
   }[build] || {
     w: 0.62, d: 0.4, torso: 0.68, hipY: 0.86, headR: 0.23,
     armR: [0.11, 0.095, 0.085], legR: [0.14, 0.12, 0.1], shoulder: 0.36,
@@ -779,36 +779,55 @@ export function buildPlayerModel(char) {
       head.add(band);
       break;
     }
-    case 'javelin': {
-      // A quiver of spears across the back and light running plate: the
-      // silhouette has to say "throws things and then chases them".
-      const quiver = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.62, 7), m.trim);
+    case 'dasher': {
+      // Everything on this frame is either a spear or a way of going faster.
+      // A quiver across the back, lit strips down the shins, and a sash that
+      // reads as speed even standing still.
+      const quiver = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.085, 0.6, 7), m.trim);
       quiver.position.set(-P.w * 0.3, P.torso * 0.62, -P.d * 0.6);
       quiver.rotation.set(0.2, 0, -0.42);
       quiver.castShadow = true;
       torso.add(quiver);
       for (let i = 0; i < 3; i++) {
-        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.95, 5), m.suit);
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.95, 5), m.suit);
         shaft.position.set(-P.w * 0.3 + (i - 1) * 0.045, P.torso * 0.88, -P.d * 0.66);
         shaft.rotation.set(0.2, 0, -0.42);
         torso.add(shaft);
-        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.14, 5), m.glow);
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.034, 0.14, 5), m.glow);
         tip.position.set(-P.w * 0.3 + (i - 1) * 0.045 + 0.2, P.torso * 1.32, -P.d * 0.56);
         tip.rotation.set(0.2, 0, -0.42);
         torso.add(tip);
       }
 
-      // Sprinter's greaves — lit strips down the shins say "this one dashes".
+      // Sprinter's greaves and heel blades: the legs are the character.
       for (const leg of [legL, legR]) {
-        const greave = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.03), m.glow);
+        const greave = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.32, 0.03), m.glow);
         greave.position.set(0, -0.2, P.legR[2] * 1.5);
         leg.userData.lower.add(greave);
+        const blade = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.22, 4), m.accent);
+        blade.position.set(0, -0.3, -P.legR[2] * 1.9);
+        blade.rotation.x = -0.5;
+        leg.userData.lower.add(blade);
       }
-      // Trailing sash: reads as speed even when standing still.
-      const sash = new THREE.Mesh(new THREE.ConeGeometry(P.w * 0.4, 0.72, 6, 1, true), m.accent);
+
+      // Trailing sash.
+      const sash = new THREE.Mesh(new THREE.ConeGeometry(P.w * 0.4, 0.78, 6, 1, true), m.accent);
       sash.position.set(0, P.torso * 0.42, -P.d * 0.46);
       sash.rotation.x = 0.3;
       torso.add(sash);
+
+      // Vents down the ribs — the frame is mostly cooling and almost no armour.
+      ventStack(torso, m.trim, {
+        pos: [P.w * 0.44, P.torso * 0.5, 0], count: 4, size: [0.014, 0.09, 0.05], spacing: 0.075,
+      });
+      ventStack(torso, m.trim, {
+        pos: [-P.w * 0.44, P.torso * 0.5, 0], count: 4, size: [0.014, 0.09, 0.05], spacing: 0.075,
+      });
+
+      // Single-eye visor slit: nothing on this head but the part that aims.
+      const slit = new THREE.Mesh(new THREE.BoxGeometry(P.headR * 1.5, 0.035, 0.03), m.glow);
+      slit.position.set(0, 0.015, P.headR * 0.92);
+      head.add(slit);
       break;
     }
     default: {
@@ -1241,6 +1260,76 @@ export function buildWeaponModel(weapon) {
       }
 
       muzzle.position.set(0, 0, 0.28);
+      break;
+    }
+    case 'sniper': {
+      // A long bolt gun: heavy receiver, free-floated fluted barrel, a real
+      // tube optic sat high on rings, and a bipod folded under the handguard.
+      g.add(box(0.1, 0.15, 0.66, body, 0, 0, 0.26));            // receiver
+      g.add(box(0.105, 0.045, 0.68, dark, 0, 0.09, 0.26));      // top flat
+      addRail(0.24, 0.5, 0.115);
+      // Free-floated barrel: a heavy contour that steps down to the brake.
+      g.add(cyl(0.045, 0.052, 0.62, 10, steel, 0, 0, 0.9));
+      addFlutes(0.9, 0.62, 0.045, 8);
+      g.add(cyl(0.038, 0.045, 0.16, 10, dark, 0, 0, 1.27));     // muzzle brake body
+      for (let i = 0; i < 3; i++) {
+        g.add(box(0.09, 0.016, 0.028, dark, 0, 0, 1.22 + i * 0.05));   // brake ports
+      }
+      g.add(box(0.052, 0.052, 0.05, accent, 0, 0, 1.33));
+
+      // Tube optic on two rings, with a lit objective at the far end.
+      for (const z of [0.16, 0.46]) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.014, 4, 12), steel);
+        ring.rotation.x = Math.PI / 2;
+        ring.position.set(0, 0.19, z);
+        g.add(ring);
+        g.add(box(0.045, 0.06, 0.03, dark, 0, 0.14, z));
+      }
+      const tube = cyl(0.042, 0.042, 0.5, 12, dark, 0, 0.19, 0.32);
+      tube.rotation.x = Math.PI / 2;
+      g.add(tube);
+      const bell = cyl(0.056, 0.042, 0.11, 12, body, 0, 0.19, 0.6);
+      bell.rotation.x = Math.PI / 2;
+      g.add(bell);
+      const objective = new THREE.Mesh(new THREE.CircleGeometry(0.05, 12), glass);
+      objective.position.set(0, 0.19, 0.657);
+      g.add(objective);
+      // Elevation and windage turrets — the detail that says "optic", not "box".
+      const elev = cyl(0.028, 0.03, 0.05, 8, steel, 0, 0.245, 0.34);
+      g.add(elev);
+      const wind = cyl(0.026, 0.028, 0.045, 8, steel, 0.055, 0.19, 0.34);
+      wind.rotation.z = Math.PI / 2;
+      g.add(wind);
+
+      // Bipod, folded back along the handguard.
+      for (const sx of [-1, 1]) {
+        const leg = cyl(0.011, 0.014, 0.3, 5, dark, sx * 0.035, -0.09, 0.72);
+        leg.rotation.set(-0.9, 0, sx * 0.24);
+        g.add(leg);
+        g.add(box(0.03, 0.014, 0.03, steel, sx * 0.05, -0.2, 0.62));
+      }
+      g.add(box(0.075, 0.05, 0.1, dark, 0, -0.075, 0.74));      // bipod mount
+
+      g.add(box(0.08, 0.22, 0.11, dark, 0, -0.17, 0.14));       // box magazine
+      g.add(box(0.06, 0.03, 0.09, steel, 0, -0.285, 0.14));
+      addGrip(-0.04, 0.34, 1.05);
+      addIronSights(1.05, -0.1, 0.1, 0.85);
+      addAction(0.22, 1.1);
+      addSling(0.72, -0.34, 1.1);
+      // Bolt handle: the thing the reload minigame is actually working.
+      const bolt = cyl(0.017, 0.017, 0.13, 6, steel, 0.075, 0.035, 0.06);
+      bolt.rotation.z = Math.PI / 2 - 0.35;
+      g.add(bolt);
+      g.add(sphere(0.028, steel, 0.13, 0.01, 0.06, 8));
+      // Adjustable stock with a cheek riser and a monopod spike.
+      g.add(box(0.055, 0.1, 0.34, dark, 0, -0.015, -0.24));
+      g.add(box(0.075, 0.05, 0.24, body, 0, 0.065, -0.24));     // cheek riser
+      g.add(box(0.095, 0.21, 0.06, grip, 0, -0.05, -0.44));     // butt pad
+      g.add(box(0.05, 0.02, 0.3, steel, 0, 0.075, -0.24));
+      g.add(box(0.03, 0.09, 0.03, steel, 0, -0.16, -0.42));     // monopod
+      panelLine(g, dark, { pos: [0, -0.082, 0.34], size: [0.07, 0.008, 0.36] });
+      boltRow(g, steel, { from: [0.052, -0.05, 0.02], to: [0.052, -0.05, 0.44], count: 4, r: 0.009 });
+      muzzle.position.set(0, 0, 1.4);
       break;
     }
     case 'scythe':
