@@ -10,9 +10,10 @@
  * in a lobby.
  *
  * Canvas is stubbed out: nothing it draws reaches a collider, which is exactly
- * the invariant under test.
+ * the invariant under test. Run it through `npm run check:coop`, which supplies
+ * the resolve hook that makes `three` mean the vendored build outside a browser.
  */
-import { Scene } from '../vendor/three.module.js';
+import { Scene } from 'three';
 
 const noop = () => {};
 const ctx2d = () => ({

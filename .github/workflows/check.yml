@@ -18,4 +18,4 @@ jobs:
       - name: Parse every module
         run: node --experimental-vm-modules tools/check.js
       - name: Prove co-op terrain agrees
-        run: node tools/coop-check.js
+        run: node --import ./tools/vendor-resolve.mjs tools/coop-check.js

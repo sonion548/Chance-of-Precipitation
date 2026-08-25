@@ -27,10 +27,12 @@ npm run check      # parses every module, then proves co-op terrain agrees
 npm run check:coop # just the terrain check
 ```
 
-Neither needs a browser. `check` parses every module to catch syntax errors, then builds
-arenas headlessly and asserts that two peers on the same seed produce identical colliders
-and identical ground height — the thing that, when it silently stopped being true, had
-teammates rendering knee-deep in the floor.
+Neither needs a browser, and neither needs `npm install` — `three` is vendored, and
+`tools/vendor-resolve.mjs` is a resolve hook that makes the bare specifier mean the vendored
+build outside the browser, where there is no importmap. `check` parses every module to catch
+syntax errors, then builds arenas headlessly and asserts that two peers on the same seed
+produce identical colliders and identical ground height — the thing that, when it silently
+stopped being true, had teammates rendering knee-deep in the floor.
 
 Requires a browser with WebGL2. No install step: `three` is vendored in `vendor/`.
 
@@ -306,6 +308,8 @@ tools/
   relay.js            WebSocket rooms, written from scratch (no dependencies)
   check.js            module parser
   coop-check.js       proves two peers on one seed build the same ground
+  vendor-resolve.mjs  makes `import 'three'` work outside the browser
+  vendor-hooks.mjs    the resolve hook itself
 graph/                generated knowledge graph — see graph/README.md
 .vscode/              launch + task config (F5 to play)
 jsconfig.json         language-service config for IntelliSense

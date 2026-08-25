@@ -7,8 +7,8 @@
   "scripts": {
     "start": "node tools/serve.js",
     "dev": "node tools/serve.js",
-    "check": "node --experimental-vm-modules tools/check.js && node tools/coop-check.js",
-    "check:coop": "node tools/coop-check.js"
+    "check": "node --experimental-vm-modules tools/check.js && npm run --silent check:coop",
+    "check:coop": "node --import ./tools/vendor-resolve.mjs tools/coop-check.js"
   },
   "engines": {
     "node": ">=18"
