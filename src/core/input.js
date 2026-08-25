@@ -46,7 +46,7 @@ export class Input {
       this.keys.add(c);
       this.pressed.add(c);
       // Stop the browser from scrolling / activating on gameplay keys.
-      if (['Space', 'Tab', 'KeyE', 'KeyR', 'KeyQ', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(c)) e.preventDefault();
+      if (['Space', 'Tab', 'KeyE', 'KeyR', 'KeyQ', 'KeyF', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(c)) e.preventDefault();
     };
     const ku = (e) => {
       if (isTextTarget(e.target)) return;

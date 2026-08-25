@@ -96,9 +96,17 @@ export class HUD {
       { key: 'SHIFT', icon: character?.utility.icon ?? '⇢', name: character?.utility.name ?? 'Dash', kind: 'utility' },
       { key: 'R', icon: character?.special.icon ?? '★', name: character?.special.name ?? 'Special', kind: 'special' },
     ];
+    // The ultimate reads differently from the other four: its mask is a meter
+    // filling up, not a cooldown draining, so it gets its own slot styling.
+    if (character?.ultimate) {
+      defs.push({
+        key: 'F', icon: character.ultimate.icon ?? '★',
+        name: character.ultimate.name, kind: 'ultimate',
+      });
+    }
     this.abilityEls = defs.map((d) => {
       const el = document.createElement('div');
-      el.className = 'ability ready';
+      el.className = `ability ready${d.kind === 'ultimate' ? ' ult' : ''}`;
       el.title = d.name;
       el.innerHTML = `
         <span class="ico">${d.icon}</span>
@@ -202,10 +210,21 @@ export class HUD {
         total = Math.max(0.01, (util?.cooldown ?? 3) * p.stats.cooldownMult * p.stats.dashCooldownMult);
         remaining = combat.utilityCharges > 0 ? 0 : Math.max(0, combat.utilityTimer);
         if (combat.maxUtilityCharges > 1) stackText = `${combat.utilityCharges}`;
-      } else {
+      } else if (a.kind === 'special') {
         const sp = combat.character?.special;
         total = Math.max(0.01, (sp?.cooldown ?? 10) * p.stats.cooldownMult);
         remaining = combat.specialTimer;
+      } else {
+        // Ultimate: the mask is the part still to earn, so a full meter is an
+        // empty mask — the same shape as "off cooldown" on every other slot.
+        const charged = combat.ultimateFraction;
+        a.mask.style.height = `${(1 - charged) * 100}%`;
+        a.num.textContent = charged >= 1 ? '' : `${Math.floor(charged * 100)}`;
+        a.charge.style.width = `${charged * 100}%`;
+        a.stacks.textContent = '';
+        a.el.classList.toggle('ready', charged >= 1);
+        a.el.classList.toggle('charging', charged > 0 && charged < 1);
+        continue;
       }
       frac = total > 0 ? clamp01(remaining / total) : 0;
 
@@ -397,7 +416,7 @@ export class HUD {
   }
 
   damageNumber(worldPos, amount, isCrit) {
-    if (amount < 0.5) return;
+    if (amount < 0.5 || this.showDamageNumbers === false) return;
     this._addFloater(worldPos, formatNumber(amount), isCrit ? 'crit' : '', isCrit ? '#ffb347' : '#ffffff', {
       rise: isCrit ? 3.4 : 2.6, life: isCrit ? 1.0 : 0.8,
     });

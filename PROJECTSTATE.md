@@ -32,6 +32,7 @@ config.
 | `Q` | Weapon secondary (hold to charge where applicable) |
 | `Shift` | Character utility |
 | `R` | Character special |
+| `F` | Character ultimate — no cooldown; charges from kills and damage taken |
 | Right click | Aim (pulls camera in, narrows FOV) |
 | `E` | Interact — chests, shrines, brood eggs, the Beacon |
 | `Esc` | Pause — in co-op this only frees the mouse; the world keeps running |
@@ -40,15 +41,25 @@ config.
 
 ## Content
 
-- **4 characters** — Vanguard (baseline), **Unloader** (grapple + momentum punch, the
-  Loader-alike), Wraith (glass cannon, blink), Bulwark (tank, shield charge + bastion).
-  A character sets base stats plus utility (Shift) and special (R); weapons are independent.
-- **7 weapons** — MK-4 Sidearm, Breach Scattergun, Arc Emitter, Rivet Driver, Seeker
-  Launcher, Photon Lance, Void Reaper. Tuned to near-identical single-target DPS (~64–84 at
-  base damage) so the choice is about *how* you fight.
+- **6 characters** — Vanguard (baseline), **Unloader** (grapple + momentum punch, the
+  Loader-alike), Wraith (glass cannon, blink), Bulwark (tank, shield charge + bastion),
+  **Halcyon** (flies; low health, negative armour, slightly softer damage, impact bombs),
+  **Javelin** (0-damage marking spear + a piercing dash that refunds itself on a marked hit).
+  A character sets base stats plus utility (Shift), special (R) and ultimate (F); weapons
+  are independent.
+- **Ultimates** — one per character, on `F`, with **no cooldown**. A meter fills from kills
+  (3 / 9 / 26 per normal / elite / boss) and from damage taken (0.6 per 1% of max health
+  lost), plus a 0.35/s trickle; spending empties it. Tuning lives in `ULTIMATE` in
+  `core/config.js`. They are meant to be run-swinging, not routine.
+- **8 weapons** — MK-4 Sidearm, Breach Scattergun, Arc Emitter, Rivet Driver, Seeker
+  Launcher, Photon Lance, Void Reaper, **Siege Gauntlets**. Tuned to near-identical
+  single-target DPS (~64–84 at base damage) so the choice is about *how* you fight. Every
+  ability names an `anim` and the rig acts it out (slash / punch / thrust / pump / lob).
 - **62 items** across 5 rarities. 34 unlocked on a fresh profile including some of every
   tier, so all five can drop on run one. Each has a procedurally drawn icon.
-- **Brood lizards** — gold-bought minions hatched from eggs, three at base.
+- **Brood lizards** — gold-bought minions hatched from eggs, four at base, and substantially
+  buffed: 135% of owner damage per fireball on a 0.85s cadence, 75% of owner health, cheaper
+  eggs with a gentler per-owned markup.
 - **10 enemies** (7 regular, 3 bosses) + 4 elite affixes.
 - **6 arena themes**, procedurally generated and dressed. Stage 1 (*Verdant Hollow*) is a
   calm green meadow; the palette darkens as you descend.
@@ -172,6 +183,27 @@ dynamic lights are the first thing dropped.
 
 ## Recently fixed (worth not regressing)
 
+- **A "melee" weapon that fired a projectile with no swing behind it.** The Void Reaper's
+  primary now resolves as a flat horizontal arc (`ctx.slashWave`) that *then* throws the cut:
+  a tapered crescent mesh, not a sphere, sweeping a radius rather than raycasting its own
+  centre line. Anything that wants a travelling melee arc should use the same `wave` spec on
+  `ProjectileManager.spawn` — it damages each enemy exactly once through a hit set, and it
+  ghosts through world geometry so a wave spawned at chest height does not die on the floor.
+- **Attack animations went through the wrist.** `rigAttack` plays a named move on the whole
+  upper body, and the damped bases the swing adds to live on the rig (`rig.armRX` and
+  friends) rather than on the `Object3D` rotations. That separation is load-bearing: adding
+  an offset straight onto a value that is `damp`-ed toward a target every frame feeds the
+  offset back into the smoothing and the limb over-rotates while the attack is rising.
+- **The Harpoon shoved instead of pulling.** It applied one impulse, which barely moved
+  anything heavy. It is now a `pulled` status the enemy carries for 0.9s, overriding its AI
+  velocity each frame and scaled by `knockbackResist` so bosses resist rather than ignore it.
+- **Marks had to survive being spent by somebody else.** Javelin's mark is a per-enemy status,
+  so consuming the one the dash struck cannot touch any other enemy's — and the dash refunds
+  at most once per dash, so a line of marked targets is a bonus, not infinite movement.
+- **Refunding a utility charge used to hand out two.** Setting `utilityTimer = 0` is exactly
+  the condition the charge regeneration ticks on, so a "reset the cooldown" that zeroed it
+  granted a second charge on the next frame. `Combat.refundUtility` restarts the timer at
+  full instead, and only zeroes it when already at max charges.
 - **Terrain drifted apart in co-op** — teammates rendered inside the floor or hovering above
   it. Three causes, all fixed: the ground texture pulled ~3,600 numbers out of the same RNG
   stream the colliders came from (so any cosmetic edit moved every structure), a waiting

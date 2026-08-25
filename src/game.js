@@ -74,8 +74,23 @@ export class Game {
       }
     });
 
+    this.applySettings();
+
     this._loop = this._loop.bind(this);
     this._lastFrame = performance.now();
+  }
+
+  /**
+   * Pushes the saved options into the systems that act on them.
+   *
+   * Called at boot, whenever a setting changes, and after an account reset —
+   * a reset that left the old sensitivity in place would be a reset in name only.
+   */
+  applySettings() {
+    const st = this.profile.data.settings || {};
+    this.input.sensitivityScale = st.sensitivity ?? 1;
+    this.engine.shakeScale = st.screenShake ?? 1;
+    this.hud.showDamageNumbers = st.damageNumbers !== false;
   }
 
   // ==================================================================== run
@@ -622,6 +637,8 @@ export class Game {
         this.pickups.spawnHealth(enemy.position, this.player.stats.maxHealth * (enemy.boss ? 0.3 : 0.12));
       }
       this.inventory.trigger('onKill', { enemy });
+      // Kills are the other half of the ultimate meter.
+      this.combat?.noteKill(enemy);
     }
 
     // Elite death effects

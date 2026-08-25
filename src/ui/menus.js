@@ -10,7 +10,14 @@ import { formatTime, formatNumber } from '../core/mathx.js';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** All out-of-run screens: menu, loadout, Sanctum, codex, records, pause, summary. */
+/** How a settings value reads next to its control. */
+function settingLabel(key, value) {
+  if (key === 'damageNumbers') return value ? 'On' : 'Off';
+  if (key === 'screenShake' && Number(value) === 0) return 'Off';
+  return `${Number(value).toFixed(2)}×`;
+}
+
+/** All out-of-run screens: menu, loadout, Sanctum, codex, records, settings, pause, summary. */
 export class Menus {
   constructor(game) {
     this.game = game;
@@ -40,6 +47,7 @@ export class Menus {
     if (name === 'codex') this._renderCodex();
     if (name === 'stats') this._renderStats();
     if (name === 'help') this._renderHelp();
+    if (name === 'settings') this._renderSettings();
     if (name === 'pause') this._renderPause();
     if (name === 'coop') this._renderCoop();
   }
@@ -139,24 +147,59 @@ export class Menus {
     $('abandon-btn').addEventListener('click', () => this.game.abandonRun());
     $('summary-again').addEventListener('click', () => this.game.startRun());
     $('summary-menu').addEventListener('click', () => this.show('menu'));
-    $('wipe-btn').addEventListener('click', () => {
-      if (this._wipeArmed) {
-        this.profile.wipe();
-        this.selectedWeapon = this.profile.data.equippedWeapon;
-    this.selectedCharacter = this.profile.data.equippedCharacter;
-        this._wipeArmed = false;
-        this._renderStats();
-        this._renderMenu();
-      } else {
-        this._wipeArmed = true;
-        $('wipe-btn').textContent = 'Click again to confirm — this cannot be undone';
-        setTimeout(() => {
-          this._wipeArmed = false;
-          const b = $('wipe-btn');
-          if (b) b.textContent = 'Erase All Progress';
-        }, 4000);
-      }
+    // Settings live-update as they are dragged and are written straight to the
+    // profile, so there is no Apply button to forget to press.
+    document.addEventListener('input', (e) => {
+      const el = e.target;
+      if (!el.id || !el.id.startsWith('set-')) return;
+      const key = el.id.slice(4);
+      const value = el.type === 'checkbox' ? el.checked : Number(el.value);
+      this.profile.setSetting(key, value);
+      this.game.applySettings();
+      const out = $(`val-${key}`);
+      if (out) out.textContent = settingLabel(key, value);
     });
+
+    $('reset-btn').addEventListener('click', () => this._resetAccount());
+  }
+
+  /**
+   * Wipes the account, behind a two-click confirmation.
+   *
+   * The button arms rather than opening a modal: `confirm()` is blocked in some
+   * embedded contexts, and an ignored dialog would make the destructive path
+   * the silent one. Arming disarms itself after four seconds.
+   */
+  _resetAccount() {
+    const btn = $('reset-btn');
+    if (!btn) return;
+    if (!this._resetArmed) {
+      this._resetArmed = true;
+      btn.classList.add('armed');
+      btn.textContent = 'Click again to erase everything — this cannot be undone';
+      clearTimeout(this._resetTimer);
+      this._resetTimer = setTimeout(() => {
+        this._resetArmed = false;
+        const b = $('reset-btn');
+        if (b) { b.classList.remove('armed'); b.textContent = 'Reset Account'; }
+      }, 4000);
+      return;
+    }
+
+    clearTimeout(this._resetTimer);
+    this._resetArmed = false;
+    this.profile.wipe();
+    // Everything the menus were holding on to came from the profile, so it all
+    // has to come back from the fresh one — otherwise the loadout still shows a
+    // character the account no longer owns.
+    this.selectedWeapon = this.profile.data.equippedWeapon;
+    this.selectedCharacter = this.profile.data.equippedCharacter;
+    this.game.applySettings();
+    btn.classList.remove('armed');
+    btn.textContent = 'Reset Account';
+    this._renderSettings();
+    this._renderMenu();
+    this.game.hud.toast('Account reset — everything is back to zero', '#ff4d5e');
   }
 
   _purchase(kind, id, cost) {
@@ -233,7 +276,13 @@ export class Menus {
         <div class="wa-body"><h6>${esc(char.special.name)}
           <span style="color:var(--dim);font-size:11px">${char.special.cooldown}s</span></h6>
           <p>${esc(char.special.desc)}</p></div>
-      </div>`;
+      </div>
+      ${char.ultimate ? `<div class="wd-ability ult">
+        <span class="wa-key">F</span>
+        <div class="wa-body"><h6>${esc(char.ultimate.name)}
+          <span style="color:var(--gold);font-size:11px">ULTIMATE · charges from kills and damage taken</span></h6>
+          <p>${esc(char.ultimate.desc)}</p></div>
+      </div>` : ''}`;
 
     $('weapon-list').innerHTML = WEAPONS.map((w) => {
       const owned = this.profile.isWeaponUnlocked(w.id);
@@ -508,7 +557,7 @@ export class Menus {
       <span class="c-body">
         <span class="c-name" style="color:${hex}">${esc(c.name)}</span>
         <span class="c-desc">${esc(c.desc)}</span>
-        <span class="c-stack">${esc(c.utility.name)} · ${esc(c.special.name)}</span>
+        <span class="c-stack">${esc(c.utility.name)} · ${esc(c.special.name)}${c.ultimate ? ` · ${esc(c.ultimate.name)}` : ''}</span>
         ${entry.owned ? '<span class="c-owned">✓ Unlocked</span>' : `<span class="c-cost">◈ ${entry.cost}</span>`}
       </span>
     </button>`;
@@ -617,6 +666,47 @@ export class Menus {
       </div>`;
   }
 
+  // ------------------------------------------------------------------ settings
+  _renderSettings() {
+    const st = this.profile.data.settings;
+    const s = this.profile.data.stats;
+    $('settings-body').innerHTML = `
+      <div class="sect-label">Controls</div>
+      <div class="set-rows">
+        <label class="set-row">
+          <span>Mouse Sensitivity</span>
+          <input id="set-sensitivity" type="range" min="0.2" max="3" step="0.05" value="${st.sensitivity}" />
+          <b id="val-sensitivity">${settingLabel('sensitivity', st.sensitivity)}</b>
+        </label>
+      </div>
+
+      <div class="sect-label">Display</div>
+      <div class="set-rows">
+        <label class="set-row">
+          <span>Screen Shake</span>
+          <input id="set-screenShake" type="range" min="0" max="1.5" step="0.05" value="${st.screenShake}" />
+          <b id="val-screenShake">${settingLabel('screenShake', st.screenShake)}</b>
+        </label>
+        <label class="set-row">
+          <span>Damage Numbers</span>
+          <input id="set-damageNumbers" type="checkbox" ${st.damageNumbers ? 'checked' : ''} />
+          <b id="val-damageNumbers">${settingLabel('damageNumbers', st.damageNumbers)}</b>
+        </label>
+      </div>
+
+      <div class="sect-label">Account</div>
+      <div class="stat-rows">
+        <div class="stat-row"><span>Echoes Available</span><b>${formatNumber(this.profile.echoes)}</b></div>
+        <div class="stat-row"><span>Runs Recorded</span><b>${formatNumber(s.runs)}</b></div>
+        <div class="stat-row"><span>Unlocks Owned</span><b>${
+          this.profile.data.unlockedItems.length
+          + this.profile.data.unlockedWeapons.length
+          + this.profile.data.unlockedCharacters.length}</b></div>
+      </div>
+      <p class="set-warn">Resetting the account erases every Echo, unlock, record and option on this
+      device and puts the game back to a first launch. There is no undo and no backup.</p>`;
+  }
+
   // ------------------------------------------------------------------ help
   _renderHelp() {
     const keys = [
@@ -627,6 +717,7 @@ export class Menus {
       ['Right Click', 'Aim — pulls the camera in and narrows the view'],
       ['Shift', 'Utility ability (character-specific)'],
       ['R', 'Special ability (character-specific)'],
+      ['F', 'Ultimate — no cooldown; the meter fills from kills and from damage taken'],
       ['Space', 'Jump (twice with Gravity Boots)'],
       ['E', 'Interact with chests, shrines and the Beacon'],
       ['Esc', 'Pause'],
@@ -635,6 +726,9 @@ export class Menus {
       <h4>The Loop</h4>
       <p>Kill things, take their gold, spend it on chests. Chests give items. Items stack — every copy of an item makes its effect stronger, and there is no upper limit.</p>
       <p>Enemies get stronger every second you are alive. The difficulty meter at the top of the screen never goes down, so a run is a race between your item collection and the ramp.</p>
+
+      <h4>Ultimates</h4>
+      <p>Every character has one ultimate on <b>F</b>. It has no cooldown — the meter beside your other abilities fills as you kill things and as you take damage, and empties completely when you spend it. Being ground down in a bad fight is worth as much as winning an easy one, so the ultimate tends to arrive at the moment it is most needed.</p>
 
       <h4>Descending</h4>
       <p>Each stage holds a Beacon. Activating it starts a ${'≈'}42-second charge that only advances while you stand inside the ring, and it calls a guardian. Survive the charge, clear the guardian, and the Beacon opens the way down — a fresh arena, a harder baseline, and better gold.</p>

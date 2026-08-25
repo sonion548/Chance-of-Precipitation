@@ -65,6 +65,7 @@ directly from the file system: ES modules and the importmap need an HTTP origin.
 | `Q` | Weapon secondary — **hold to charge** on weapons that support it |
 | `Shift` | Utility ability (character-specific) |
 | `R` | Special ability (character-specific) |
+| `F` | **Ultimate** — no cooldown; the meter fills from kills and from damage taken |
 | Right click | Aim — pulls the camera in and narrows the field of view |
 | `Space` | Jump (double jump with Gravity Boots) |
 | `E` | Interact — chests, shrines, brood eggs, the Beacon |
@@ -153,16 +154,39 @@ The host's machine owns the world, so if they leave, the session ends for everyo
 
 ## Content
 
-**4 characters.** A character sets your stats and both signature abilities; weapons stay
+**6 characters.** A character sets your stats and all three signature abilities; weapons stay
 independent, so the character decides how you move and commit while the weapon decides how
 you shoot.
 
-| Character | Identity | Utility (Shift) | Special (R) |
-| --- | --- | --- | --- |
-| Vanguard | Balanced baseline — 115 HP, no sharp edges | Combat Roll | Overclock |
-| Unloader | Heavy exosuit, 165 HP, slow but armoured | **Grapple Gun** | **Overcharged Fist** |
-| Wraith | Glass cannon — 88 HP, negative armour, double jump | Blink (in the air too) | Umbral Volley |
-| Bulwark | 200 HP and 16 armour, walks slowly at the problem | Shield Charge | Bastion |
+| Character | Identity | Utility (Shift) | Special (R) | Ultimate (F) |
+| --- | --- | --- | --- | --- |
+| Vanguard | Balanced baseline — 115 HP, no sharp edges | Combat Roll | Overclock | Fire Mission |
+| Unloader | Heavy exosuit, 165 HP, slow but armoured | **Grapple Gun** | **Overcharged Fist** | Terminal Velocity |
+| Wraith | Glass cannon — 88 HP, negative armour, double jump | Blink (in the air too) | Umbral Volley | Event Horizon |
+| Bulwark | 200 HP and 16 armour, walks slowly at the problem | Shield Charge | Bastion | Last Stand |
+| Halcyon | 84 HP, −10 armour, slightly softer damage — and it **flies** | **Thruster Flight** | **Bomb Cluster** | Carpet Bombing |
+| Javelin | 108 HP runner built around marks | **Lance Dash** | **Marking Spear** | Impaling Storm |
+
+**Ultimates** are the one ability the game gives you for having been in a fight rather than
+for having waited. There is no cooldown: the meter beside the ability bar fills from kills
+(3% a kill, 9% an elite, 26% a boss) and from damage taken (0.6% per 1% of your health lost),
+plus a slow trickle so a quiet stretch is not dead time. It empties completely when spent.
+They are deliberately enormous — a 26-shell fire mission, a 2600% crater, three singularities
+with thirty shades thrown into them, six seconds of literal invulnerability.
+
+**Halcyon** is the flying character. Thruster Flight switches gravity off for seven seconds:
+hold `Space` to climb, release to drift down, full ground-level control of your direction the
+whole time. It is paid for in everything else — 84 HP, −10 armour and slightly less damage
+than the baseline — and its bombs (three per Bomb Cluster, twenty-eight per bombing run) go
+off on whatever they touch first. Landing early cuts the thrusters and refunds half the time
+you did not use.
+
+**Javelin** is the one built around a weapon that deals no damage at all. The Marking Spear
+hurts nobody: what it buys is a mark on everything within 13m of where it sticks, for ten
+seconds. Lance Dash then goes *through* people for 360% damage — and if it strikes something
+marked, the dash comes straight back. Only the enemy actually struck spends its mark;
+everything else the spear painted stays painted, so one good throw is a chain of dashes
+across a crowd rather than a single reset.
 
 **Unloader** is the combo character. The grapple anchors to terrain *or* enemies and reels
 you in at 40 u/s, and — critically — it hands that momentum back on release instead of
@@ -177,14 +201,21 @@ and adds one more item per player to everything the beacon and its bosses drop, 
 of the run. It stacks twice and no further — three guardians waiting at the beacon, three
 items each on the far side of them.
 
-**Brood lizards.** Eggs sit out in every stage beside the chests. Paying one hatches a lizard
-that follows you, picks targets off your crosshair, and spits homing fire that explodes and
-burns. They have no stats of their own — health, damage, speed and fire rate all read from
-*your* current stats every frame, and their hits resolve through the same `damageEnemy` path
-yours do, so your crit, your damage modifiers, your lifesteal and your on-hit items all fire
-from their fireballs. Every second item you pick up grows another crystal on their backs.
-Dropping one to zero curls it back into an egg for fifteen seconds rather than deleting a
-purchase you made three stages ago.
+**Brood lizards.** Eggs sit out in every stage beside the chests — two or three of them now,
+not one or two. Paying one hatches a lizard that follows you, picks targets off your
+crosshair, and spits homing fire that explodes and burns. They have no stats of their own —
+health, damage, speed and fire rate all read from *your* current stats every frame, and their
+hits resolve through the same `damageEnemy` path yours do, so your crit, your damage
+modifiers, your lifesteal and your on-hit items all fire from their fireballs. Every second
+item you pick up grows another crystal on their backs.
+
+They were re-cut hard, because a lizard used to cost like an item and fight like a
+decoration. A fireball is **135%** of your damage rather than 60%, it lands every 0.85s
+instead of every 1.35s, splash is 3.6m, the burn is nearly double, and each lizard carries
+75% of your health rather than 42%. The brood caps at four before Brood Totem stacks, an egg
+starts at 30 gold rather than 48, and each one you already own adds 42% rather than 85% to
+the next — so a full brood is a real purchase you can actually finish making. Dropping one to
+zero curls it into an egg for eight seconds, not fifteen.
 
 **62 items** across five rarities — 34 available from the start (including a taste of every
 tier, so Rare, Epic and Legendary drops can appear on a brand-new profile), 28 unlockable. Every item
@@ -209,7 +240,7 @@ tier is unlocked yet" fallback cannot drop below, so an expensive chest can neve
 hand back a white item. **Fortune Clover** rerolls every rarity roll and keeps the better
 result.
 
-**7 weapons**, one starting and six unlockable, each with a distinct primary and secondary.
+**8 weapons**, one starting and seven unlockable, each with a distinct primary and secondary.
 They are deliberately tuned to near-identical single-target DPS (~64–84 at base damage) so
 the choice is about *how* you fight, not which is strongest:
 
@@ -218,10 +249,33 @@ the choice is about *how* you fight, not which is strongest:
 | MK-4 Sidearm | Balanced hitscan, full 1.0 proc coefficient | Focused Shot — chargeable piercing round |
 | Breach Scattergun | 10 pellets, brutal up close | Concussive Blast — knockback, and a self-launch |
 | Arc Emitter | Chains through 3 extra targets | Overload Sphere — drifting orb that zaps an area |
-| Rivet Driver | 13/s, pierces 2 | Harpoon — drags a target to you and chills it |
+| Rivet Driver | 13/s, pierces 2 | Harpoon — **winches** a target all the way in over 0.9s |
 | Seeker Launcher | Homing explosive arcs | Cluster Barrage — 9 mortars on your aim point |
 | Photon Lance | Beam that ramps to 3× on a held target | Prism Burst — discharge stored heat |
-| Void Reaper | A two-handed void blade; every wide slash feeds you | Blink Slash — phase 14m at your own height, cutting the path |
+| Void Reaper | Flat horizontal slash that **throws the cut** as a crescent wave | Blink Slash — phase 14m at your own height, cutting the path |
+| Siege Gauntlets | Punches a 9m compression wave out of the knuckles | Jet Boost — ride the blast straight up |
+
+**Every weapon acts its attack out.** A weapon ability names an `anim` — `slash`, `punch`,
+`thrust`, `pump`, `lob`, `beam` or `shoot` — and the rig plays it: the blade sweeps across the
+body and rolls through its arc, the gauntlet drives the shoulder forward and snaps the elbow
+straight, the harpoon is a two-handed stab, the shotgun racks its action with the support
+hand. The trunk leads every one of them, because a swing that lives only in the wrist reads
+as a mannequin twitching. Alternate strokes reverse, so holding attack is a sequence rather
+than one shape stuttering.
+
+The **Void Reaper**'s primary is a flat horizontal cut that then leaves the blade: the swing
+does 245% in an arc and the crescent travels 26m at 34 u/s doing another 130%, sweeping
+through everything it passes rather than raycasting down its centre line. It is drawn as the
+cut itself — a tapered crescent lying flat — not as a glowing ball.
+
+The **Rivet Driver**'s Harpoon is a winch rather than a shove. A single impulse barely moved
+anything heavy; the target is now dragged under power for 0.9s at 34 u/s, lifted just enough
+to clear kerbs on the way, with heavy enemies resisting in proportion to their knockback
+resistance rather than ignoring the line entirely.
+
+The **Siege Gauntlets** have no muzzle: the reach *is* the ability. Each punch resolves a 9m
+cone with three upright crescents marching away from the fist, and the secondary fires both
+gauntlets at the floor — straight up, jumps refunded, with a 260% blast under you.
 
 **10 enemy types** (7 regulars, 3 bosses) with melee, ranged, flying, charging and artillery
 behaviours, plus **4 elite affixes** — Blazing, Glacial, Overcharged, Voidtouched — that
@@ -368,17 +422,23 @@ and a throwing hook is caught and logged rather than killing the frame.
 ### Adding a character
 
 Append to `src/data/characters.js` with base stats, a `build` key for the model, and a
-`utility` plus `special`. Abilities receive the same combat context weapons use, extended
-with movement primitives — `dash`, `fireGrapple`, `momentumPunch`, `blink`, `homingVolley`,
-`shieldCharge`, `bastion`. Movement states live on the player (`startGrapple`,
-`startShieldCharge`) so they compose with collision and the camera correctly.
+`utility`, `special` and (optionally) `ultimate`. Abilities receive the same combat context
+weapons use, extended with movement primitives — `dash`, `lanceDash`, `fireGrapple`,
+`momentumPunch`, `blink`, `flight`, `homingVolley`, `bombVolley`, `markSpear`, `shieldCharge`,
+`bastion` — and the ultimate-scale helpers `mortarStorm`, `meteorSlam`, `voidStorm`,
+`lastStand`, `carpetBomb` and `spearStorm`. Movement states live on the player
+(`startGrapple`, `startShieldCharge`, `startFlight`, and `startDash`, which takes
+`damage`/`radius`/`onHit` for a dash that pierces) so they compose with collision and the
+camera correctly. An ultimate needs no cooldown field: it is gated by the charge meter in
+`Combat`, and `ULTIMATE` in `core/config.js` decides how fast that fills.
 
 ### Adding a weapon
 
 Append to `src/data/weapons.js` with a `primary` and `secondary`. Damage is expressed as a
 multiplier of the player's damage stat so it scales with levels and items automatically. The
-context gives you `hitscan`, `spawnBullet`, `spawnMortar`, `cone`, `melee`, `blinkSlash` and
-`chain`.
+context gives you `hitscan`, `spawnBullet`, `spawnMortar`, `cone`, `melee`, `slashWave`,
+`shockwave`, `jetBoost`, `blinkSlash` and `chain`. Give each ability an `anim` so the body
+acts it out — see `rigAttack` in `entities/characterRig.js` for the moves available.
 
 ### Tuning
 
@@ -430,8 +490,10 @@ recovers, with a hold either side so it never oscillates. The simulation clamps 
 
 Progress lives in `localStorage` under `chance-of-precipitation.profile.v1`: Echoes, unlocks, equipped
 weapon, lifetime records and the Codex. If storage is unavailable the profile falls back to
-memory for the session rather than failing. **Records → Erase All Progress** wipes it
-(two clicks, deliberately).
+memory for the session rather than failing. **Settings → Reset Account** wipes it — Echoes,
+unlocks, records, Codex and options alike — behind a two-click confirmation that disarms
+itself after four seconds. Options (look sensitivity, screen shake, damage numbers) live in
+the same profile blob rather than a key of their own, so a reset genuinely takes everything.
 
 The game used to be called SONEYBUN and wrote to `soneybun.profile.v1`. A profile under the
 old key is adopted the first time you load a build with the new one, and left where it is —

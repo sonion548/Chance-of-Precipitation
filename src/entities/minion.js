@@ -149,7 +149,7 @@ export class Minion {
 
     // Out-of-combat regeneration, so a bad fight is not permanent.
     if (this.health < this.maxHealth) {
-      this.health = Math.min(this.maxHealth, this.health + this.maxHealth * 0.06 * dt);
+      this.health = Math.min(this.maxHealth, this.health + this.maxHealth * MINIONS.regen * dt);
     }
 
     this._retarget(dt, world);
