@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { DIRECTOR, DIFFICULTY, ECONOMY } from '../core/config.js';
-import { clamp, clamp01, damp, armorMultiplier, angleLerp } from '../core/mathx.js';
+import { DIRECTOR, DIFFICULTY } from '../core/config.js';
+import { clamp01, damp, armorMultiplier, angleLerp } from '../core/mathx.js';
 import { moveWithCollision, rayCapsule, raycastWorld, distanceToBody } from '../systems/physics.js';
 import { buildEnemyModel } from './models.js';
 import { ENEMIES_BY_ID, AFFIX_BY_ID } from '../data/enemies.js';

@@ -392,8 +392,19 @@ export class Player {
 
   /* ---------------------------------------------------------------- ability movement */
 
-  /** Burst of speed along the current input direction, with optional i-frames. */
-  startDash({ speed = 26, duration = 0.2, iframes = 0.16, dir = null } = {}) {
+  /**
+   * Burst of speed along the current input direction, with optional i-frames.
+   *
+   * Called bare, this is the baseline roll and its numbers come from `PLAYER` —
+   * so a designer changing the dash in config.js changes the dash. A character
+   * whose movement is its identity passes its own.
+   */
+  startDash({
+    speed = PLAYER.dashSpeed,
+    duration = PLAYER.dashDuration,
+    iframes = PLAYER.iframesOnDash,
+    dir = null,
+  } = {}) {
     const basis = this.moveBasis;
     const d = dir ? dir.clone() : new THREE.Vector3();
     if (!dir) {

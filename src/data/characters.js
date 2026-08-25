@@ -31,7 +31,9 @@ export const CHARACTERS = [
     utility: {
       name: 'Combat Roll', key: 'SHIFT', icon: '⇢', cooldown: 3.0, charges: 1,
       desc: 'Roll a short distance with brief invulnerability.',
-      fire(ctx) { ctx.dash({ speed: 26, duration: 0.2, iframes: 0.16 }); },
+      // The baseline roll, verbatim from PLAYER — Vanguard is the character the
+      // others are tuned against, so it takes the numbers rather than restating them.
+      fire(ctx) { ctx.dash(); },
     },
     special: {
       name: 'Overclock', key: 'R', icon: '⚡', cooldown: 18,

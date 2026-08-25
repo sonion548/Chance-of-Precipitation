@@ -2,8 +2,7 @@ import * as THREE from 'three';
 import { Engine } from './core/engine.js';
 import { Input, isTextTarget } from './core/input.js';
 import { RNG } from './core/rng.js';
-import { TELEPORTER, DIFFICULTY, PLAYER, ECONOMY, MINIONS, RARITY, COOP } from './core/config.js';
-import { clamp01, formatTime } from './core/mathx.js';
+import { TELEPORTER, PLAYER, MINIONS, RARITY, COOP } from './core/config.js';
 
 import { Arena } from './world/arena.js';
 import { Player } from './entities/player.js';
@@ -197,7 +196,6 @@ export class Game {
     this.teleporter?.dispose();
     this.teleporter = null;
     this.stageCleared = false;
-    this.bossRef = null;
     this.bossRefs = [];
 
     if (layout?.pending) return;              // waiting on the host's packet
@@ -527,15 +525,14 @@ export class Game {
       const boss = this.director.spawnStageBoss(this.arena, this.player);
       if (boss) this.bossRefs.push(boss);
     }
-    this.bossRef = this.bossRefs[0] || null;
-    if (this.bossRef) this.hud.setBoss(this.bossRef, this.bossRefs.length);
+    if (this.bossRefs.length) this.hud.setBoss(this.bossRefs[0], this.bossRefs.length);
     this.hud.toast(count > 1 ? `BEACON ACTIVE — ${count} guardians` : 'BEACON ACTIVE — hold the ring', '#46e0c0');
     this.engine.addShake(0.6);
   }
 
   /** The living guardians of the current beacon event, host side. */
   livingBosses() {
-    return (this.bossRefs || (this.bossRef ? [this.bossRef] : [])).filter((b) => b && !b.dead);
+    return (this.bossRefs || []).filter((b) => b && !b.dead);
   }
 
   _updateTeleporterEvent(dt) {

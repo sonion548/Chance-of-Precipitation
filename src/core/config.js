@@ -2,15 +2,12 @@
 
 export const VERSION = '1.0.0';
 
+// The body every character shares: how it moves, how big it is, how it levels.
+// What separates one character from another — health, damage, regen, armour,
+// crit, speed and their per-level growth — lives on the character in
+// `data/characters.js`, and is read from there, never from here.
 export const PLAYER = {
-  baseHealth: 110,
-  baseRegen: 1.0,           // hp / sec
-  baseDamage: 12,
-  baseArmor: 0,
-  baseMoveSpeed: 8.2,       // units / sec
-  sprintMultiplier: 1.45,
-  baseCrit: 0.01,
-  baseCritDamage: 2.0,
+  baseCritDamage: 2.0,      // crit chance is per-character; the multiplier is not
   jumpVelocity: 11.5,
   gravity: -34,
   airControl: 0.42,
@@ -19,16 +16,13 @@ export const PLAYER = {
   radius: 0.45,
   height: 1.75,
   eyeHeight: 1.45,
+  // The baseline roll. A character that passes nothing to `dash()` gets these;
+  // its cooldown comes from the ability, like every other cooldown.
   dashSpeed: 26,
   dashDuration: 0.20,
-  dashCooldown: 3.0,
   iframesOnDash: 0.16,
   pickupRadius: 3.2,
   interactRange: 4.2,
-  // Level scaling (per level gained)
-  hpPerLevel: 32,
-  regenPerLevel: 0.2,
-  damagePerLevel: 2.4,
   xpBase: 22,               // xp needed for level 2
   xpGrowth: 1.55,
 };
@@ -61,7 +55,6 @@ export const DIRECTOR = {
   eliteHealthMultiplier: 3.6,
   eliteDamageMultiplier: 1.9,
   eliteGoldMultiplier: 2.4,
-  eliteChanceStart: 0.0,
   eliteUnlockDifficulty: 1.9,
   eliteChanceMax: 0.42,
   spawnMinDistance: 22,
@@ -103,7 +96,6 @@ export const ECONOMY = {
   legendaryChestMult: 7.5,
   shrineCostGrowth: 1.35,
   ruinShrineMult: 2.2,       // the Shrine of Ruin is priced against a Large chest
-  goldPerKillBase: 5,
   goldOrbLifetime: 26,
 };
 
@@ -165,7 +157,6 @@ export const COOP = {
   reviveRadius: 3.6,
   reviveTime: 5,
   reviveHealth: 0.45,       // fraction of max health you come back on
-  friendlyFire: false,
   // A client has to stand somewhere in the half-second before the host's stage
   // packet lands. It builds this seed rather than one of its own, so every
   // machine's placeholder is the same ground and nobody is ever described to
@@ -177,7 +168,6 @@ export const COOP = {
 export const TELEPORTER = {
   chargeTime: 42,           // seconds to charge
   radius: 21,
-  bossCreditBonus: 1.0,
   postClearGoldBonus: 0.35, // % of current gold granted on stage clear
   // Boss loot is per head, not per party: four players clearing a stage get
   // four items, the same one item each a solo run gets. Splitting a single drop

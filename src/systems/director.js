@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { DIRECTOR, DIFFICULTY } from '../core/config.js';
 import { ENEMIES, BOSSES, ELITE_AFFIXES } from '../data/enemies.js';
 import { clamp } from '../core/mathx.js';

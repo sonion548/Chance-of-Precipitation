@@ -4,7 +4,7 @@ import { itemIconDataURL } from '../data/itemArt.js';
 import { WEAPONS } from '../data/weapons.js';
 import { CHARACTERS } from '../data/characters.js';
 import { ENEMIES, BOSSES } from '../data/enemies.js';
-import { unlockCatalogue, itemEchoCost, runModeById } from '../meta/progression.js';
+import { unlockCatalogue } from '../meta/progression.js';
 import { formatTime, formatNumber } from '../core/mathx.js';
 
 const $ = (id) => document.getElementById(id);
@@ -23,7 +23,7 @@ export class Menus {
     // What is currently half-typed into the co-op form. The panel re-renders
     // whenever the roster or the lobby address changes, and a re-render replaces
     // the fields — without this, a friend joining wipes what you were typing.
-    this._coopDraft = { name: null, url: null, code: null };
+    this._clearCoopDraft();
     this._bind();
   }
 
@@ -374,7 +374,7 @@ export class Menus {
 
   async _coopHost() {
     const name = ($('coop-name')?.value || this._coopDraft.name || 'Descender').trim() || 'Descender';
-    this._coopDraft = { name: null, url: null, code: null };
+    this._clearCoopDraft();
     this.profile.setPlayerName(name);
     this._coopError = null;
     this._coopBusy('Opening a lobby…');
@@ -391,7 +391,7 @@ export class Menus {
     const code = ($('coop-code')?.value || this._coopDraft.code || '').trim().toUpperCase();
     const hostInput = ($('coop-url')?.value || this._coopDraft.url || '').trim();
     if (!code) { this._coopError = 'Enter the four-letter lobby code.'; this._renderCoop(); return; }
-    this._coopDraft = { name: null, url: null, code: null };
+    this._clearCoopDraft();
     this.profile.setPlayerName(name);
     this.profile.setLastLobbyCode(code);
     this.profile.data.lastLobbyHost = hostInput;
@@ -405,6 +405,9 @@ export class Menus {
     }
     this._renderCoop();
   }
+
+  /** Forget the half-typed form: the saved profile values take over again. */
+  _clearCoopDraft() { this._coopDraft = { name: null, url: null, code: null }; }
 
   _coopBusy(text) {
     $('coop-foot').innerHTML = `<div class="coop-busy">${esc(text)}</div>`;

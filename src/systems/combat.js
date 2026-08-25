@@ -2,8 +2,22 @@ import * as THREE from 'three';
 import { weaponById } from '../data/weapons.js';
 import { characterById } from '../data/characters.js';
 import { buildWeaponModel } from '../entities/models.js';
-import { raycastWorld, distanceToBody } from '../systems/physics.js';
+import { raycastWorld } from '../systems/physics.js';
 import { clamp01, damp } from '../core/mathx.js';
+
+/**
+ * Where a teleport puts you, and whether you are still airborne when it lands.
+ *
+ * Both the Wraith's blink and the Reaper's blink slash hold the altitude they
+ * left from — crossing a gap must not plant you on the floor — and rise only if
+ * the ground under the exit is higher than you already are. Mutates `end.y` and
+ * returns whether the player should stay off the ground.
+ */
+function settleTeleport(player, arena, start, end) {
+  const ground = arena.groundHeightAt(end.x, end.z, Math.max(start.y, end.y) + 2.5);
+  end.y = Math.max(start.y, ground);
+  return !player.grounded || end.y > ground + 0.05;
+}
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -454,11 +468,7 @@ export class Combat {
         );
         const dist = hit ? Math.max(1, hit.distance - 1) : spec.distance;
         const end = start.clone().addScaledVector(dir, dist);
-        // Same rule as the Wraith's blink: hold the altitude you dashed from,
-        // and only rise if the ground under the exit is higher than you are.
-        const ground = game.arena.groundHeightAt(end.x, end.z, Math.max(start.y, end.y) + 2.5);
-        end.y = Math.max(start.y, ground);
-        const airborne = !player.grounded || end.y > ground + 0.05;
+        const airborne = settleTeleport(player, game.arena, start, end);
 
         // Damage everything on the swept line. The path is marked by crescents
         // laid along it — the cut you made, not a row of glowing lumps.
@@ -592,11 +602,7 @@ export class Combat {
         const dist = hit ? Math.max(1.5, hit.distance - 1) : spec.distance;
         const end = start.clone().addScaledVector(dir, dist);
 
-        // Keep the altitude, but never end up inside the world: if the ground
-        // has risen under the exit, step up onto it instead of into it.
-        const ground = game.arena.groundHeightAt(end.x, end.z, Math.max(start.y, end.y) + 2.5);
-        end.y = Math.max(start.y, ground);
-        const airborne = !player.grounded || end.y > ground + 0.05;
+        const airborne = settleTeleport(player, game.arena, start, end);
 
         self.areaDamage(start.clone().setY(start.y + 1), spec.radius, spec.damage, {
           proc: 1, source: 'Blink',

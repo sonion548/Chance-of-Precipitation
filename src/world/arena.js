@@ -29,8 +29,7 @@ const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 export class Arena {
   constructor(scene, seed, stage) {
     this.scene = scene;
-    // Tolerate an RNG instance for older callers, but the seed is the contract.
-    this.seed = (typeof seed === 'object' && seed ? seed.seed : seed) >>> 0;
+    this.seed = seed >>> 0;
     this.rng = new RNG(this.seed);
     this.decorRng = new RNG((this.seed ^ 0x9e3779b9) >>> 0);
     this.stage = stage;
