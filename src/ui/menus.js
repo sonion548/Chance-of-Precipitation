@@ -1,4 +1,5 @@
-import { RARITY, RARITY_ORDER, RUN_MODES, VERSION, COOP, MINIONS } from '../core/config.js';
+import { RARITY, RARITY_ORDER, RUN_MODES, VERSION, COOP, PETS, FINAL, ECHOES } from '../core/config.js';
+import { PETS_SPECIES } from '../data/pets.js';
 import { ITEMS, ITEMS_BY_RARITY, itemDescription } from '../data/items.js';
 import { itemIconDataURL } from '../data/itemArt.js';
 import { WEAPONS } from '../data/weapons.js';
@@ -6,17 +7,13 @@ import { CHARACTERS } from '../data/characters.js';
 import { ENEMIES, BOSSES } from '../data/enemies.js';
 import { unlockCatalogue } from '../meta/progression.js';
 import { formatTime, formatNumber } from '../core/mathx.js';
+import { settings, ACTIONS, codeLabel } from '../core/settings.js';
+import { audio } from '../core/audio.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** How a settings value reads next to its control. */
-function settingLabel(key, value) {
-  if (key === 'damageNumbers') return value ? 'On' : 'Off';
-  if (key === 'screenShake' && Number(value) === 0) return 'Off';
-  return `${Number(value).toFixed(2)}×`;
-}
-
 /** All out-of-run screens: menu, loadout, Sanctum, codex, records, settings, pause, summary. */
 export class Menus {
   constructor(game) {
@@ -27,6 +24,10 @@ export class Menus {
     this.selectedCharacter = this.profile.data.equippedCharacter;
     this.unlockTab = 'items';
     this.codexTab = 'items';
+    this.settingsTab = 'audio';
+    // Where the ✕ on the settings panel goes back to. Opening it from a paused
+    // run and being dumped at the main menu would be a good way to lose a run.
+    this.settingsReturn = 'menu';
     // What is currently half-typed into the co-op form. The panel re-renders
     // whenever the roster or the lobby address changes, and a re-render replaces
     // the fields — without this, a friend joining wipes what you were typing.
@@ -50,6 +51,7 @@ export class Menus {
     if (name === 'settings') this._renderSettings();
     if (name === 'pause') this._renderPause();
     if (name === 'coop') this._renderCoop();
+    if (name === 'settings') this._renderSettings();
   }
 
   hide() {
@@ -60,14 +62,22 @@ export class Menus {
   _bind() {
     document.addEventListener('click', (e) => {
       const goto = e.target.closest('[data-goto]');
-      if (goto) { this.show(goto.dataset.goto); return; }
+      if (goto) {
+        audio.unlock();
+        audio.uiClick(goto.dataset.goto === 'menu' ? 'back' : 'click');
+        if (goto.dataset.goto === 'settings') this.settingsReturn = this.current;
+        this.show(goto.dataset.goto);
+        return;
+      }
 
       const tab = e.target.closest('.tab');
       if (tab) {
         const container = tab.closest('.panel');
         container.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
         tab.classList.add('active');
-        if (container.closest('#screen-unlocks')) { this.unlockTab = tab.dataset.tab; this._renderUnlocks(); }
+        audio.uiClick();
+        if (tab.dataset.stab) { this.settingsTab = tab.dataset.stab; this._renderSettings(); }
+        else if (container.closest('#screen-unlocks')) { this.unlockTab = tab.dataset.tab; this._renderUnlocks(); }
         else { this.codexTab = tab.dataset.tab; this._renderCodex(); }
         return;
       }
@@ -137,6 +147,8 @@ export class Menus {
       this.show('coop');
     };
 
+    this._bindSettings();
+
     $('launch-btn').addEventListener('click', () => {
       // In a lobby the host launches for everyone; solo, this is just Play.
       if (this.game.coop.active && this.game.coop.isHost) this.game.coop.startRun();
@@ -147,38 +159,7 @@ export class Menus {
     $('abandon-btn').addEventListener('click', () => this.game.abandonRun());
     $('summary-again').addEventListener('click', () => this.game.startRun());
     $('summary-menu').addEventListener('click', () => this.show('menu'));
-    // Settings live-update as they are dragged and are written straight to the
-    // profile, so there is no Apply button to forget to press.
-    document.addEventListener('input', (e) => {
-      const el = e.target;
-      if (!el.id || !el.id.startsWith('set-')) return;
-      const key = el.id.slice(4);
-      const value = el.type === 'checkbox' ? el.checked : Number(el.value);
-      this.profile.setSetting(key, value);
-      this.game.applySettings();
-      const out = $(`val-${key}`);
-      if (out) out.textContent = settingLabel(key, value);
-    });
-
     $('reset-btn').addEventListener('click', () => this._resetAccount());
-    $('unlock-all-btn').addEventListener('click', () => this._unlockEverything());
-  }
-
-  /**
-   * Hands over the whole catalogue.
-   *
-   * One click, no confirmation: nothing is lost — Echoes and records are
-   * untouched, and Reset Account puts it all back if it was a misclick. Making
-   * a purely additive button ask twice is friction for its own sake.
-   */
-  _unlockEverything() {
-    const granted = this.profile.unlockAll();
-    this._renderSettings();
-    this._renderMenu();
-    this.game.hud.toast(
-      granted > 0 ? `Unlocked ${granted} item${granted === 1 ? '' : 's'}, weapons and characters` : 'Everything was already unlocked',
-      '#ffcf5c',
-    );
   }
 
   /**
@@ -212,12 +193,268 @@ export class Menus {
     // character the account no longer owns.
     this.selectedWeapon = this.profile.data.equippedWeapon;
     this.selectedCharacter = this.profile.data.equippedCharacter;
-    this.game.applySettings();
     btn.classList.remove('armed');
     btn.textContent = 'Reset Account';
     this._renderSettings();
     this._renderMenu();
     this.game.hud.toast('Account reset — everything is back to zero', '#ff4d5e');
+  }
+
+  // ------------------------------------------------------------------ settings
+  /**
+   * Everything on this screen writes straight through to the settings store and
+   * saves. There is no Apply button and no cancel: a volume slider you have to
+   * confirm is a volume slider you cannot hear yourself adjusting.
+   */
+  _bindSettings() {
+    $('settings-close').addEventListener('click', () => {
+      audio.uiClick('back');
+      this.show(this.settingsReturn === 'pause' ? 'pause' : 'menu');
+    });
+    $('pause-settings-btn')?.addEventListener('click', () => {
+      this.settingsReturn = 'pause';
+      this.show('settings');
+    });
+    $('settings-reset').addEventListener('click', () => {
+      settings.resetAll();
+      audio.applyVolumes();
+      audio.uiClick('confirm');
+      this._renderSettings();
+    });
+
+    // Sliders: live, on every drag frame.
+    $('settings-body').addEventListener('input', (e) => {
+      const el = e.target.closest('[data-set]');
+      if (!el) return;
+      const key = el.dataset.set;
+      const value = Number(el.value) / 100;
+      settings.set(key, value);
+      audio.applyVolumes();
+      const out = el.parentElement.querySelector('output');
+      if (out) out.textContent = this._settingValue(key, value);
+    });
+
+    // Sliders make a noise when you let go of them, so you can hear what you
+    // just set without having to go and find something to shoot.
+    $('settings-body').addEventListener('change', (e) => {
+      const el = e.target.closest('[data-set]');
+      if (!el) return;
+      if (el.dataset.set === 'musicVolume') return;   // the score is already audible
+      audio.uiClick('confirm');
+    });
+
+    $('settings-body').addEventListener('click', (e) => {
+      const sw = e.target.closest('[data-toggle]');
+      if (sw) {
+        const key = sw.dataset.toggle;
+        settings.set(key, !settings.data[key]);
+        audio.applyVolumes();
+        audio.uiClick();
+        sw.classList.toggle('on', !!settings.data[key]);
+        return;
+      }
+
+      const bind = e.target.closest('[data-bind]');
+      if (bind) { this._startRebind(bind); return; }
+
+      const reset = e.target.closest('#binds-reset');
+      if (reset) {
+        settings.resetBindings();
+        audio.uiClick('confirm');
+        this._renderSettings();
+        return;
+      }
+
+      const unlock = e.target.closest('#unlock-all-btn');
+      if (unlock) { this._unlockEverything(unlock); return; }
+    });
+  }
+
+  /**
+   * Listens for the next key or button and binds it.
+   *
+   * The capture runs through the Input layer rather than a local listener so
+   * that mouse buttons are offered on equal terms with keys — somebody who
+   * wants their utility ability on the thumb button should not have to care
+   * that it is not a keyboard.
+   */
+  _startRebind(el) {
+    document.querySelectorAll('.bind-key.listening').forEach((b) => {
+      b.classList.remove('listening');
+      b.textContent = b.dataset.label;
+    });
+    el.classList.add('listening');
+    el.textContent = 'Press…';
+    const action = el.dataset.bind;
+    const slot = Number(el.dataset.slot);
+    this.game.input.captureBinding((code) => {
+      el.classList.remove('listening');
+      if (code === null) { this._renderSettings(); return; }
+      if (code === 'Backspace' || code === 'Delete') settings.clearBinding(action, slot);
+      else settings.rebind(action, slot, code);
+      audio.uiClick('confirm');
+      this._renderSettings();
+    });
+  }
+
+  _unlockEverything(btn) {
+    if (this.profile.everythingUnlocked) return;
+    if (!this._unlockArmed) {
+      this._unlockArmed = true;
+      btn.classList.add('armed');
+      btn.textContent = 'Click again — this cannot be undone';
+      audio.uiClick('back');
+      setTimeout(() => {
+        this._unlockArmed = false;
+        if (this.current === 'settings') this._renderSettings();
+      }, 4000);
+      return;
+    }
+    this._unlockArmed = false;
+    const got = this.profile.unlockEverything();
+    this.selectedWeapon = this.profile.data.equippedWeapon;
+    this.selectedCharacter = this.profile.data.equippedCharacter;
+    audio.levelUp();
+    this.game.hud.toast(`Everything unlocked — ${got.items} items, ${got.weapons} weapons, ${got.characters} characters`, '#ffcf5c');
+    this._renderSettings();
+    this._renderMenu();
+  }
+
+  _settingValue(key, v) {
+    if (key === 'sensitivity' || key === 'aimSensitivity' || key === 'turnSnap') return `×${v.toFixed(2)}`;
+    return `${Math.round(v * 100)}%`;
+  }
+
+  _slider(key, label, { min = 0, max = 100, note = null } = {}) {
+    const v = settings.data[key] ?? 0;
+    return `
+      <div class="set-row">
+        <label for="set-${key}">${esc(label)}</label>
+        <input id="set-${key}" type="range" min="${min}" max="${max}" step="1"
+               value="${Math.round(v * 100)}" data-set="${key}" />
+        <output>${this._settingValue(key, v)}</output>
+      </div>
+      ${note ? `<p class="set-note">${note}</p>` : ''}`;
+  }
+
+  _toggle(key, label, note = null) {
+    const on = !!settings.data[key];
+    return `
+      <div class="set-row toggle">
+        <label>${esc(label)}</label>
+        <button class="switch ${on ? 'on' : ''}" data-toggle="${key}" aria-pressed="${on}"></button>
+      </div>
+      ${note ? `<p class="set-note">${note}</p>` : ''}`;
+  }
+
+  _renderSettings() {
+    const body = $('settings-body');
+    if (!body) return;
+    for (const t of document.querySelectorAll('#settings-tabs .tab')) {
+      t.classList.toggle('active', t.dataset.stab === this.settingsTab);
+    }
+    if (this.settingsTab === 'audio') body.innerHTML = this._settingsAudio();
+    else if (this.settingsTab === 'controls') body.innerHTML = this._settingsControls();
+    else body.innerHTML = this._settingsGame();
+  }
+
+  _settingsAudio() {
+    return `
+      <div class="set-group">
+        <div class="sect-label">Volume</div>
+        <p class="set-note">Nothing here is a recording. Every sound in the game — every shot,
+        every impact, and the score itself — is synthesised as it plays, which is why there is
+        no download and why the music never loops back to the same bar twice.</p>
+        ${this._toggle('muted', 'Mute Everything')}
+        ${this._slider('masterVolume', 'Master')}
+        ${this._slider('sfxVolume', 'Sound Effects')}
+        ${this._slider('musicVolume', 'Music', {
+          note: 'The score is generated live and opens up as the fight does — percussion arrives with the crowd, and a lead line only shows up when things have genuinely gone wrong.',
+        })}
+      </div>`;
+  }
+
+  _settingsControls() {
+    const groups = new Map();
+    for (const a of ACTIONS) {
+      if (!groups.has(a.group)) groups.set(a.group, []);
+      groups.get(a.group).push(a);
+    }
+    const rows = [...groups].map(([group, list]) => `
+      <div class="sect-label">${esc(group)}</div>
+      ${list.map((a) => {
+        const binds = settings.bindingsFor(a.id);
+        const slot = (i) => {
+          const code = binds[i];
+          const label = code ? codeLabel(code) : 'Unbound';
+          return `<button class="bind-key ${code ? '' : 'empty'}" data-bind="${a.id}" data-slot="${i}"
+                   data-label="${esc(label)}">${esc(label)}</button>`;
+        };
+        const dead = !binds.filter(Boolean).length;
+        return `<div class="bind-row ${dead ? 'unbound' : ''}"><span>${esc(a.name)}</span>${slot(0)}${slot(1)}</div>`;
+      }).join('')}`).join('');
+
+    return `
+      <div class="set-group">
+        <p class="set-note">Click a key to rebind it, then press the key or mouse button you want.
+        <kbd>Esc</kbd> cancels, <kbd>Backspace</kbd> clears the slot. Mouse buttons are offered on
+        the same terms as keys, so anything can live on a thumb button. Binding a key that is
+        already in use takes it away from whatever had it — two actions sharing a key is never
+        what anyone meant.</p>
+        ${rows}
+      </div>
+      <div class="set-group">
+        <div class="sect-label">Mouse</div>
+        ${this._slider('sensitivity', 'Sensitivity', { min: 10, max: 400 })}
+        ${this._slider('aimSensitivity', 'Aim Sensitivity', {
+          min: 10, max: 200,
+          note: 'A multiplier applied only while you are holding aim. Below 100% the crosshair slows down when the camera pulls in, which is what keeps a scoped shot from being twitchier than a hip-fired one.',
+        })}
+        ${this._toggle('invertY', 'Invert Vertical Look')}
+      </div>
+      <div class="set-group">
+        <button class="ghost-btn" id="binds-reset">Reset Controls to Default</button>
+      </div>`;
+  }
+
+  _settingsGame() {
+    const done = this.profile.everythingUnlocked;
+    return `
+      <div class="set-group">
+        <div class="sect-label">Camera</div>
+        ${this._slider('cameraShake', 'Screen Shake', {
+          max: 150,
+          note: 'Scales every impact, explosion and boss slam. Set it to zero and the game plays identically, it just stops moving the frame.',
+        })}
+        ${this._slider('turnSnap', 'Turn Response', {
+          min: 20, max: 250,
+          note: 'How hard the character swings round to face the camera when you start shooting. Your body and your camera are independent — you can run one way and look another — and this is how firmly the two are reunited when the weapon comes up.',
+        })}
+      </div>
+      <div class="set-group">
+        <div class="sect-label">Readout</div>
+        ${this._toggle('damageNumbers', 'Damage Numbers',
+          'The figure that floats off everything you hit. Off is a quieter screen, not a quieter fight.')}
+      </div>
+      <div class="set-group">
+        <div class="sect-label">Collection</div>
+        <p class="set-note">The Sanctum exists so that a long campaign slowly widens the drop pool.
+        Some people do not want the campaign; they want the game underneath it. This hands over
+        every item, weapon and character at once. Your Echoes are untouched, and nothing else about
+        your progress changes.</p>
+        <button class="unlock-all ${done ? 'done' : ''}" id="unlock-all-btn">
+          ${done ? '✓ Everything is already unlocked' : 'Unlock All Items, Weapons and Characters'}
+        </button>
+      </div>
+      <div class="set-group">
+        <div class="sect-label">Status</div>
+        <div class="stat-rows">
+          <div class="stat-row"><span>Items</span><b>${this.profile.data.unlockedItems.length} / ${ITEMS.length}</b></div>
+          <div class="stat-row"><span>Weapons</span><b>${this.profile.data.unlockedWeapons.length} / ${WEAPONS.length}</b></div>
+          <div class="stat-row"><span>Characters</span><b>${this.profile.data.unlockedCharacters.length} / ${CHARACTERS.length}</b></div>
+          <div class="stat-row"><span>Echoes</span><b>${formatNumber(this.profile.echoes)}</b></div>
+        </div>
+      </div>`;
   }
 
   _purchase(kind, id, cost) {
@@ -684,69 +921,25 @@ export class Menus {
       </div>`;
   }
 
-  // ------------------------------------------------------------------ settings
-  _renderSettings() {
-    const st = this.profile.data.settings;
-    const s = this.profile.data.stats;
-    $('settings-body').innerHTML = `
-      <div class="sect-label">Controls</div>
-      <div class="set-rows">
-        <label class="set-row">
-          <span>Mouse Sensitivity</span>
-          <input id="set-sensitivity" type="range" min="0.2" max="3" step="0.05" value="${st.sensitivity}" />
-          <b id="val-sensitivity">${settingLabel('sensitivity', st.sensitivity)}</b>
-        </label>
-      </div>
-
-      <div class="sect-label">Display</div>
-      <div class="set-rows">
-        <label class="set-row">
-          <span>Screen Shake</span>
-          <input id="set-screenShake" type="range" min="0" max="1.5" step="0.05" value="${st.screenShake}" />
-          <b id="val-screenShake">${settingLabel('screenShake', st.screenShake)}</b>
-        </label>
-        <label class="set-row">
-          <span>Damage Numbers</span>
-          <input id="set-damageNumbers" type="checkbox" ${st.damageNumbers ? 'checked' : ''} />
-          <b id="val-damageNumbers">${settingLabel('damageNumbers', st.damageNumbers)}</b>
-        </label>
-      </div>
-
-      <div class="sect-label">Account</div>
-      <div class="stat-rows">
-        <div class="stat-row"><span>Echoes Available</span><b>${formatNumber(this.profile.echoes)}</b></div>
-        <div class="stat-row"><span>Runs Recorded</span><b>${formatNumber(s.runs)}</b></div>
-        <div class="stat-row"><span>Items Unlocked</span><b>${this.profile.data.unlockedItems.length} / ${ITEMS.length}</b></div>
-        <div class="stat-row"><span>Weapons Unlocked</span><b>${this.profile.data.unlockedWeapons.length} / ${WEAPONS.length}</b></div>
-        <div class="stat-row"><span>Characters Unlocked</span><b>${this.profile.data.unlockedCharacters.length} / ${CHARACTERS.length}</b></div>
-      </div>
-      <p class="set-warn"><b>Unlock Everything</b> grants the whole catalogue at no Echo cost — it
-      spends nothing and loses nothing, but it does end the Sanctum as something to work toward.
-      <b>Reset Account</b> erases every Echo, unlock, record and option on this device and puts the
-      game back to a first launch. There is no undo and no backup.</p>`;
-
-    const unlockBtn = $('unlock-all-btn');
-    if (unlockBtn) {
-      const done = this.profile.everythingUnlocked;
-      unlockBtn.disabled = done;
-      unlockBtn.textContent = done ? 'Everything Unlocked' : 'Unlock Everything';
-    }
-  }
-
   // ------------------------------------------------------------------ help
   _renderHelp() {
+    // Printed from the live bindings, so a rebound key is documented correctly
+    // the moment it is rebound rather than describing a keyboard nobody has.
+    const bound = (action) => settings.bindingsFor(action).map(codeLabel).join(' / ') || 'Unbound';
+    const primary = (action) => codeLabel(settings.bindingsFor(action)[0]);
     const keys = [
-      ['W A S D', 'Move'],
-      ['Mouse', 'Look'],
-      ['Left Click', 'Primary attack'],
-      ['Q', 'Secondary ability (hold to charge where applicable)'],
-      ['Right Click', 'Aim — pulls the camera in and narrows the view'],
-      ['Shift', 'Utility ability (character-specific)'],
-      ['R', 'Special ability (character-specific)'],
-      ['F', 'Ultimate — no cooldown; the meter fills from kills and from damage taken'],
-      ['Space', 'Jump (twice with Gravity Boots)'],
-      ['E', 'Interact with chests, shrines and the Beacon'],
-      ['Esc', 'Pause'],
+      [['moveForward', 'moveLeft', 'moveBack', 'moveRight'].map(primary).join(' '), 'Move — relative to the camera, not to the character'],
+      ['Mouse', 'Look — the camera turns on its own; the body follows when it has to'],
+      [bound('primary'), 'Primary attack'],
+      [bound('secondary'), 'Secondary ability (hold to charge where applicable)'],
+      [bound('aim'), 'Aim — pulls the camera in and narrows the view'],
+      [bound('utility'), 'Utility ability (character-specific)'],
+      [bound('special'), 'Special ability (character-specific)'],
+      [bound('ultimate'), 'Ultimate — no cooldown; the meter fills from kills and from damage taken'],
+      [bound('jump'), 'Jump (twice with Gravity Boots)'],
+      [bound('interact'), 'Interact with chests, shrines, eggs, the Beacon and the rift'],
+      [bound('chat'), 'Chat — the same panel logs who picked up what'],
+      ['Esc', 'Pause (in co-op this only frees your mouse)'],
     ];
     $('help-body').innerHTML = `
       <h4>The Loop</h4>
@@ -756,20 +949,53 @@ export class Menus {
       <h4>Ultimates</h4>
       <p>Every character has one ultimate on <b>F</b>. It has no cooldown — the meter beside your other abilities fills as you kill things and as you take damage, and empties completely when you spend it. Being ground down in a bad fight is worth as much as winning an easy one, so the ultimate tends to arrive at the moment it is most needed.</p>
 
+      <h4>Where You Look, Where You Face</h4>
+      <p>The camera is not bolted to the character. You can sprint one way and study something in
+      the other direction, and the body will keep running where it is going — it only swings round
+      to the camera when you do something that needs the weapon pointed at what you are aiming at:
+      firing, aiming, or an ability. Which way you are travelling shows in the legs, so a
+      backpedal, a side-step and a flat-out run all read differently from behind.</p>
+      <p>Looking steeply up is a supported move, not a mistake. The camera lifts and pulls in
+      rather than burying itself in the ground, so you can track something above you and keep
+      shooting at it.</p>
+
+      <h4>The Ground</h4>
+      <p>Every stage has its own landform, not just its own palette. The Hollow rolls, the Tidal
+      Shelf and the Void Terrace are cut into shelves you can break line of sight behind, the
+      Frozen Shelf is long smooth drifts, the Ashfall Basin falls away from the middle, and the
+      Ember Depths is a ridge field with nowhere flat to stand. Height is cover: so is a crest,
+      and so is the far side of a terrace.</p>
+
+      <h4>Prices</h4>
+      <p>Everything on a stage is priced when the stage is built, from the difficulty at that
+      moment, and the price does not move again until you descend. What you see on the prompt when
+      you walk past a chest is what it will still cost when you come back with the gold. Eggs are
+      priced as a clutch — the second one on a stage is dearer than the first, and it says so up
+      front rather than repricing itself once you have bought one.</p>
+
       <h4>Descending</h4>
       <p>Each stage holds a Beacon. Activating it starts a ${'≈'}42-second charge that only advances while you stand inside the ring, and it calls a guardian. Survive the charge, clear the guardian, and the Beacon opens the way down — a fresh arena, a harder baseline, and better gold.</p>
       <p>You can ignore the Beacon and farm the stage instead. The difficulty keeps climbing either way, so this is a real decision, not a free one.</p>
 
-      <h4>The Brood</h4>
-      <p>Eggs sit out in every stage next to the chests. Paying one hatches a lizard that follows
-      you, picks targets off your crosshair and spits homing fire that explodes and burns.</p>
-      <p>They have no stats of their own. Health, damage, speed and fire rate are all read from
-      <em>your</em> current stats, and their hits go through the same pipe yours do — your crit,
-      your damage modifiers, your lifesteal and your on-hit items all fire from their fireballs.
-      Every second item you pick up grows another crystal on their backs.</p>
-      <p>They cannot be lost. Dropping one to zero curls it back into an egg for ${MINIONS.reviveTime}s.
+      <h4>Pets</h4>
+      <p>Eggs sit out in every stage next to the chests, and each one says what is inside before
+      you pay for it. There is no limit on how many you keep — what stops you is how many eggs a
+      stage puts out and the price of the next one, which climbs with every pet you own.</p>
+      <ul>${PETS_SPECIES.map((s) => `<li class="key-row"><kbd>${s.icon} ${esc(s.name)}</kbd><span>${esc(s.desc)}</span></li>`).join('')}</ul>
+      <p>None of them have stats of their own. Health, damage, speed and attack rate are all read
+      from <em>your</em> current stats, and their hits go through the same pipe yours do — your
+      crit, your damage modifiers, your lifesteal and your on-hit items all fire from their
+      attacks. Every second item you pick up shows up on their backs.</p>
+      <p>They cannot be lost. Dropping one to zero curls it back into an egg for ${PETS.reviveTime}s.
       They are not hunted by the enemy AI, but they will stop bullets meant for you and they will
-      eat a slam, so where they stand matters. The whole brood descends with you.</p>
+      eat a slam, so where they stand matters. The whole pack descends with you.</p>
+
+      <h4>The Sovereign</h4>
+      <p>From stage ${FINAL.unlockStage} onward, clearing a stage tears a rift open beside the
+      Beacon. Through it is the Null Sanctum and the thing the descent was built to keep down
+      there — no chests, no eggs, no way back, and a boss that changes how it fights twice on the
+      way down. Beating it ends the run as a win and pays ${ECHOES.victoryBonus} Echoes on top of
+      everything else. Ignoring it is a perfectly good answer; the stages keep going.</p>
 
       <h4>Co-op</h4>
       <p>Open a lobby from the main menu and read your address and four-letter code out to your
@@ -780,6 +1006,9 @@ export class Menus {
       <p>Going down is not the end. You keep watching, and a teammate standing over you for
       ${COOP.reviveTime}s brings you back. The run only ends when the last of you falls, or when
       you all descend — anyone still down comes back up on the next stage.</p>
+      <p>The party makes the run harder as well as shorter: enemies get tougher, more of them
+      arrive at once, and the stages stock more chests and more eggs to match. Press
+      <kbd>Enter</kbd> to talk; the same panel logs who picked up what.</p>
 
       <h4>Rarity</h4>
       <div class="rar-legend">
@@ -790,6 +1019,14 @@ export class Menus {
       <h4>Echoes</h4>
       <p>Every run ends eventually. When it does you are paid in Echoes, based mostly on how long you survived, plus stages cleared and bosses killed. Spend them in the Sanctum to permanently add items to the drop pool and to unlock new weapons.</p>
       <p>Unlocking an item does not give it to you — it makes it findable. A bigger pool means more variety, not more power per chest.</p>
+      <p>If the campaign is not what you are here for, Settings has a button that hands over every
+      item, weapon and character at once. It costs nothing and it changes nothing else.</p>
+
+      <h4>Settings</h4>
+      <p>Volumes, mouse sensitivity (with a separate multiplier for while you are aiming), inverted
+      look, screen shake, how hard the body snaps back to the camera, and every control — including
+      onto mouse buttons. Nothing in the game is a recording; the effects and the score are
+      synthesised as they play, and the score opens up as the fight does.</p>
 
       <h4>Controls</h4>
       <ul>${keys.map(([k, v]) => `<li class="key-row"><kbd>${k}</kbd><span>${v}</span></li>`).join('')}</ul>`;

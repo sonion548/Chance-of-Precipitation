@@ -118,7 +118,7 @@ export const ITEMS = [
     unlocked: true,
     desc: (s) => `Brood lizards deal ${pct(0.2 * s)} more damage.`,
     stackText: '+20% brood damage per stack',
-    stats: (s, a) => { a.multMinionDamage *= 1 + 0.2 * s; },
+    stats: (s, a) => { a.multPetDamage *= 1 + 0.2 * s; },
   },
   {
     id: 'whetstone', name: 'Whetstone', rarity: 'common', icon: '🪨', tag: 'Offense',
@@ -149,6 +149,51 @@ export const ITEMS = [
     stats: (s, a) => { a.multMaxHealth *= 1 + 0.06 * s; a.addArmor += 4 * s; },
   },
 
+
+  {
+    id: 'trail_marker', name: 'Trail Marker', rarity: 'common', icon: '🧭', tag: 'Utility',
+    unlocked: true,
+    desc: (s) => `Increases pickup radius by ${(2.4 * s).toFixed(1)}m and movement speed by ${pct(0.04 * s)}.`,
+    stackText: '+2.4m pickup radius per stack',
+    stats: (s, a) => { a.addPickupRadius += 2.4 * s; a.multMoveSpeed *= 1 + 0.04 * s; },
+  },
+  {
+    id: 'chalk_dust', name: 'Chalk Dust', rarity: 'common', icon: '🥋', tag: 'Offense',
+    unlocked: true,
+    desc: (s) => `Deal ${pct(0.1 * s)} more damage to enemies within 8m.`,
+    stackText: '+10% close-range damage per stack',
+    hooks: {
+      modifyDamage(ctx, s, ev) {
+        const d = ev.enemy.position.distanceTo(ctx.player.position);
+        return d < 8 ? ev.damage * (1 + 0.1 * s) : ev.damage;
+      },
+    },
+  },
+  {
+    id: 'tallow_candle', name: 'Tallow Candle', rarity: 'common', icon: '🕯️', tag: 'Healing',
+    unlocked: true,
+    desc: (s) => `Every 6 seconds out of combat, heal for ${pct(0.03 * s)} of maximum health.`,
+    stackText: '+3% max health per stack',
+    hooks: {
+      onTick(ctx, s, ev) {
+        if (ctx.player.combatTimer > 0) return;
+        ctx.timer('tallow', ev.dt, 6, () => {
+          ctx.heal(ctx.player.stats.maxHealth * 0.03 * s, 'Tallow Candle');
+        });
+      },
+    },
+  },
+  {
+    id: 'counterweight', name: 'Counterweight', rarity: 'common', icon: '⚖️', tag: 'Mobility',
+    unlocked: true,
+    desc: (s) => `While airborne, gain ${pct(0.18 * s)} damage. Landing is when you stop being interesting.`,
+    stackText: '+18% airborne damage per stack',
+    hooks: {
+      modifyDamage(ctx, s, ev) {
+        return ctx.player.grounded ? ev.damage : ev.damage * (1 + 0.18 * s);
+      },
+    },
+  },
   /* ==========================================================
      UNCOMMON
      ========================================================== */
@@ -260,9 +305,9 @@ export const ITEMS = [
   {
     id: 'brood_totem', name: 'Brood Totem', rarity: 'uncommon', icon: '🗿', tag: 'Utility',
     unlocked: true,
-    desc: (s) => `Raises your brood limit by ${s} and gives lizards ${pct(0.25 * s)} more health.`,
-    stackText: '+1 brood lizard, +25% brood health per stack',
-    stats: (s, a) => { a.addMinionCap += s; a.multMinionHealth *= 1 + 0.25 * s; },
+    desc: (s) => `${s} more egg${s > 1 ? 's' : ''} hatch on every stage, and pets have ${pct(0.25 * s)} more health.`,
+    stackText: '+1 egg per stage, +25% pet health per stack',
+    stats: (s, a) => { a.addEggs += s; a.multPetHealth *= 1 + 0.25 * s; },
   },
   {
     id: 'kinetic_dampener', name: 'Kinetic Dampener', rarity: 'uncommon', icon: '🪂', tag: 'Defense',
@@ -312,6 +357,63 @@ export const ITEMS = [
     },
   },
 
+
+  {
+    id: 'shatter_charge', name: 'Shatter Charge', rarity: 'uncommon', icon: '💣', tag: 'Offense',
+    unlocked: true,
+    desc: (s) => `${pct(0.1)} chance on hit to detonate for ${pct(1.4 * s)} damage in 6m.`,
+    stackText: '+140% blast damage per stack',
+    hooks: {
+      onHit(ctx, s, ev) {
+        if (!ctx.procRoll(0.1, ev.proc)) return;
+        ctx.areaDamage(ev.enemy.center, 6, ctx.player.stats.damage * 1.4 * s, {
+          proc: 0.3, source: 'Shatter Charge', force: 6,
+        });
+        ctx.fx.explosion(ev.enemy.center, 6, 0xffa050, 0.7);
+      },
+    },
+  },
+  {
+    id: 'thorn_harness', name: 'Thorn Harness', rarity: 'uncommon', icon: '🌵', tag: 'Defense',
+    unlocked: true,
+    desc: (s) => `Taking damage returns ${pct(0.55 * s)} of it to every enemy within 9m.`,
+    stackText: '+55% reflected per stack',
+    hooks: {
+      onDamaged(ctx, s, ev) {
+        if (ev.amount <= 0) return;
+        ctx.areaDamage(ctx.player.position, 9, ev.amount * 0.55 * s, {
+          proc: 0.2, source: 'Thorn Harness',
+        });
+        ctx.fx.ring(ctx.player.position, 0.5, 9, 0x8fd86a, 0.32, 0.6);
+      },
+    },
+  },
+  {
+    id: 'quickstep_tabi', name: 'Quickstep Tabi', rarity: 'uncommon', icon: '🥾', tag: 'Mobility',
+    unlocked: true,
+    desc: (s) => `Using a secondary ability grants ${pct(0.35 * s)} movement speed for 3 seconds.`,
+    stackText: '+35% burst speed per stack',
+    hooks: {
+      onSecondary(ctx, s) {
+        ctx.addBuff('quickstep', 3, 0.35 * s, 1, '🥾 Quickstep', { stat: 'moveSpeed' });
+      },
+    },
+  },
+  {
+    id: 'marrow_tithe', name: 'Marrow Tithe', rarity: 'uncommon', icon: '🦴', tag: 'Healing',
+    unlocked: true,
+    desc: (s) => `Every 8 kills, heal for ${pct(0.06 * s)} of maximum health and gain a barrier.`,
+    stackText: '+6% max health per stack',
+    hooks: {
+      onKill(ctx, s) {
+        ctx.run.marrow = (ctx.run.marrow || 0) + 1;
+        if (ctx.run.marrow < 8) return;
+        ctx.run.marrow = 0;
+        ctx.heal(ctx.player.stats.maxHealth * 0.06 * s, 'Marrow Tithe');
+        ctx.grantBarrier(ctx.player.stats.maxHealth * 0.04 * s);
+      },
+    },
+  },
   /* ==========================================================
      RARE
      ========================================================== */
@@ -420,14 +522,14 @@ export const ITEMS = [
     desc: (s) => `A downed brood lizard hatches again immediately. Recharges in ${Math.max(8, 26 - 6 * (s - 1))}s.`,
     stackText: '-6s recharge per stack',
     hooks: {
-      onMinionDown(ctx, s, ev) {
+      onPetDown(ctx, s, ev) {
         if (ctx.isOnInternalCooldown('clutch_incubator')) return;
         ctx.setInternalCooldown('clutch_incubator', Math.max(8, 26 - 6 * (s - 1)));
         // A beat later, so the death still reads before the rebirth.
         ctx.schedule(0.7, () => {
-          if (!ev.minion || ev.minion.alive) return;
-          ev.minion.revive(true);
-          ev.minion.health = ev.minion.maxHealth * 0.6;
+          if (!ev.pet || ev.pet.alive) return;
+          ev.pet.revive(true);
+          ev.pet.health = ev.pet.maxHealth * 0.6;
           ctx.toast('The clutch stirs', '#ff8a3d');
         });
       },
@@ -477,6 +579,86 @@ export const ITEMS = [
     },
   },
 
+
+  {
+    id: 'gravemarker', name: 'Gravemarker', rarity: 'rare', icon: '🪦', tag: 'Offense',
+    unlocked: true,
+    desc: (s) => `Enemies leave a scorched patch on death, dealing ${pct(0.5 * s)} damage per second for 5s.`,
+    stackText: '+50% patch damage per stack',
+    hooks: {
+      onKill(ctx, s, ev) {
+        // One patch every half second at most. Without the gate, a build that
+        // clears twenty husks at once schedules a hundred area queries in the
+        // same frame, and the frame notices.
+        if (ctx.isOnInternalCooldown('gravemarker')) return;
+        ctx.setInternalCooldown('gravemarker', 0.5);
+        const at = ev.enemy.position.clone();
+        const dps = ctx.player.stats.damage * 0.5 * s;
+        ctx.fx.ring(at, 0.5, 4.5, 0x9a6ada, 0.6, 0.7);
+        for (let i = 0; i < 5; i++) {
+          ctx.schedule(i, () => {
+            ctx.areaDamage(at, 4.5, dps, { proc: 0.15, source: 'Gravemarker' });
+            ctx.fx.ring(at, 3.6, 4.5, 0x9a6ada, 0.5, 0.28);
+          });
+        }
+      },
+    },
+  },
+  {
+    id: 'siege_battery', name: 'Siege Battery', rarity: 'rare', icon: '🔌', tag: 'Offense',
+    unlocked: true,
+    desc: (s) => `Standing still charges up to ${pct(0.45 * s)} bonus damage over a second. Moving spends it. Currently {charge}%.`,
+    stackText: '+45% charged damage per stack',
+    hooks: {
+      onTick(ctx, s, ev) {
+        const still = ctx.player.speedXZ < 1.4;
+        const cur = ctx.run.siegeCharge || 0;
+        ctx.run.siegeCharge = still
+          ? Math.min(1, cur + ev.dt * 0.9)
+          : Math.max(0, cur - ev.dt * 2.4);
+      },
+      modifyDamage(ctx, s, ev) {
+        return ev.damage * (1 + (ctx.run.siegeCharge || 0) * 0.45 * s);
+      },
+    },
+    dynamic: (run) => ({ charge: Math.round((run.siegeCharge || 0) * 100) }),
+  },
+  {
+    id: 'cinder_wake', name: 'Cinder Wake', rarity: 'rare', icon: '🔥', tag: 'Offense',
+    unlocked: true,
+    desc: (s) => `Running leaves a burning trail that deals ${pct(0.35 * s)} damage per tick for two seconds.`,
+    stackText: '+35% trail damage per stack',
+    hooks: {
+      onTick(ctx, s, ev) {
+        if (ctx.player.speedXZ < 6 || !ctx.player.grounded) return;
+        ctx.timer('cinderWake', ev.dt, 0.28, () => {
+          const at = ctx.player.position.clone();
+          ctx.fx.glow(at, { color: 0xff7a3a, size: 1.5, life: 0.9, grow: 1.4 });
+          for (let i = 0; i < 4; i++) {
+            ctx.schedule(i * 0.5, () => {
+              ctx.areaDamage(at, 2.6, ctx.player.stats.damage * 0.35 * s, {
+                proc: 0.1, source: 'Cinder Wake',
+              });
+            });
+          }
+        });
+      },
+    },
+  },
+  {
+    id: 'tacticians_ledger', name: "Tactician's Ledger", rarity: 'rare', icon: '📕', tag: 'Utility',
+    unlocked: true,
+    desc: (s) => `Each enemy within 14m grants ${pct(0.035 * s)} attack speed, up to eight of them.`,
+    stackText: '+3.5% per nearby enemy per stack',
+    hooks: {
+      onTick(ctx, s, ev) {
+        ctx.timer('ledger', ev.dt, 0.4, () => {
+          const near = Math.min(8, ctx.nearestEnemies(ctx.player.position, 14, 8).length);
+          if (near > 0) ctx.addBuff('ledger', 0.9, 0.035 * s * near, 1, '📕 Outnumbered', { stat: 'attackSpeed' });
+        });
+      },
+    },
+  },
   /* ==========================================================
      EPIC
      ========================================================== */
@@ -588,12 +770,12 @@ export const ITEMS = [
   {
     id: 'alpha_bond', name: 'Alpha Bond', rarity: 'epic', icon: '🜛', tag: 'Utility',
     unlocked: false,
-    desc: (s) => `Raises your brood limit by 1. Brood fire arcs lightning through ${1 + s} enemies for ${pct(0.7 * s)} damage.`,
+    desc: (s) => `One more egg per stage. Your pets' attacks arc lightning through ${1 + s} enemies for ${pct(0.7 * s)} damage.`,
     stackText: '+1 chain jump, +70% chain damage per stack',
-    stats: (s, a) => { a.addMinionCap += 1; },
+    stats: (s, a) => { a.addEggs += 1; },
     hooks: {
       onHit(ctx, s, ev) {
-        if (ev.source !== 'Brood Lizard') return;
+        if (!ev.source || !ev.source.startsWith('Pet:')) return;
         if (ctx.isOnInternalCooldown('alpha_bond')) return;
         ctx.setInternalCooldown('alpha_bond', 0.45);
         ctx.chainLightning(ev.enemy, 1 + s, ctx.player.stats.damage * 0.7 * s, 12, 0xff8a3d);
@@ -629,6 +811,66 @@ export const ITEMS = [
     },
   },
 
+
+  {
+    id: 'echo_chamber', name: 'Echo Chamber', rarity: 'epic', icon: '🔊', tag: 'Offense',
+    unlocked: true,
+    desc: (s) => `${pct(0.18)} chance on hit to repeat the hit for ${pct(0.85 * s)} of its damage.`,
+    stackText: '+85% echoed damage per stack',
+    hooks: {
+      onHit(ctx, s, ev) {
+        if (ev.enemy.dead || !ctx.procRoll(0.18, ev.proc)) return;
+        // The echo carries a proc coefficient of zero, deliberately: an echo
+        // that can itself echo is a recursion, and a recursion with enough
+        // stacks is a hang rather than a build.
+        ctx.schedule(0.14, () => {
+          if (ev.enemy.dead) return;
+          ctx.damageEnemy(ev.enemy, ev.damage * 0.85 * s, { proc: 0, source: 'Echo Chamber' });
+          ctx.fx.ring(ev.enemy.center, 0.3, 2.2, 0xb473ff, 0.28, 0.7);
+        });
+      },
+    },
+  },
+  {
+    id: 'bulwark_anchor', name: 'Bulwark Anchor', rarity: 'epic', icon: '⛓️', tag: 'Defense',
+    unlocked: true,
+    desc: (s) => `Barriers decay half as fast, and while one holds you deal ${pct(0.2 * s)} more damage.`,
+    stackText: '+20% damage while barriered per stack',
+    hooks: {
+      onTick(ctx, s, ev) {
+        if (ctx.player.barrier <= 0) return;
+        ctx.addBuff('anchored', 0.4, 0.2 * s, 1, '⛓️ Anchored', { stat: 'damage' });
+        // The player drains barrier at 3.5% of max health a second. Paying half
+        // of that back here halves the drain without the player having to know
+        // this item exists.
+        ctx.player.barrier += ctx.player.stats.maxHealth * 0.0175 * ev.dt;
+      },
+    },
+  },
+  {
+    id: 'harvest_scythe', name: 'Harvest Scythe', rarity: 'epic', icon: '🌾', tag: 'Utility',
+    unlocked: false,
+    desc: (s) => `Every kill refunds ${(0.35 * s).toFixed(2)}s of ability cooldowns and 8 gold.`,
+    stackText: '+0.35s refunded per stack',
+    hooks: {
+      onKill(ctx, s) {
+        ctx.reduceCooldowns(0.35 * s);
+        ctx.player.addGold(8);
+      },
+    },
+  },
+  {
+    id: 'starve_the_flame', name: 'Starve the Flame', rarity: 'epic', icon: '🫙', tag: 'Defense',
+    unlocked: false,
+    desc: (s) => `No single hit can take more than ${pct(Math.max(0.06, 0.14 - 0.03 * (s - 1)))} of your maximum health.`,
+    stackText: '-3% cap per stack, down to 6%',
+    hooks: {
+      modifyIncoming(ctx, s, ev) {
+        const cap = ctx.player.stats.maxHealth * Math.max(0.06, 0.14 - 0.03 * (s - 1));
+        return Math.min(ev.amount, cap);
+      },
+    },
+  },
   /* ==========================================================
      LEGENDARY
      ========================================================== */
@@ -724,13 +966,13 @@ export const ITEMS = [
   {
     id: 'dracoform_sigil', name: 'Dracoform Sigil', rarity: 'legendary', icon: '🐉', tag: 'Utility',
     unlocked: false,
-    desc: (s) => `Your brood grows. +${2 * s} lizards, +${s} shot per volley, ${pct(0.5 * s)} brood damage and ${pct(0.6 * s)} brood health.`,
-    stackText: '+2 lizards, +1 volley shot per stack',
+    desc: (s) => `Your brood grows. +${2 * s} eggs per stage, +${s} shot per volley, ${pct(0.5 * s)} pet damage and ${pct(0.6 * s)} pet health.`,
+    stackText: '+2 eggs per stage, +1 volley shot per stack',
     stats: (s, a) => {
-      a.addMinionCap += 2 * s;
-      a.addMinionVolley += s;
-      a.multMinionDamage *= 1 + 0.5 * s;
-      a.multMinionHealth *= 1 + 0.6 * s;
+      a.addEggs += 2 * s;
+      a.addPetVolley += s;
+      a.multPetDamage *= 1 + 0.5 * s;
+      a.multPetHealth *= 1 + 0.6 * s;
     },
   },
   {
@@ -779,6 +1021,61 @@ export const ITEMS = [
       },
     },
     dynamic: (run) => ({ count: run.zeroHour || 0 }),
+  },
+
+  {
+    id: 'gauntlet_of_ruin', name: 'Gauntlet of Ruin', rarity: 'legendary', icon: '🤜', tag: 'Offense',
+    unlocked: true,
+    desc: (s) => `Every twelfth hit detonates for ${pct(6 * s)} damage in 10m. {charge} of 12 charged.`,
+    stackText: '+600% detonation per stack',
+    hooks: {
+      onHit(ctx, s, ev) {
+        ctx.run.ruinStacks = (ctx.run.ruinStacks || 0) + 1;
+        if (ctx.run.ruinStacks < 12) return;
+        ctx.run.ruinStacks = 0;
+        const at = ev.enemy.center.clone();
+        ctx.areaDamage(at, 10, ctx.player.stats.damage * 6 * s, {
+          proc: 0.4, source: 'Gauntlet of Ruin', force: 22,
+        });
+        ctx.fx.explosion(at, 10, 0xff5a2a, 1.6);
+        ctx.shake(0.4);
+      },
+    },
+    dynamic: (run) => ({ charge: run.ruinStacks || 0 }),
+  },
+  {
+    id: 'tectonic_heart', name: 'Tectonic Heart', rarity: 'legendary', icon: '🪨', tag: 'Offense',
+    unlocked: false,
+    desc: (s) => `Landing from four metres or more slams the ground for up to ${pct(10.5 * s)} damage. The further you fell, the wider it goes.`,
+    stackText: '+350% slam damage per stack',
+    hooks: {
+      onTick(ctx, s) {
+        const p = ctx.player;
+        const peak = ctx.run.tectonicPeak || 0;
+        if (!p.grounded) {
+          ctx.run.tectonicPeak = Math.max(peak, p.position.y);
+          return;
+        }
+        ctx.run.tectonicPeak = 0;
+        const drop = peak - p.position.y;
+        if (drop < 4) return;
+        const scale = Math.min(3, drop / 6);
+        const radius = 6 + scale * 4;
+        ctx.areaDamage(p.position, radius, p.stats.damage * 3.5 * s * scale, {
+          proc: 0.5, source: 'Tectonic Heart', force: 18,
+        });
+        ctx.fx.explosion(p.position, radius, 0x8a7060, 1.1 * scale);
+        ctx.fx.ring(p.position, 0.5, radius, 0xffb347, 0.45, 0.8);
+        ctx.shake(0.3 * scale);
+      },
+    },
+  },
+  {
+    id: 'covenant_of_debt', name: 'Covenant of Debt', rarity: 'legendary', icon: '📜', tag: 'Utility',
+    unlocked: false,
+    desc: (s) => `Everything on the stage costs ${pct(Math.min(0.6, 0.25 * s))} less. Everything on the stage hits you ${pct(0.14)} harder.`,
+    stackText: '-25% prices per stack, capped at 60%',
+    stats: (s, a) => { a.multDamageTaken *= 1.14; a.priceMult = Math.min(0.6, 0.25 * s); },
   },
 ];
 

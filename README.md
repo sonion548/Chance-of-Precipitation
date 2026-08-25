@@ -7,23 +7,36 @@ pool and unlocks new weapons for every run after.
 
 Built with [three.js](https://threejs.org/) and plain ES modules. **No build step, no
 bundler, no external assets** — every character, weapon and prop is assembled from
-primitives at runtime.
+primitives at runtime, every texture is painted onto a canvas at load, and every sound,
+including the score, is synthesised by the Web Audio API as it plays. Nothing in the
+repository is a binary.
 
 ---
 
 ## Running it
 
 ```bash
-npm start          # serves on http://localhost:8080, and hosts co-op on the same port
+node tools/serve.js       # serves on http://localhost:8080, and hosts co-op on the same port
+node tools/serve.js --port 9000   # if 8080 is taken; it also auto-advances on its own
 ```
 
-That is a zero-dependency static server (`tools/serve.js`) with a WebSocket room relay
+Or double-click **`play.cmd`** on Windows (**`./play.sh`** elsewhere), which finds Node —
+including a portable copy unzipped next to the script — and starts the same server.
+
+**npm is optional.** It never did anything here but forward the command: `npm start` runs
+`node tools/serve.js` and nothing else. There are no runtime dependencies to install, and
+`three` is vendored in `vendor/`. If npm is broken or blocked on your machine, ignore it —
+see [MULTIPLAYER.md](MULTIPLAYER.md) for the details and for the PowerShell execution-policy
+fix if you want it back.
+
+That server is a zero-dependency static server (`tools/serve.js`) with a WebSocket room relay
 (`tools/relay.js`) riding on the same port. On start it prints your LAN address as well as
-localhost — that is the one to give friends. Any static server works for solo play; the game
-needs one only because ES modules can't load over `file://`.
+localhost — that is the one to give friends. Any static server works for solo play, but *not*
+for co-op: Live Server and friends serve the files without the relay, so the lobby has nothing
+to talk to. The game needs a server at all only because ES modules can't load over `file://`.
 
 ```bash
-npm run check      # parses every module, then proves co-op terrain agrees
+npm run check      # parses every module, lints, then proves co-op terrain agrees
 npm run check:coop # just the terrain check
 ```
 
@@ -34,6 +47,13 @@ syntax errors, then builds arenas headlessly and asserts that two peers on the s
 produce identical colliders and identical ground height — the thing that, when it silently
 stopped being true, had teammates rendering knee-deep in the floor.
 
+The lint is short and specific. `Object3D.add` returns the **parent**, so
+`group.add(mesh).rotation.z = x` rotates the whole group — an idiom that reads exactly like
+the thing it is not, and which has shipped three separate times here: once it put a
+character's head inside its own torso, once it rolled every rifle-family weapon ninety degrees
+onto its side, and once it displaced a chest lid. It parses, it type-checks, and it is never
+correct, so `check.js` greps for it.
+
 Requires a browser with WebGL2. No install step: `three` is vendored in `vendor/`.
 
 ### In VS Code
@@ -43,7 +63,8 @@ background task and opens the game in Chrome (there is an Edge variant too) — 
 configure. `Ctrl/Cmd+Shift+B`-style task running also works: **Terminal → Run Task** offers
 `serve` and `check`, with `check` wired as the default test task.
 
-For IntelliSense on `import * as THREE from 'three'`, run `npm install` once. That pulls
+For IntelliSense on `import * as THREE from 'three'`, run `npm install` once — the one thing
+npm is genuinely for here, and entirely skippable. That pulls
 `@types/three` — an **editor-only** dependency; the game still loads the vendored copy at
 runtime via the importmap in `index.html`, so the types never ship and never affect the
 build. `jsconfig.json` sets the language service to ES2022 modules with `checkJs` off, so
@@ -57,9 +78,13 @@ directly from the file system: ES modules and the importmap need an HTTP origin.
 
 ## Controls
 
+Every one of these is rebindable from **Settings → Controls**, onto keys *or* mouse buttons —
+they share one code namespace, so an ability can live on a thumb button without anything
+downstream knowing the difference. The defaults:
+
 | Key | Action |
 | --- | --- |
-| `W` `A` `S` `D` | Move |
+| `W` `A` `S` `D` | Move — **relative to the camera**, not to the character |
 | Mouse | Look (click the canvas to capture the pointer) |
 | Left click | Primary attack |
 | `Q` | Weapon secondary — **hold to charge** on weapons that support it |
@@ -68,8 +93,39 @@ directly from the file system: ES modules and the importmap need an HTTP origin.
 | `F` | **Ultimate** — no cooldown; the meter fills from kills and from damage taken |
 | Right click | Aim — pulls the camera in and narrows the field of view |
 | `Space` | Jump (double jump with Gravity Boots) |
-| `E` | Interact — chests, shrines, brood eggs, the Beacon |
+| `E` | Interact — chests, shrines, eggs, the Beacon, the rift |
+| `Enter` | Chat, and the run log |
 | `Esc` | Pause (in co-op this frees your mouse; the world keeps running) |
+
+### The character
+
+The weapon is held by the grip, in the hand, and the hand goes where the weapon goes: the
+glove is parented into the weapon mount, so however the barrel turns to track the crosshair,
+the fingers turn with it. The aim is clamped to a cone around the forearm, so a body facing
+its travel direction while the camera looks elsewhere can never end up presenting a gun
+pointing somewhere the arm plainly is not.
+
+Elbows bend forwards and knees bend backwards, which sounds like it should not need saying.
+Both were positive rotations about the same axis, so both bent the same way and one of them
+was wrong — most visible with the weapon lowered, where the hands ended up behind the hips.
+The hips are also set wider than they were, with a few degrees of splay, because at the old
+width the two boots were seven centimetres apart and every walk cycle looked like the knees
+were being pressed together.
+
+### The camera is not bolted to the character
+
+Look direction and body facing are two separate quantities. The mouse drives the camera and
+nothing else; the character turns to face **wherever it is travelling** while you are simply
+running around, and snaps to the camera only when the weapon needs to be pointed at the
+crosshair — firing, aiming, charging, or an ability. So you can sprint one way and watch
+another, and the legs tell you which: a run, a backpedal and a side-step are three different
+gaits blended by the travel direction in the body's own frame, sharing one clock so a
+diagonal is a continuous gait changing shape rather than a crossfade.
+
+Looking steeply up is a supported move. A boom is a rigid arm — swing it up and the far end
+goes *down*, which on a character standing on the ground meant straight into the floor. The
+pivot now rises with the pitch and the arm shortens against the terrain underneath it, so the
+camera stays on the boom the whole way to 74° and the crosshair keeps working.
 
 ---
 
@@ -79,6 +135,26 @@ directly from the file system: ES modules and the importmap need an HTTP origin.
 die. Chests are scattered around each arena and cost gold to open; each gives one item.
 Items **stack** — every copy strengthens the effect, with no cap.
 
+**Eight things to walk up to.** Three chest tiers and a shrine take gold for a roll. The other
+four each ask for something else entirely:
+
+| Device | Costs | Gives |
+| --- | --- | --- |
+| Blood Altar | 35% of your maximum health | A guaranteed Uncommon-or-better. No gold involved. |
+| Cursed Cache | Nothing | An item, and an ambush of five with an elite in it. |
+| Pattern Duplicator | Gold, above a Large chest | +1 stack of an item you already carry, weighted to what you have most of. |
+| Scrap Forge | Two Common items | One better one. Twice per stage. |
+
+Each has its own silhouette, because the point of four more devices is that you decide which
+one to cross the arena for before you are close enough to read the prompt.
+
+**Prices are fixed for the length of a stage.** Everything buyable is priced once, when the
+stage is built, from the difficulty coefficient at that moment — and does not move again until
+you descend. The number on the prompt when you walk past a chest is what it will still cost
+when you come back with the gold for it. Eggs are priced as a clutch, so the second egg on a
+stage is dearer than the first and says so up front, rather than repricing itself behind you
+once you have bought one.
+
 **Difficulty is a function of time.** A coefficient rises continuously from the first second
 and steps up each stage:
 
@@ -86,8 +162,8 @@ and steps up each stage:
 difficulty = (1 + 0.30 × minutes) × 1.14 ^ stagesCleared × modeMultiplier
 ```
 
-It feeds enemy health and damage, gold values, chest prices, and the rate at which the
-spawn director earns credits — so surviving longer is uniformly harder, not harder along
+It feeds enemy health and damage, gold values, the price list each stage is built with, and
+the rate at which the spawn director earns credits — so surviving longer is uniformly harder, not harder along
 one axis. The named tiers (Easy → Medium → Hard → Very Hard → Insane → Impossible →
 Cataclysm → Oblivion) are just labels on that one number, shown as a meter that only ever
 goes up.
@@ -126,13 +202,21 @@ Up to eight of you, one arena.
 3. The host presses **Launch Descent** when the party is full.
 
 Over the internet rather than a LAN, the host needs port 8080 reachable: forward it on the
-router, or point a tunnel (`ssh -R`, `cloudflared`, `ngrok`, anything) at it and hand out the
-tunnel's address instead.
+router, or point a tunnel (`ssh -R`, `cloudflared`, VS Code's built-in port forwarding,
+anything) at it and hand out the tunnel's address instead. Friends paste that address into the
+Join screen, or simply open it — the game defaults to talking to whatever served the page.
+
+**[MULTIPLAYER.md](MULTIPLAYER.md) walks through each of those**, including the options that
+need no installer, no administrator rights and no firewall exception.
 
 **What is shared:** the arena, the director, the enemies, the bosses, the chests and the
-beacon. **What is yours alone:** your items, your gold, your level and your brood. Gold and
+beacon. **What is yours alone:** your items, your gold, your level and your pets. Gold and
 experience are paid to *everyone* on every kill, so nobody has to race to a corpse — but an
 item on the ground goes to whoever reaches it first.
+
+The party makes the run harder as well as faster: the difficulty coefficient, the spawn budget
+and the simultaneous-enemy cap all rise with the headcount, and the stages stock more chests
+and more eggs to match. Press **Enter** to talk — the same panel logs who picked up what.
 
 **Boss loot is per head.** A boss, and the beacon on stage clear, drops one item per player —
 four of you, four items — so joining a friend never costs you the drop you would have had
@@ -201,38 +285,46 @@ and adds one more item per player to everything the beacon and its bosses drop, 
 of the run. It stacks twice and no further — three guardians waiting at the beacon, three
 items each on the far side of them.
 
-**Brood lizards.** Eggs sit out in every stage beside the chests — two or three of them now,
-not one or two. Paying one hatches a lizard that follows you, picks targets off your
-crosshair, and spits homing fire that explodes and burns. They have no stats of their own —
-health, damage, speed and fire rate all read from *your* current stats every frame, and their
-hits resolve through the same `damageEnemy` path yours do, so your crit, your damage
-modifiers, your lifesteal and your on-hit items all fire from their fireballs. Every second
-item you pick up grows another crystal on their backs.
+**Four pet species.** Eggs sit out in every stage beside the chests, and each one says what is
+inside before you pay for it. There is no cap on how many you keep — the limit is how many
+eggs a stage puts out and the price of the next one, which climbs with every pet you own.
 
-They were re-cut hard, because a lizard used to cost like an item and fight like a
-decoration. A fireball is **135%** of your damage rather than 60%, it lands every 0.85s
-instead of every 1.35s, splash is 3.6m, the burn is nearly double, and each lizard carries
-75% of your health rather than 42%. The brood caps at four before Brood Totem stacks, an egg
-starts at 30 gold rather than 48, and each one you already own adds 42% rather than 85% to
-the next — so a full brood is a real purchase you can actually finish making. Dropping one to
-zero curls it into an egg for eight seconds, not fifteen.
+| Pet | Role | Measured |
+| --- | --- | --- |
+| 🦎 Brood Lizard | Homing fire that bursts and burns | 6.3 dps |
+| 🪲 Cinder Beetle | Charges in and gores. Tough | 8.0 dps |
+| ✨ Spark Wisp | Constant fire, arcs to a second target, made of paper | 4.9 dps |
+| 🐢 Aegis Shell | Barely scratches anything; pulses barrier onto the party | 1.7 dps, +17% barrier |
 
-**62 items** across five rarities — 34 available from the start (including a taste of every
-tier, so Rare, Epic and Legendary drops can appear on a brand-new profile), 28 unlockable. Every item
-draws its own icon procedurally from a shape library, so all 62 are distinguishable on the
+None of them have stats of their own — health, damage, speed and attack rate all read from
+*your* current stats every frame, and their hits resolve through the same `damageEnemy` path
+yours do, so your crit, your damage modifiers, your lifesteal and your on-hit items all fire
+from their attacks. Every second item you pick up shows up on their backs. Dropping one to
+zero curls it back into an egg for fifteen seconds rather than deleting a purchase you made
+three stages ago.
+
+**An ending, if you want one.** From stage 5, clearing a stage tears a rift open beside the
+Beacon. Through it is the Null Sanctum and the Null Sovereign — no chests, no eggs, no way
+back, and a boss that changes how it fights twice on the way down. Beating it finishes the run
+as a win. Ignoring it is a perfectly good answer; the stages keep going forever.
+
+**81 items** across five rarities — 49 available from the start, 32 unlockable. Every item
+draws its own icon procedurally from a shape library, so all 81 are distinguishable on the
 ground before you touch them, and the same art appears in the HUD, the pickup card, the
 Sanctum and the Codex:
 
-| Rarity | Count | Chest odds | Echo cost |
-| --- | --- | --- | --- |
-| Common | 11 | 74% | 40 |
-| Uncommon | 10 | 20% | 110 |
-| Rare | 9 | 4.7% | 240 |
-| Epic | 8 | 1.1% | 480 |
-| Legendary | 6 | 0.3% | 900 |
+| Rarity | Total | Unlocked on a fresh profile | Chest odds | Echo cost |
+| --- | --- | --- | --- | --- |
+| Common | 19 | 19 | 74% | 40 |
+| Uncommon | 18 | 18 | 20% | 110 |
+| Rare | 17 | 6 | 4.7% | 240 |
+| Epic | 15 | 4 | 1.1% | 480 |
+| Legendary | 12 | 2 | 0.3% | 900 |
 
-A fresh profile starts with all 11 Commons, all 10 Uncommons, and 2 Rares / 2 Epics / 1
-Legendary, so every tier is reachable from the first run.
+Every tier is reachable from the very first run — a new account can find a Legendary. The
+Sanctum widens the pool rather than gating entry to it, which is the difference between a
+progression system and a paywall made of time. And if you would rather not have the campaign
+at all, **Settings → Game** hands over every item, weapon and character in one click.
 
 Large chests never roll Common — paying the premium guarantees at least an Uncommon, and
 Legendary chests start at Rare. Each table carries a rarity floor that the "nothing of that
@@ -240,7 +332,7 @@ tier is unlocked yet" fallback cannot drop below, so an expensive chest can neve
 hand back a white item. **Fortune Clover** rerolls every rarity roll and keeps the better
 result.
 
-**8 weapons**, one starting and seven unlockable, each with a distinct primary and secondary.
+**9 weapons**, one starting and eight unlockable, each with a distinct primary and secondary.
 They are deliberately tuned to near-identical single-target DPS (~64–84 at base damage) so
 the choice is about *how* you fight, not which is strongest:
 
@@ -252,7 +344,8 @@ the choice is about *how* you fight, not which is strongest:
 | Rivet Driver | 13/s, pierces 2 | Harpoon — **winches** a target all the way in over 0.9s |
 | Seeker Launcher | Homing explosive arcs | Cluster Barrage — 9 mortars on your aim point |
 | Photon Lance | Beam that ramps to 3× on a held target | Prism Burst — discharge stored heat |
-| Void Reaper | Flat horizontal slash that **throws the cut** as a crescent wave | Blink Slash — phase 14m at your own height, cutting the path |
+| Void Reaper | Flat horizontal slash that **throws the cut** as a crescent wave | Blink Slash — phase 14m along your line of sight, cutting the path |
+| Sundered Gauntlets | Punches at ~3m; anything hit **detonates** | Ground Slam — drive into the floor, scaled by the fall |
 | Siege Gauntlets | Punches a 9m compression wave out of the knuckles | Jet Boost — ride the blast straight up |
 
 **Every weapon acts its attack out.** A weapon ability names an `anim` — `slash`, `punch`,
@@ -277,15 +370,93 @@ The **Siege Gauntlets** have no muzzle: the reach *is* the ability. Each punch r
 cone with three upright crescents marching away from the fist, and the secondary fires both
 gauntlets at the floor — straight up, jumps refunded, with a 260% blast under you.
 
-**10 enemy types** (7 regulars, 3 bosses) with melee, ranged, flying, charging and artillery
+**Sundered Gauntlets** is the one weapon with no range at all. The punch carries you into the
+swing, and a connecting hit detonates the target for a further 120% in five metres, so it
+gets better the worse your position is. Ground Slam drives you straight down and lets the
+floor do the rest — damage and radius scale with how far you fell to get there, up to double,
+which makes it one idea with the jump rather than a second button.
+
+**13 enemy types** (7 regulars, 6 bosses) with melee, ranged, flying, charging and artillery
 behaviours, plus **4 elite affixes** — Blazing, Glacial, Overcharged, Voidtouched — that
 appear once the ramp gets going and bring their own mechanics.
 
-**6 arena themes** cycle across stages, each procedurally generated and dressed with a
-low-poly prop set — grass, ferns, reeds, bushes, trees, conifers, dead trees, mushrooms,
-rocks, crystals, columns, arches, broken walls and monoliths. Stage 1 (*Verdant Hollow*) is
-deliberately the calmest of the set: open green meadow under a blue sky. The palette darkens
-and the architecture gets taller and more ruined as you descend.
+Each arena has its own shortlist of guardians and draws from it at random, so the same place
+can hand you a different fight and the fight always suits the place. The six:
+
+| Boss | The problem it sets |
+| --- | --- |
+| The Colossus | Slams and boulder volleys. A wall that walks. |
+| Ashen Leviathan | Circles at altitude, painting the ground with cold fire. |
+| Void Harbinger | Teleports, summons, and knows you are the anomaly. |
+| **Thornmaw** | Spends half the fight underground, where you cannot hit it and it can still reach you. |
+| **The Fulgurant** | Strikes where you are *going*. Standing still is the only reliable way to be wrong. |
+| **The Ossuary Choir** | Cannot be meaningfully hurt while its choir is standing. Kill the adds. |
+
+The last three are built to be different *problems* rather than more health bars: one you
+cannot hit for half the fight, one that punishes holding a line, and one where shooting the
+health bar is the wrong play. The Choir's damage ward is shown on its lantern ring — one lit
+lantern per living chorister — so it reads without a tooltip.
+
+**9 arena themes**, drawn in a different order every run, each procedurally generated and
+dressed with a low-poly prop set — grass, ferns, reeds, bushes, trees, conifers, dead trees, mushrooms,
+rocks, crystals, columns, arches, broken walls and monoliths. Stage 1 is always one of the two
+calm green ones, because the opening minutes are the tutorial. The palette darkens and the
+architecture gets taller and more ruined as you descend.
+
+Every prop's collision volume is **measured off the geometry that actually got built**, per
+variant, rather than read from a hand-written table of radii. The table could only ever be
+approximately right — a builder makes three or four randomised shapes and the scatterer then
+scales each instance again — so boulders had no collider at all, arches were solid all the
+way across, and columns stopped you a metre early. Trunks are found by scanning the vertices
+near the base; arches emit one volume per leg and leave the opening walkable.
+
+There are **nine of them**, they are **148 to 176 metres in radius** — up from a flat 78 — and
+each has the shape of its own ground, not just its own colours. A theme carries a `landform`:
+an amplitude, a wavelength, and three dials for whether the relief rolls, folds into ridges,
+or quantises into shelves.
+
+| Theme | Radius | Depth | Ground |
+| --- | --- | --- | --- |
+| Verdant Hollow | 148 | 1 | Rolling and forgiving, lifting gently toward the treeline |
+| Sunken Mire | 158 | 1 | Shallow terraced pans draining inward, thick with reeds |
+| Tidal Shelf | 162 | 2 | Metre-high shelves falling away from the middle |
+| Frozen Shelf | 170 | 3 | The smoothest relief in the game, walled in by a high rim |
+| Shattered Spires | 168 | 3 | The most vertical ground here: 2.4m plates with real drops |
+| Ashfall Basin | 155 | 4 | Falls away from the centre, hardened crests breaking through |
+| Ossuary Flats | 172 | 4 | Almost flat, and pale — the longest sightlines in the game |
+| Void Terrace | 176 | 5 | Wide plates you break line of sight behind |
+| Ember Depths | 166 | 5 | Short-wavelength ridging and deep clefts; nowhere to hold a line |
+
+**The order is different every run.** Stage one is one of the two calm green themes; after
+that a stage is drawn at random from everything deep enough to have appeared, with the
+shallowest themes dropping out again as you descend and no theme ever running back to back.
+The host draws and sends the result in the stage packet, so a co-op party always lands in the
+same place — including someone who joined halfway through.
+
+It is an analytic height function, not a baked heightmap, for two reasons: co-op replicates an
+arena from its seed alone, so the ground has to be reproducible from four bytes; and the
+physics, the camera boom and every prop placement ask "how high is the ground here" thousands
+of times a frame, which a closed form answers in a handful of trig calls. The centre is held
+flat so the plateau, the Beacon fight and every spawn sit on level ground, and so is the outer
+ring, so the boundary still meets the floor. Prop counts, structure counts and interactable
+counts all scale with the area, so a bigger arena is more stage rather than the same stage
+spread thinner: about twenty chests, three or four shrines, two or three devices and a
+handful of eggs.
+
+### There is no wall
+
+There used to be a thirty-metre brick cylinder around every arena, visible from anywhere in
+it. It answered "what stops me leaving" very clearly and every other question badly — every
+stage was visibly a room, and no amount of landform mattered when the backdrop was masonry.
+
+Two things replace it, because they are two jobs. A **backdrop** of three mountain ranges at
+two and a half to five arena radii, each washed further toward the horizon colour than the one
+in front of it, under a gradient sky and a band of haze — depth read entirely from value,
+since none of it ever moves relative to you. And a **containment field**: a hexagonal lattice
+on the boundary that is completely invisible until you are within about twenty metres, lights
+only the panels near you, and fades out again as you walk away. Nothing about the physics
+changed — a radial clamp has always been what actually stops you, and the field is purely the
+readout for it.
 
 Structures are assemblies, not slabs: columns have stepped plinths, drummed shafts and
 capitals; decks have edge lips, braced legs and collapsing railings; walls are coursed brick
@@ -318,27 +489,30 @@ src/
   core/
     config.js         every tuning constant in the game
     engine.js         renderer, camera, lighting, adaptive quality
-    input.js          keyboard/mouse + pointer lock
+    input.js          pointer lock, and actions rather than keys
+    settings.js       volumes, mouse feel, key bindings — persisted separately
+    audio.js          the entire soundtrack and every effect, synthesised
     rng.js            seedable mulberry32 + weighted picks
     mathx.js          clamp/damp/armor curve/proc rolls
   data/
-    items.js          62 item descriptors
+    items.js          81 item descriptors
+    pets.js           the four pet species
     itemArt.js        procedural icon recipes, one per item
     characters.js     4 playable characters and their abilities
-    weapons.js        7 weapon descriptors
-    enemies.js        bestiary, bosses, elite affixes
+    weapons.js        8 weapon descriptors
+    enemies.js        bestiary, 6 bosses, elite affixes
   world/
     arena.js          procedural arena, structures, scattering, collider grid
     textures.js       procedural material library + triplanar projection
-    props.js          low-poly prop geometry library (grass → ruins)
-    themes.js         6 stage palettes, prop mixes and terrain profiles
+    props.js          low-poly prop geometry, and collision measured off it
+    themes.js         9 stages: palettes, prop mixes, landforms, boss shortlists
   entities/
     player.js         movement, stats pipeline, third-person camera
     characterRig.js   procedural body animation, shared by local and remote players
     enemy.js          AI behaviours + enemy manager
-    minion.js         brood lizards and their manager
+    pet.js            the four pet species and their manager
     projectiles.js    bullets, mortars, hazards, singularities
-    interactables.js  chests, shrines, eggs, teleporter, pickups
+    interactables.js  chests, shrines, the four devices, eggs, Beacon, pickups
     models.js         every mesh, built from primitives
   net/
     session.js        WebSocket transport, roster, message dispatch
@@ -356,7 +530,8 @@ src/
     progression.js    Echo maths and the unlock catalogue
   ui/
     hud.js            in-run overlay and floating combat text
-    menus.js          menu, loadout, Sanctum, codex, records, summary
+    chat.js           run log and text chat
+    menus.js          menu, loadout, Sanctum, codex, records, settings, summary
 tools/
   serve.js            dev server + co-op relay on the same port
   relay.js            WebSocket rooms, written from scratch (no dependencies)
@@ -377,7 +552,7 @@ of the weight:
 
 **All enemy damage funnels through `Combat.damageEnemy`.** Crits, item damage modifiers,
 lifesteal and on-hit procs are therefore applied in exactly one place, no matter whether the
-source was a bullet, a beam, an explosion, a brood lizard or an item. It is also the single
+source was a bullet, a beam, an explosion, a pet or an item. It is also the single
 point where a co-op client reports what it did to the host.
 
 **Authority in co-op is split, not centralised.** The host owns the world; every player owns
@@ -447,6 +622,54 @@ credit rates, chest pricing, rarity tables, Echo payouts, player stats and camer
 
 ---
 
+## Sound
+
+There is not an audio file in the repository, and there is not going to be one. Everything you
+hear is built out of oscillators and filtered noise at the moment it plays, in `core/audio.js`.
+
+The reasoning is the same as for the models and the textures: the whole game is procedural, and
+a folder of `.ogg` files would be the only part of it that had to be downloaded, and the only
+part that could not be retuned by changing a number. A weapon's report is derived from its
+`model` tag, so a new weapon that reuses an existing silhouette gets a fitting sound without
+anyone authoring one.
+
+Three buses hang off the master — effects, music, UI — behind a gentle limiter, with a shared
+convolution reverb whose impulse response is synthesised decaying noise. Positional sounds are
+attenuated by distance and panned against the camera's right vector, which is enough
+spatialisation for a third-person game at a fraction of what a `PannerNode` per voice costs.
+Voices are throttled per sound name and capped at 28 at once; anything that would be inaudible
+is never synthesised at all, so a fight with forty enemies in it does not cost forty graphs.
+
+The score is a small generative engine rather than a loop. Each theme carries a root, a scale,
+a tempo and two timbre dials, so a stage change hands the same engine a different key instead
+of cutting to a different track. It is sequenced against the audio clock with a quarter-second
+lookahead, so notes land on the grid when the renderer stutters — and if the frame loop stalls
+outright, the schedule skips the gap rather than firing every missed note at once. The
+arrangement opens up with the fight: percussion arrives with the crowd, and a lead line only
+shows up when a boss is out or you are below a third health.
+
+---
+
+## Settings
+
+`Settings` is reachable from the main menu and from the pause panel, and everything on it
+writes through immediately — there is no Apply button, because a volume slider you have to
+confirm is a volume slider you cannot hear yourself adjusting.
+
+- **Audio** — master, effects and music, plus a mute.
+- **Controls** — every action, rebindable onto keys or mouse buttons, two slots each. Binding a
+  key that is already in use takes it from whatever had it; the robbed action is shown as
+  unbound in red rather than silently losing a slot. Plus mouse sensitivity, a separate
+  multiplier that applies only while aiming, and inverted look.
+- **Game** — screen shake (down to zero, which changes nothing else), how hard the body snaps
+  back to the camera, and a button that unlocks every item, weapon and character at once.
+
+Settings live under their own localStorage key, apart from the profile. Wiping your progress
+should not reset your mouse sensitivity, and a profile carried between browsers should not
+drag someone else's controls along with it.
+
+---
+
 ## Performance
 
 Roughly 150 draw calls and 75k triangles for a fully dressed arena, with all scenery batched
@@ -491,12 +714,14 @@ recovers, with a hold either side so it never oscillates. The simulation clamps 
 Progress lives in `localStorage` under `chance-of-precipitation.profile.v1`: Echoes, unlocks, equipped
 weapon, lifetime records and the Codex. If storage is unavailable the profile falls back to
 memory for the session rather than failing. **Settings → Reset Account** wipes it — Echoes,
-unlocks, records, Codex and options alike — behind a two-click confirmation that disarms
-itself after four seconds. **Settings → Unlock Everything** is the other direction: it grants
-the whole catalogue at no Echo cost, in one click, and disables itself once there is nothing
-left to grant. It spends nothing and loses nothing, so it needs no confirmation — Reset
-Account is the undo. Options (look sensitivity, screen shake, damage numbers) live in
-the same profile blob rather than a key of their own, so a reset genuinely takes everything.
+unlocks, records and Codex alike — behind a two-click confirmation that disarms itself after
+four seconds. **Settings → Game → Unlock All** is the other direction: it grants the whole
+catalogue at no Echo cost, behind its own two-click arm, and says so once there is nothing
+left to grant. It spends nothing and loses nothing.
+
+Settings live under a separate key, `chance-of-precipitation.settings.v1`, and are
+deliberately not part of the profile: a profile is a record of what you have earned, settings
+are how the machine in front of you is set up, and wiping one should not touch the other.
 
 The game used to be called SONEYBUN and wrote to `soneybun.profile.v1`. A profile under the
 old key is adopted the first time you load a build with the new one, and left where it is —

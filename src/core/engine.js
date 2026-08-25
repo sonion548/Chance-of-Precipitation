@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CAMERA, WORLD } from './config.js';
+import { settings } from './settings.js';
 
 const SHAKE_GAIN = 0.42;      // incoming amounts are scaled by this
 const SHAKE_CEILING = 0.62;   // and the total can never exceed this
@@ -38,7 +39,14 @@ export class Engine {
     this.sun.shadow.mapSize.set(1536, 1536);
     this.sun.shadow.camera.near = 10;
     this.sun.shadow.camera.far = 240;
-    const S = 74;
+    /* Shadow coverage.
+     *
+     * A directional shadow camera is a fixed box, and the arenas are now up to
+     * 350m across — covering all of it at this resolution would give texels the
+     * size of a chest. Instead the box tracks the player and covers what is
+     * actually on screen; anything beyond it is past the fog anyway. */
+    const S = 62;
+    this.shadowSpan = S;
     Object.assign(this.sun.shadow.camera, { left: -S, right: S, top: S, bottom: -S });
     this.sun.shadow.bias = -0.0009;
     this.sun.shadow.normalBias = 0.045;
@@ -104,6 +112,24 @@ export class Engine {
     this.scene.traverse((o) => { if (o.isMesh && o.material) o.material.needsUpdate = true; });
   }
 
+  /**
+   * Keeps the sun (and its shadow box) centred on the action.
+   *
+   * The light direction is what the theme sets; only the origin moves. Snapping
+   * to a texel-sized grid stops shadow edges crawling as the player walks,
+   * which is far more noticeable than the shadows being slightly off-centre.
+   */
+  followShadows(target) {
+    if (!target || !this.sun.castShadow) return;
+    const texel = (this.shadowSpan * 2) / this.sun.shadow.mapSize.x;
+    const sx = Math.round(target.x / texel) * texel;
+    const sz = Math.round(target.z / texel) * texel;
+    const dir = this._sunDir || (this._sunDir = new THREE.Vector3(48, 76, 34));
+    this.sun.position.set(sx + dir.x, dir.y, sz + dir.z);
+    this.sun.target.position.set(sx, 0, sz);
+    this.sun.target.updateMatrixWorld();
+  }
+
   resize() {
     const w = this.container.clientWidth || window.innerWidth;
     const h = this.container.clientHeight || window.innerHeight;
@@ -123,6 +149,7 @@ export class Engine {
     this.sun.color.setHex(theme.sunColor);
     this.sun.intensity = theme.sunIntensity ?? 1.5;
     this.sun.position.set(...theme.sunDir);
+    (this._sunDir || (this._sunDir = new THREE.Vector3())).set(...theme.sunDir);
     this.rim.color.setHex(theme.rimColor ?? 0x6688ff);
     this.rim.intensity = theme.rimIntensity ?? 0.35;
     this.renderer.toneMappingExposure = theme.exposure ?? 1.08;
@@ -137,11 +164,13 @@ export class Engine {
    * as punchy without taking the camera away from the player.
    */
   addShake(amount) {
-    // `shakeScale` is the player's own setting; zero turns the whole effect off
-    // rather than merely quieting it, which is what people who need it off want.
-    const scale = this.shakeScale ?? 1;
-    if (scale <= 0) return;
-    this.shakeAmount = Math.min(SHAKE_CEILING, this.shakeAmount + amount * SHAKE_GAIN * scale);
+    // Scaled by the player's own preference last, so somebody who finds the
+    // whole effect nauseating can turn it off without the game noticing.
+    // Zero turns it off outright rather than merely quieting it, which is what
+    // people who need it off actually want.
+    const user = settings.data.cameraShake ?? 1;
+    if (user <= 0) return;
+    this.shakeAmount = Math.min(SHAKE_CEILING, this.shakeAmount + amount * SHAKE_GAIN * user);
   }
 
   /** Applies decaying positional shake to the camera. Call after camera placement. */

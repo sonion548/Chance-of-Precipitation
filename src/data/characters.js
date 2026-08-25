@@ -91,11 +91,12 @@ export const CHARACTERS = [
     special: {
       name: 'Overcharged Fist', key: 'R', icon: '🤜', cooldown: 5.5,
       anim: 'punch',
-      desc: 'A colossal punch. Damage scales with how fast you are moving — up to 1800% at full tilt — and detonates in a shockwave.',
+      desc: 'Detonate a colossal punch and launch yourself through it, cutting down anything in the way. Damage and distance both scale with how fast you were already moving — up to 1800% at full tilt.',
       fire(ctx) {
         ctx.momentumPunch({
           baseDamage: ctx.dmg * 4.5, maxDamage: ctx.dmg * 18, radius: 9,
           reference: 30, knockback: 30, color: 0xffd24b,
+          dashSpeed: 32, dashTime: 0.24, sweepFraction: 0.45,
         });
       },
     },

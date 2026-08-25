@@ -96,8 +96,48 @@ export const BOSSES = [
     health: 3100, damage: 46, speed: 5.0, radius: 1.6, height: 4.6,
     xp: 560, gold: 300, color: 0x2a1a4a, accent: 0xd94bff, model: 'harbinger',
     ai: 'boss_harbinger', attackRange: 30, preferredRange: 14, attackCooldown: 2.0, windup: 0.5,
+    flying: true, flyHeight: 6,
     knockbackResist: 1, guaranteedDrop: true,
     lore: 'It teleports, it summons, and it is aware that you are the anomaly here.',
+  },
+
+  /* ----------------------------------------------------------------------
+     The second three.
+     ----------------------------------------------------------------------
+     Three bosses was one per stage in a fixed rotation, so by your fourth run
+     you knew what was coming before the Beacon finished charging. These are
+     built to be *different problems* rather than more health bars: one you
+     cannot hit for half the fight, one that punishes standing still, and one
+     that cannot be hurt until you deal with what it brought.
+  */
+  {
+    id: 'thornmaw', name: 'Thornmaw', cost: 0, boss: true,
+    health: 2800, damage: 38, speed: 5.6, radius: 2.0, height: 4.4,
+    xp: 500, gold: 270, color: 0x4a5a32, accent: 0xc8e04b, model: 'thornmaw',
+    ai: 'boss_thornmaw', attackRange: 9, attackCooldown: 2.4, windup: 0.7,
+    burrowTime: 4.5, surfaceTime: 9.0, eruptRadius: 9,
+    knockbackResist: 1, guaranteedDrop: true,
+    lore: 'It does not chase you across the ground. It chases you through it.',
+  },
+  {
+    id: 'fulgurant', name: 'The Fulgurant', cost: 0, boss: true,
+    health: 2500, damage: 42, speed: 7.4, radius: 1.7, height: 4.0,
+    xp: 520, gold: 285, color: 0x2c3c52, accent: 0x7fd8ff, model: 'fulgurant',
+    ai: 'boss_fulgurant', attackRange: 40, preferredRange: 22, attackCooldown: 1.5, windup: 0.4,
+    flying: true, flyHeight: 12, novaInterval: 9, novaRadius: 27,
+    knockbackResist: 1, guaranteedDrop: true,
+    lore: 'Strikes where you were going to be. Standing still is the only reliable way to be wrong.',
+  },
+  {
+    id: 'choir', name: 'The Ossuary Choir', cost: 0, boss: true,
+    health: 2400, damage: 36, speed: 4.2, radius: 1.9, height: 4.8,
+    xp: 540, gold: 295, color: 0xa89878, accent: 0xff6a9a, model: 'choir',
+    ai: 'boss_choir', attackRange: 26, preferredRange: 17, attackCooldown: 2.1, windup: 0.55,
+    // Every living chorister it has raised takes a bite out of incoming damage.
+    wardPerMinion: 0.16, wardCap: 0.72, maxMinions: 6, summonInterval: 4.5,
+    summonPool: ['husk', 'spitter', 'skimmer'],
+    knockbackResist: 1, guaranteedDrop: true,
+    lore: 'It does not fight. It conducts, and it is very hard to interrupt a choir.',
   },
 ];
 
@@ -127,5 +167,24 @@ export const ELITE_AFFIXES = [
   },
 ];
 
-export const ENEMIES_BY_ID = Object.fromEntries([...ENEMIES, ...BOSSES].map((e) => [e.id, e]));
+/**
+ * The optional final fight.
+ *
+ * Kept out of BOSSES so the director can never roll it as a stage guardian —
+ * the only way to meet it is to walk through the rift on purpose. Its health is
+ * three times a normal boss before difficulty and party scaling touch it, and
+ * it fights in three escalating phases rather than one loop of patterns.
+ */
+export const FINAL_BOSS = {
+  id: 'sovereign', name: 'The Null Sovereign', cost: 0, boss: true, final: true,
+  health: 9400, damage: 62, speed: 6.2, radius: 2.1, height: 6.2,
+  xp: 2400, gold: 1200, color: 0x1a0e2c, accent: 0xff2f8f, model: 'sovereign',
+  ai: 'boss_sovereign', attackRange: 46, preferredRange: 17, attackCooldown: 1.9, windup: 0.55,
+  knockbackResist: 1, flyHeight: 4.2, guaranteedDrop: true,
+  lore: 'The thing the descent was built to keep down here. It has been waiting the whole time.',
+};
+
+export const ENEMIES_BY_ID = Object.fromEntries(
+  [...ENEMIES, ...BOSSES, FINAL_BOSS].map((e) => [e.id, e]),
+);
 export const AFFIX_BY_ID = Object.fromEntries(ELITE_AFFIXES.map((a) => [a.id, a]));

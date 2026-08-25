@@ -3,6 +3,8 @@ import { NetSession, defaultRelayUrl } from './session.js';
 import { RemotePlayer } from './remotePlayer.js';
 import { clamp01 } from '../core/mathx.js';
 import { COOP } from '../core/config.js';
+import { itemById } from '../data/items.js';
+import { characterById } from '../data/characters.js';
 
 const _v = new THREE.Vector3();
 
@@ -42,7 +44,7 @@ export class Coop {
 
     this.stateTimer = 0;
     this.snapTimer = 0;
-    this.minionTimer = 0;
+    this.petTimer = 0;
     this.damageTimer = 0;
     this.nextDropId = 1;
     this.reviveProgress = 0;
@@ -146,13 +148,15 @@ export class Coop {
       // as the stage does — it was broadcast before they connected, so without
       // it they sit in the lobby holding an arena they never entered.
       this._announceProfile();
+      this.game.chat?.system(`${this.nameOf(m?.id)} joined the descent`, '#46e0c0');
       if (this.isHost && this.runStarted) this._sendWorldTo(m.id);
     });
 
     s.on('peerLeft', (m) => {
       const remote = this.remotes.get(m.id);
       if (remote) { remote.dispose(); this.remotes.delete(m.id); }
-      this.game.minions?.dropPeer(m.id);
+      this.game.pets?.dropPeer(m.id);
+      this.game.chat?.system(`${this.nameOf(m.id)} left the descent`, '#7d89a3');
       this.lobbyProfiles.delete(m.id);
       this.game.hud?.toast('A descender disconnected', '#7d89a3');
     });
@@ -189,6 +193,8 @@ export class Coop {
     s.on('chest', (m) => { if (!this.isHost) this.game.applyChestState(m.i, m.o, m.c); });
     s.on('egg', (m) => { if (!this.isHost) this.game.applyEggState(m.i); });
     s.on('tp', (m) => { if (!this.isHost) this.game.applyTeleporterState(m); });
+    s.on('portal', (m) => { if (!this.isHost) this.game.applyPortalState(m); });
+    s.on('win', () => { if (!this.isHost) this.game.applyVictory(); });
     s.on('over', () => {
       if (this.isHost) return;
       // The run is finished, so nothing that arrives late reopens it.
@@ -202,12 +208,20 @@ export class Coop {
       const remote = this._remote(from);
       if (remote) remote.applyState(m);
     });
-    s.on('mins', (m, from) => this.game.applyRemoteMinions(from, m.l, this._remote(from)));
+    s.on('mins', (m, from) => this.game.applyRemotePets(from, m.l, this._remote(from)));
     s.on('shot', (m, from) => {
       this._remote(from)?.onShot();
       this.game.spawnRemoteShot(m);
     });
 
+    s.on('chat', (m, from) => {
+      const who = this.nameOf(from);
+      this.game.chat.chat(who, String(m.t ?? '').slice(0, 140), this.colorOf(from));
+    });
+    s.on('got', (m, from) => {
+      const item = itemById(m.i);
+      if (item) this.game.chat.itemPickup(this.nameOf(from), item, false);
+    });
     s.on('boon', (m) => { if (!this.isHost) this.game.applyBoon(m); });
 
     /* ---------------- commands, clients → host ---------------- */
@@ -272,16 +286,16 @@ export class Coop {
       this.session.send(this._statePacket());
     }
 
-    this.minionTimer -= dt;
-    if (this.minionTimer <= 0) {
-      this.minionTimer = COOP.minionInterval;
-      const mine = this.game.minions.ownedBy(this.game.player);
+    this.petTimer -= dt;
+    if (this.petTimer <= 0) {
+      this.petTimer = COOP.petInterval;
+      const mine = this.game.pets.ownedBy(this.game.player);
       if (mine.length) {
         this.session.send({
           k: 'mins',
           l: mine.map((m) => [
             m.slot, r2(m.position.x), r2(m.position.y), r2(m.position.z), r2(m.yaw),
-            m.alive ? 1 : 0, m.model.userData.accent, m._trophies || 0,
+            m.alive ? 1 : 0, m.accent, m._trophies || 0, m.species,
           ]),
         });
       }
@@ -443,12 +457,45 @@ export class Coop {
     if (tp) this.session.send({ k: 'tp', state: tp.state, charge: r2(tp.charge) });
   }
 
-  onMinionHatched() { /* covered by the minion state stream */ }
+  onPetHatched() { /* covered by the pet state stream */ }
 
   onRunOver() {
     if (!this.isHost) return;
     this.runStarted = false;
     this.session.send({ k: 'over' });
+  }
+
+  onPortalState() {
+    if (!this.isHost || !this.game.portal) return;
+    const p = this.game.portal.position;
+    this.session.send({ k: 'portal', x: r2(p.x), y: r2(p.y), z: r2(p.z) });
+  }
+
+  onVictory() { if (this.isHost) this.session.send({ k: 'win' }); }
+
+  /** Display name for a peer, falling back through everything we might know. */
+  nameOf(id) {
+    return this.lobbyProfiles.get(id)?.name
+      || this.session.peers.get(id)?.name
+      || 'Descender';
+  }
+
+  /** A peer's character accent, so the log colour-codes who is talking. */
+  colorOf(id) {
+    const charId = this.lobbyProfiles.get(id)?.character
+      || this.session.peers.get(id)?.character;
+    const accent = characterById(charId)?.accent ?? 0xdfe6f5;
+    return `#${accent.toString(16).padStart(6, '0')}`;
+  }
+
+  sendChat(text) {
+    if (!this.active) return;
+    this.session.send({ k: 'chat', t: String(text).slice(0, 140) });
+  }
+
+  announcePickup(itemId) {
+    if (!this.active) return;
+    this.session.send({ k: 'got', i: itemId });
   }
 
   /** Fires whenever the local player shoots, so teammates see tracers. */

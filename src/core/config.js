@@ -29,36 +29,59 @@ export const PLAYER = {
 
 export const CAMERA = {
   fov: 74,
-  near: 0.1,
-  far: 620,
+  // The backdrop ranges sit several arena radii out, so the far plane has to
+  // reach them. Pushing the near plane out with it keeps the depth precision
+  // roughly where it was; nothing ever gets closer than the minimum boom.
+  near: 0.2,
+  far: 3200,
   distance: 7.0,
   height: 1.40,      // pivot sits near head height so level aim hits body height
   shoulder: 1.05,
   aimDistance: 4.2,
   aimFov: 62,
-  minPitch: -1.15,
-  maxPitch: 0.95,
+  // Steeper than a boom of this length can physically swing to, because it no
+  // longer has to: looking up lifts the pivot and shortens the arm instead of
+  // burying the camera in the floor.
+  minPitch: -1.28,
+  maxPitch: 1.30,
+  // How far the pivot rises as you look up, and how far it drops looking down.
+  pitchLift: 1.45,
+  pitchDrop: 0.35,
   smoothing: 17,
   sensitivity: 0.0023,
+  // Obstruction probing. The camera is a volume, not a point: a single ray from
+  // the shoulder-offset pivot slips past anything narrower than the offset —
+  // which is every tree trunk in the game.
+  collisionRadius: 0.34,    // half-width of the probe bundle
+  collisionPad: 0.3,        // stop this far short of whatever we hit
+  minDistance: 1.55,
+  groundClearance: 0.55,   // never closer than this to whatever is underneath
+  // The body only turns to match the camera when you are doing something that
+  // needs it to. These are the two speeds it turns at.
+  bodyTurnCombat: 16,
+  bodyTurnFree: 9,
 };
 
 export const DIRECTOR = {
-  creditRateBase: 1.55,     // credits/sec at difficulty 1
+  creditRateBase: 1.72,     // credits/sec at difficulty 1
   creditRateGrowth: 0.62,   // sub-linear: volume must grow slower than player DPS
   creditCapBase: 26,        // banked credits are capped so falling behind cannot spiral
   creditCapPerDifficulty: 16,
-  activeEnemiesBase: 16,    // the population cap also ramps with difficulty
-  activeEnemiesPerDifficulty: 3.4,
+  // Population scales with the arena as well as with the difficulty: the same
+  // headcount spread over twice the ground is not the same fight, it is a
+  // walking simulator with occasional violence.
+  activeEnemiesBase: 20,    // the population cap also ramps with difficulty
+  activeEnemiesPerDifficulty: 3.8,
   waveInterval: [3.6, 6.8], // seconds between spawn attempts
-  maxActiveEnemies: 46,     // absolute ceiling
+  maxActiveEnemies: 58,     // absolute ceiling
   eliteCostMultiplier: 5.2,
   eliteHealthMultiplier: 3.6,
   eliteDamageMultiplier: 1.9,
   eliteGoldMultiplier: 2.4,
   eliteUnlockDifficulty: 1.9,
   eliteChanceMax: 0.42,
-  spawnMinDistance: 22,
-  spawnMaxDistance: 52,
+  spawnMinDistance: 24,
+  spawnMaxDistance: 64,
 };
 
 export const DIFFICULTY = {
@@ -94,6 +117,7 @@ export const ECONOMY = {
   chestCostExponent: 1.05,   // cost = base * difficulty^exp
   largeChestMult: 3.1,
   legendaryChestMult: 7.5,
+  duplicatorMult: 3.6,
   shrineCostGrowth: 1.35,
   ruinShrineMult: 2.2,       // the Shrine of Ruin is priced against a Large chest
   goldOrbLifetime: 26,
@@ -120,37 +144,20 @@ export const RARITY = {
 export const RARITY_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
 
 // Brood lizards: bought from eggs with gold, they inherit the owner's items.
-//
-// These numbers were re-cut once it became clear a lizard was priced like a
-// small item and fought like a decoration. An egg now costs roughly what a
-// chest does rather than double it, the brood is bigger, and each lizard hits
-// hard enough that three of them read as a second gun rather than as ambience.
-// The proc coefficient stayed low on purpose — see below.
-export const MINIONS = {
-  baseCap: 4,               // more from Brood Totem
-  eggBaseCost: 30,
+export const PETS = {
+  // No headcount cap: the eggs a stage puts out, and the rising price of the
+  // next one, are the limit.
+  eggBaseCost: 48,
   eggCostExponent: 1.02,    // cost = base * difficulty^exp * (1 + owned * perOwned)
-  eggCostPerOwned: 0.42,
+  eggCostPerOwned: 0.85,
   eggsPerStage: [2, 3],     // inclusive range
-  health: 0.75,             // × owner max health
-  damage: 1.35,             // × owner damage, per fireball
-  attackCooldown: 0.85,     // ÷ owner attack speed
-  attackRange: 32,
-  minRange: 4.5,            // backs off if something gets this close
-  projectileSpeed: 44,
-  splashRadius: 3.6,
-  burnDps: 0.34,            // × owner damage, per second
-  burnTime: 3.5,
-  // Proc coefficient. Low, because a fireball is an area hit and a full brood
-  // firing into a crowd resolves far more hit events per second than your gun
-  // does — at 1.0 the lizards would be procing your items harder than you are.
-  // Raised with the damage, but nowhere near proportionally.
-  proc: 0.22,
-  regen: 0.11,              // × own max health per second, out of combat
+  // Everything about a species — health, damage, reach, how it fights and what
+  // its attacks proc at — lives in data/pets.js. Only what every pet shares is
+  // here.
   followRadius: 5.0,
   leash: 30,                // teleports back past this
-  speed: 1.16,              // × owner move speed
-  reviveTime: 8,
+  reviveTime: 15,
+  regen: 0.11,              // × own max health per second, out of combat
 };
 
 /**
@@ -176,10 +183,27 @@ export const ULTIMATE = {
 // Co-op. Send rates are a compromise: high enough that a teammate strafing
 // past you does not skate, low enough that eight players on a home upload do
 // not saturate it. Everything is interpolated on the receiving side.
+/**
+ * How much harder a party makes the run.
+ *
+ * Two dials, because they are not the same problem. `difficultyPerPlayer` feeds
+ * the coefficient, so enemies get tougher and richer; the spawn dials make the
+ * arena busier. Four players with four times the DPS against one enemy at a
+ * time would be a parade, and against four times the enemies at unchanged
+ * health would be a bullet sponge convention — so both move.
+ */
+export const PARTY = {
+  difficultyPerPlayer: 0.22,   // coefficient × (1 + this × extra players)
+  creditsPerPlayer: 0.55,      // spawn budget, and the banked-credit ceiling
+  capPerPlayer: 0.55,          // simultaneous enemies
+  chestsPerPlayer: 1.6,        // more loot for more people to buy it
+  eggsPerPlayer: 0.9,
+};
+
 export const COOP = {
   stateInterval: 1 / 20,    // your own body, to everyone
   snapInterval: 1 / 15,     // the host's enemy snapshot
-  minionInterval: 1 / 10,   // your lizards, to everyone
+  petInterval: 1 / 10,   // your pets, to everyone
   damageInterval: 1 / 20,   // batched damage reports, client → host
   maxPlayers: 8,
   reviveRadius: 3.6,
@@ -209,17 +233,34 @@ export const TELEPORTER = {
   maxBossItemBonus: 2,      // ceiling on the shrine's extra items per player
 };
 
+/**
+ * The optional ending.
+ *
+ * Offered rather than imposed: the rift opens beside the Beacon from stage five
+ * onward and the descent still goes on forever if you would rather keep going.
+ */
+export const FINAL = {
+  unlockStage: 5,
+  bossHealthMult: 1.0,
+  bossHealthPerPlayer: 0.85,   // on top of the difficulty coefficient
+  directorMultiplier: 1.35,    // the sanctum keeps spawning while you fight
+};
+
 export const ECHOES = {
   perMinute: 9,
   perStage: 30,
   perKill: 0.32,
   perBoss: 45,
   firstClearBonus: 60,
+  victoryBonus: 900,          // for actually finishing it
 };
 
 export const WORLD = {
-  arenaRadius: 78,
-  wallHeight: 26,
-  fogNear: 40,
-  fogFar: 260,
+  // Fallback only: every theme names its own radius, between 148 and 176.
+  arenaRadius: 160,
+  // Not a wall any more — the height of the containment field that draws when
+  // you get near the edge. See `Arena._buildBarrier`.
+  wallHeight: 34,
+  fogNear: 60,
+  fogFar: 430,
 };

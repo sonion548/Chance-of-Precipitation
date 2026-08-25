@@ -767,3 +767,113 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: none; ba
 @media (max-width: 860px) {
   .coop-split { grid-template-columns: 1fr; }
 }
+
+/* ============================ RUN LOG / CHAT ============================ */
+#chat {
+  position: absolute; left: 22px; bottom: 150px; width: 380px;
+  display: flex; flex-direction: column; gap: 6px; pointer-events: none;
+}
+#chat-log { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow: hidden; }
+#chat.typing { pointer-events: auto; }
+#chat.typing #chat-log {
+  background: rgba(8,11,18,.62); border-left: 2px solid rgba(70,224,192,.4);
+  border-radius: 4px; padding: 7px 9px; overflow-y: auto;
+}
+.cl-row {
+  font-size: 12.5px; line-height: 1.45; color: #c3cbdb;
+  text-shadow: 0 1px 3px rgba(0,0,0,.85);
+}
+.cl-row b { font-weight: 700; }
+.cl-row i { font-style: normal; color: var(--dim); font-size: 10.5px; margin-left: 6px; }
+.cl-row.sys { font-style: italic; }
+#chat-form {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(8,11,18,.85); border: 1px solid rgba(70,224,192,.45);
+  border-radius: 5px; padding: 6px 9px;
+}
+#chat-form.hidden { display: none; }
+.cf-label { font-size: 11px; letter-spacing: .16em; color: #46e0c0; text-transform: uppercase; }
+#chat-input {
+  flex: 1; background: none; border: none; outline: none;
+  color: var(--text); font: inherit; font-size: 13.5px;
+}
+
+/* ============================================================
+   Settings
+   ============================================================ */
+.set-group { margin-bottom: 26px; }
+.set-group > .sect-label { margin-top: 0; }
+.set-note {
+  font-size: 12.5px; color: var(--dim); line-height: 1.5;
+  margin: -2px 0 12px; max-width: 62ch;
+}
+
+.set-row {
+  display: grid; grid-template-columns: 200px 1fr 74px; align-items: center;
+  gap: 16px; padding: 9px 0; border-bottom: 1px solid var(--line-soft);
+}
+.set-row > label { font-size: 13.5px; letter-spacing: 1px; color: var(--muted); }
+.set-row output { font-family: var(--mono); font-size: 14px; color: var(--accent-2); text-align: right; }
+.set-row.toggle { grid-template-columns: 200px 1fr; }
+
+input[type=range] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
+  background: var(--line); border-radius: 3px; outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 15px; height: 15px;
+  border-radius: 50%; background: var(--accent); cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(255,179,71,.16); transition: .12s;
+}
+input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+input[type=range]::-moz-range-thumb {
+  width: 15px; height: 15px; border: none; border-radius: 50%;
+  background: var(--accent); cursor: pointer;
+}
+
+.switch {
+  justify-self: start; width: 46px; height: 23px; border-radius: 12px;
+  border: 1px solid var(--line); background: #10141e; position: relative; transition: .16s;
+}
+.switch::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 17px; height: 17px;
+  border-radius: 50%; background: var(--dim); transition: .16s;
+}
+.switch.on { background: rgba(70,224,192,.16); border-color: var(--accent-2); }
+.switch.on::after { left: 24px; background: var(--accent-2); }
+
+/* controls */
+.bind-row {
+  display: grid; grid-template-columns: 1fr 128px 128px; align-items: center;
+  gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line-soft);
+}
+.bind-row > span { font-size: 13.5px; letter-spacing: 1px; color: var(--muted); }
+.bind-key {
+  font-family: var(--mono); font-size: 12.5px; padding: 7px 6px; border-radius: 5px;
+  border: 1px solid var(--line); background: #10141e; color: var(--text);
+  text-align: center; transition: .14s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bind-key:hover { border-color: var(--accent); color: var(--accent); }
+.bind-key.empty { color: var(--dim); }
+/* An action left with nothing bound still works — it just cannot be used. Say so. */
+.bind-row.unbound > span { color: var(--danger); }
+.bind-row.unbound > span::after { content: ' — unbound'; font-size: 11px; letter-spacing: 1.5px; }
+.bind-key.listening {
+  border-color: var(--accent-2); color: var(--accent-2);
+  background: rgba(70,224,192,.1); animation: bindpulse .9s ease-in-out infinite;
+}
+@keyframes bindpulse { 0%,100% { opacity: 1 } 50% { opacity: .5 } }
+
+.unlock-all {
+  display: block; width: 100%; padding: 14px 18px; border-radius: 7px;
+  border: 1px solid #6b5326; background: linear-gradient(90deg, rgba(255,179,71,.14), rgba(255,179,71,.03));
+  color: var(--accent); font-size: 14px; letter-spacing: 2.5px; text-transform: uppercase; transition: .16s;
+}
+.unlock-all:hover { background: linear-gradient(90deg, rgba(255,179,71,.28), rgba(255,179,71,.06)); border-color: var(--accent); }
+.unlock-all.armed { border-color: var(--danger); color: #ff8f9a; background: rgba(255,77,94,.09); }
+.unlock-all.done { border-color: var(--hp); color: var(--hp); background: rgba(75,224,138,.08); cursor: default; }
+
+@media (max-width: 700px) {
+  .set-row { grid-template-columns: 130px 1fr 56px; gap: 10px; }
+  .bind-row { grid-template-columns: 1fr 96px 96px; }
+}

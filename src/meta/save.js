@@ -29,11 +29,6 @@ function freshProfile() {
     lastLobbyCode: '',
     // Player-facing options. Kept in the profile rather than in their own key
     // so a wipe takes them with it — "reset account" has to mean all of it.
-    settings: {
-      sensitivity: 1,        // × the base look sensitivity
-      screenShake: 1,        // × engine shake
-      damageNumbers: true,
-    },
     stagesEverCleared: {},        // stageIndex -> true (for first-clear bonuses)
     stats: {
       runs: 0,
@@ -171,14 +166,6 @@ export class Profile {
 
   setRunMode(id) { this.data.runMode = id; this.save(); }
 
-  /** Writes one option and persists. Unknown keys are ignored on purpose. */
-  setSetting(key, value) {
-    if (!(key in this.data.settings)) return false;
-    this.data.settings[key] = value;
-    this.save();
-    return true;
-  }
-
   setPlayerName(name) { this.data.playerName = String(name).slice(0, 18); this.save(); }
   setLastLobbyCode(code) { this.data.lastLobbyCode = String(code || '').toUpperCase().slice(0, 6); this.save(); }
 
@@ -210,27 +197,28 @@ export class Profile {
   }
 
   /**
-   * Grants every item, weapon and character at once.
+   * Hands over the entire catalogue at once.
    *
-   * Echoes are deliberately left alone: this hands over the catalogue, not the
-   * currency, so the counter still reads as what you actually earned. Returns
-   * how many things were newly unlocked, which is the only interesting thing to
-   * say about it afterwards.
+   * Deliberately offered, and deliberately not free of consequence: the Sanctum
+   * exists so that a long campaign slowly widens the pool, and some people do
+   * not want that campaign — they want the game the campaign is protecting.
+   * Making them grind for it does not make the game better, it makes it longer.
+   * Echoes are left alone, so nothing already earned is thrown away.
    */
-  unlockAll() {
-    const before = this.data.unlockedItems.length
-      + this.data.unlockedWeapons.length
-      + this.data.unlockedCharacters.length;
+  unlockEverything() {
     this.data.unlockedItems = [...new Set([...this.data.unlockedItems, ...ITEMS.map((i) => i.id)])];
     this.data.unlockedWeapons = [...new Set([...this.data.unlockedWeapons, ...WEAPONS.map((w) => w.id)])];
     this.data.unlockedCharacters = [...new Set([...this.data.unlockedCharacters, ...CHARACTERS.map((c) => c.id)])];
+    this.data.unlockedAll = true;
     this.save();
-    return this.data.unlockedItems.length
-      + this.data.unlockedWeapons.length
-      + this.data.unlockedCharacters.length - before;
+    return {
+      items: this.data.unlockedItems.length,
+      weapons: this.data.unlockedWeapons.length,
+      characters: this.data.unlockedCharacters.length,
+    };
   }
 
-  /** True once there is nothing left to unlock. */
+  /** True when there is nothing left in the Sanctum to buy. */
   get everythingUnlocked() {
     return this.data.unlockedItems.length >= ITEMS.length
       && this.data.unlockedWeapons.length >= WEAPONS.length

@@ -1,4 +1,4 @@
-import { RARITY_TABLES, RARITY, RARITY_ORDER, ECONOMY, MINIONS } from '../core/config.js';
+import { RARITY_TABLES, RARITY, RARITY_ORDER, ECONOMY, PETS } from '../core/config.js';
 import { availableItemPool } from '../meta/progression.js';
 
 /**
@@ -62,21 +62,39 @@ export function rollItem(rng, tableName, luck, profileData) {
 }
 
 /**
- * Egg price. Scales with difficulty like a chest, and again with how many
- * lizards you already own — the third one should be a real decision against a
- * Large chest, not an afterthought.
+ * Egg price.
+ *
+ * Fixed the moment the stage is built, from the difficulty coefficient at that
+ * moment, and never touched again until the next stage. It used to be
+ * recalculated every time you walked up to one, against how many lizards you
+ * were holding — which meant the number on the prompt changed while you were
+ * running back to it with the gold, and buying the cheap egg made the one you
+ * were saving for more expensive. Pricing the whole clutch up front turns a row
+ * of eggs into a shopping list you can actually plan against.
+ *
+ * `sequence` is the egg's position in the stage's clutch, so the second and
+ * third are still dearer than the first — that pressure was always the point,
+ * it just has to be legible from the start rather than applied behind you.
  */
-export function eggCost(difficulty, owned) {
-  const base = MINIONS.eggBaseCost * Math.pow(difficulty, MINIONS.eggCostExponent);
-  return Math.max(1, Math.round(base * (1 + owned * MINIONS.eggCostPerOwned)));
+export function eggCost(difficulty, sequence = 0) {
+  const base = PETS.eggBaseCost * Math.pow(difficulty, PETS.eggCostExponent);
+  return Math.max(1, Math.round(base * (1 + sequence * PETS.eggCostPerOwned)));
 }
 
 /** Interactable cost scales with the difficulty coefficient, matching enemy gold. */
 export function chestCost(kind, difficulty) {
   const base = ECONOMY.chestBaseCost * Math.pow(difficulty, ECONOMY.chestCostExponent);
   const mult = {
-    chest: 1, large: ECONOMY.largeChestMult, legendary: ECONOMY.legendaryChestMult,
-    shrine: 0.7, ruin: ECONOMY.ruinShrineMult,
+    chest: 1,
+    large: ECONOMY.largeChestMult,
+    legendary: ECONOMY.legendaryChestMult,
+    shrine: 0.7,
+    ruin: ECONOMY.ruinShrineMult,
+    // A duplicator is not a roll — it is a guaranteed extra stack of something
+    // you have already decided you want, so it is priced above a Large chest.
+    duplicator: ECONOMY.duplicatorMult,
+    // The altar, the cache and the forge are not bought with gold at all.
+    altar: 0, cache: 0, forge: 0,
   }[kind] ?? 1;
   return Math.max(1, Math.round(base * mult));
 }

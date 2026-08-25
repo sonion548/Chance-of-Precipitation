@@ -3,6 +3,7 @@ import { RARITY } from '../core/config.js';
 import { formatTime, formatNumber, clamp01 } from '../core/mathx.js';
 import { itemDescription } from '../data/items.js';
 import { itemIconDataURL } from '../data/itemArt.js';
+import { settings, codeShort } from '../core/settings.js';
 
 const _v = new THREE.Vector3();
 
@@ -90,11 +91,17 @@ export class HUD {
   // ------------------------------------------------------------------ setup
   buildAbilities(weapon, character) {
     this.el.abilities.innerHTML = '';
+    // Read the actual bindings rather than printing the defaults. Somebody who
+    // moved their special onto a thumb button should see the thumb button.
+    const shown = (action, fallback) => {
+      const code = settings.bindingsFor(action)[0];
+      return code ? codeShort(code) : fallback;
+    };
     const defs = [
-      { key: 'M1', icon: weapon.primary.icon, name: weapon.primary.name, kind: 'primary' },
-      { key: 'Q', icon: weapon.secondary.icon, name: weapon.secondary.name, kind: 'secondary' },
-      { key: 'SHIFT', icon: character?.utility.icon ?? '⇢', name: character?.utility.name ?? 'Dash', kind: 'utility' },
-      { key: 'R', icon: character?.special.icon ?? '★', name: character?.special.name ?? 'Special', kind: 'special' },
+      { key: shown('primary', 'M1'), icon: weapon.primary.icon, name: weapon.primary.name, kind: 'primary' },
+      { key: shown('secondary', 'Q'), icon: weapon.secondary.icon, name: weapon.secondary.name, kind: 'secondary' },
+      { key: shown('utility', 'SHIFT'), icon: character?.utility.icon ?? '⇢', name: character?.utility.name ?? 'Dash', kind: 'utility' },
+      { key: shown('special', 'R'), icon: character?.special.icon ?? '★', name: character?.special.name ?? 'Special', kind: 'special' },
     ];
     // The ultimate reads differently from the other four: its mask is a meter
     // filling up, not a cooldown draining, so it gets its own slot styling.
@@ -325,7 +332,7 @@ export class HUD {
    * existing nodes, because this runs every frame.
    */
   _updateBrood(p) {
-    const mine = this.game.minions?.ownedBy(p) || [];
+    const mine = this.game.pets?.ownedBy(p) || [];
     const el = this.el.brood;
     if (!mine.length) {
       if (!el.classList.contains('hidden')) { el.classList.add('hidden'); el.innerHTML = ''; this._broodCount = 0; }
@@ -416,7 +423,7 @@ export class HUD {
   }
 
   damageNumber(worldPos, amount, isCrit) {
-    if (amount < 0.5 || this.showDamageNumbers === false) return;
+    if (amount < 0.5 || settings.data.damageNumbers === false) return;
     this._addFloater(worldPos, formatNumber(amount), isCrit ? 'crit' : '', isCrit ? '#ffb347' : '#ffffff', {
       rise: isCrit ? 3.4 : 2.6, life: isCrit ? 1.0 : 0.8,
     });

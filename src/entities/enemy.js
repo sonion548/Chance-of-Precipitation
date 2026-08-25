@@ -8,6 +8,7 @@ import { ENEMIES_BY_ID, AFFIX_BY_ID } from '../data/enemies.js';
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _dir = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
 
 export class Enemy {
   constructor(game, def, position, opts = {}) {
@@ -45,6 +46,12 @@ export class Enemy {
     this.statuses = new Map();
     this.dead = false;
     this.hitFlash = 0;
+    // Boss state that the shared paths read: a damage ward maintained by
+    // whatever is protecting this body, and whether it is currently under the
+    // ground (which is also what makes it unhittable).
+    this.ward = 0;
+    this.burrowed = false;
+    this.minions = null;
     this.spawnTime = 0;
     this.volleyLeft = 0;
     this.volleyTimer = 0;
@@ -146,6 +153,10 @@ export class Enemy {
     if (this.dead) return 0;
 
     let dmg = amount;
+    // A warded boss is protected by something else that is still alive. The
+    // reduction is stored by the AI that maintains it, so nothing here needs to
+    // know what a chorister is.
+    if (this.ward > 0) dmg *= 1 - this.ward;
     const sunder = this.statuses.get('sunder');
     let armor = 0;
     if (sunder) { armor -= sunder.data.armor ?? 0; dmg *= 1 + (sunder.data.vuln ?? 0); }
@@ -241,7 +252,32 @@ export class Enemy {
     if (pulled) this._tickPull(dt, pulled);
 
     // Physics
-    const flying = this.def.ai === 'flyer' || this.def.model === 'leviathan' || this.def.model === 'harbinger' || this.def.model === 'warden';
+    // Whether a body flies is a property of the body, not something the physics
+    // should be recognising by name. The model list is kept as a fallback for
+    // the definitions that predate the flag.
+    const flying = this.def.flying || this.def.ai === 'flyer'
+      || this.def.model === 'leviathan' || this.def.model === 'harbinger'
+      || this.def.model === 'warden' || this.def.model === 'sovereign';
+
+    /* Burrowing.
+     *
+     * A body under the ground is simply a body whose capsule is under the
+     * ground — every raycast in the game then misses it for free, with no
+     * "untargetable" flag for anything to forget to check. It moves on rails
+     * while it is down there, because there is nothing to collide with. */
+    if (this.burrowed) {
+      this.velocity.y = 0;
+      this.position.x += this.velocity.x * dt;
+      this.position.z += this.velocity.z * dt;
+      const limit = world.radius - this.radius - 1;
+      const d = Math.hypot(this.position.x, this.position.z);
+      if (d > limit) { this.position.x *= limit / d; this.position.z *= limit / d; }
+      this.position.y = world.groundHeightAt(this.position.x, this.position.z) - this.def.height - 1.2;
+      this._eliteTick(dt, player);
+      this._updateModel(dt, player);
+      return;
+    }
+
     if (flying) {
       const targetY = world.groundHeightAt(this.position.x, this.position.z) + (this.def.flyHeight ?? 6);
       // Hold altitude firmly so flyers track a predictable horizontal plane.
@@ -373,6 +409,10 @@ export class Enemy {
       case 'boss_colossus': return this._aiColossus(dt, player, world, distXZ);
       case 'boss_leviathan': return this._aiLeviathan(dt, player, world, distXZ);
       case 'boss_harbinger': return this._aiHarbinger(dt, player, world, distXZ);
+      case 'boss_thornmaw': return this._aiThornmaw(dt, player, world, distXZ);
+      case 'boss_fulgurant': return this._aiFulgurant(dt, player, world, distXZ);
+      case 'boss_choir': return this._aiChoir(dt, player, world, distXZ);
+      case 'boss_sovereign': return this._aiSovereign(dt, player, world, distXZ);
       default: return this._aiMelee(dt, player, world, distXZ);
     }
   }
@@ -416,7 +456,7 @@ export class Enemy {
       player.applyImpulse(_dir.multiplyScalar(4).setY(3));
     }
     // Anything else standing inside the swing eats it too.
-    for (const m of this.game.minions?.inRadius(this.position, range + 1.2) || []) {
+    for (const m of this.game.pets?.inRadius(this.position, range + 1.2) || []) {
       m.takeDamage(this.damage * 0.7, { source: this.def.name });
     }
   }
@@ -717,6 +757,431 @@ export class Enemy {
     }
   }
 
+  /**
+   * The Null Sovereign — the optional fight at the bottom.
+   *
+   * Three phases rather than one rotation of patterns, because the difference
+   * between a long boss and a hard one is whether it changes its mind. Each
+   * threshold cuts the pause between attacks and adds a pattern rather than
+   * replacing one, so the last third is everything at once.
+   *
+   *   Above 66%  barrage, summons
+   *   Above 33%  + rifts (expanding hazard rings) and blink-slams
+   *   Below 33%  + a sweeping wall of fire, and no time to breathe
+   */
+  /**
+   * Thornmaw: half the fight happens underground.
+   *
+   * Surfaced it is an ordinary heavy melee boss with a spread attack, and it is
+   * the only time you can hurt it. Then it goes under, becomes untouchable, and
+   * tracks you at nearly double speed while pushing a line of root swells up
+   * behind it — so the safe answer is to keep moving and watch the ground, and
+   * the greedy answer is to stand where it will surface and be ready.
+   */
+  _aiThornmaw(dt, player, world, dist) {
+    const def = this.def;
+    this.phaseTimer = (this.phaseTimer ?? def.surfaceTime) - dt;
+
+    if (this.burrowed) {
+      // Chase hard, and leave a trail that erupts a moment later.
+      _v.copy(player.position).sub(this.position).setY(0);
+      const len = _v.length() || 1;
+      _v.divideScalar(len).multiplyScalar(def.speed * 1.9);
+      this.velocity.x = damp(this.velocity.x, _v.x, 5, dt);
+      this.velocity.z = damp(this.velocity.z, _v.z, 5, dt);
+
+      this.trailTimer = (this.trailTimer ?? 0) - dt;
+      if (this.trailTimer <= 0) {
+        this.trailTimer = 0.34;
+        const at = _v2.set(this.position.x, world.groundHeightAt(this.position.x, this.position.z), this.position.z);
+        this.game.fx.ring(at, 0.4, 2.4, def.accent, 0.5, 0.6);
+        this.game.spawnHazard(at.clone(), {
+          radius: 3.0, damage: this.damage * 0.55, delay: 0.7, color: def.accent,
+        });
+      }
+
+      if (this.phaseTimer <= 0) this._thornmawSurface(world, player);
+      return;
+    }
+
+    this._faceTarget(dt, player.position, 3.2);
+    if (this.state === 'windup') {
+      this.windupTimer -= dt;
+      this.velocity.x *= 0.85; this.velocity.z *= 0.85;
+      if (this.windupTimer <= 0) {
+        this.state = 'chase';
+        if (this.pendingAttack === 'bite' && dist < def.attackRange + 2) {
+          this.game.fx.explosion(this.center, 5, def.accent, 0.9);
+          if (dist < def.attackRange + 2) player.takeDamage(this.damage * 1.5, { source: def.name });
+        } else {
+          // A fan of thorns, wide enough that backing straight up does not work.
+          for (let i = -3; i <= 3; i++) {
+            this.game.spawnEnemyProjectile(this, {
+              speed: 40, radius: 0.34, gravity: -6, color: def.accent, splash: 2.6,
+              damage: this.damage * 0.6, target: player.position, spread: 0, lead: 0.2,
+              direction: _v.copy(player.position).sub(this.center).normalize()
+                .applyAxisAngle(_up, i * 0.14),
+            });
+          }
+        }
+      }
+      return;
+    }
+
+    if (dist > def.attackRange - 2) this._steer(dt, player.position, 1, world);
+    else { this.velocity.x *= 0.9; this.velocity.z *= 0.9; }
+
+    if (this.attackTimer <= 0) {
+      this.state = 'windup';
+      this.windupTimer = def.windup;
+      this.attackTimer = def.attackCooldown;
+      this.pendingAttack = dist < def.attackRange ? 'bite' : 'thorns';
+    }
+    if (this.phaseTimer <= 0) this._thornmawBurrow(world);
+  }
+
+  _thornmawBurrow(world) {
+    const def = this.def;
+    this.burrowed = true;
+    this.phaseTimer = def.burrowTime;
+    this.state = 'chase';
+    const at = _v.set(this.position.x, world.groundHeightAt(this.position.x, this.position.z), this.position.z);
+    this.game.fx.explosion(at, 7, def.accent, 1.1);
+    this.game.fx.ring(at, 0.5, 8, def.accent, 0.6, 0.9);
+    this.game.engine.addShake(0.3);
+  }
+
+  _thornmawSurface(world, player) {
+    const def = this.def;
+    this.burrowed = false;
+    this.phaseTimer = def.surfaceTime;
+    this.attackTimer = 0.6;
+    this.velocity.set(0, 0, 0);
+    this.position.y = world.groundHeightAt(this.position.x, this.position.z);
+    const r = def.eruptRadius;
+    this.game.fx.explosion(this.position, r, def.accent, 1.8);
+    this.game.fx.ring(this.position, 1, r * 1.4, def.accent, 0.7, 1);
+    this.game.engine.addShake(0.65);
+    for (const member of this.game.party()) {
+      const d = Math.hypot(member.position.x - this.position.x, member.position.z - this.position.z);
+      if (d > r) continue;
+      member.takeDamage(this.damage * 1.3, { source: def.name });
+      member.applyImpulse?.(new THREE.Vector3(0, 9, 0));
+    }
+  }
+
+  /**
+   * The Fulgurant: it shoots where you are going, not where you are.
+   *
+   * Strikes land on a delay at a lead-predicted point, so the way through is to
+   * keep changing direction rather than to keep running. The periodic nova is
+   * the opposite instruction — everything inside a very large radius, telegraphed
+   * for long enough to get out but only if you start immediately.
+   */
+  _aiFulgurant(dt, player, world, dist) {
+    const def = this.def;
+    this._faceTarget(dt, player.position, 4);
+
+    // Orbits, rather than closing: it wants to be at strike range, always moving.
+    const t = this.game.time * 0.5 + (this.orbitPhase ??= Math.random() * 6.28);
+    _v2.set(Math.cos(t) * def.preferredRange, 0, Math.sin(t) * def.preferredRange).add(player.position);
+    this._steer(dt, _v2, 1, world);
+
+    this.novaTimer = (this.novaTimer ?? def.novaInterval) - dt;
+    if (this.novaTimer <= 0 && this.state !== 'windup') {
+      this.state = 'windup';
+      this.windupTimer = 1.9;
+      this.pendingAttack = 'nova';
+      this.novaTimer = def.novaInterval;
+      this.game.fx.ring(this.position, 2, def.novaRadius, def.accent, 1.9, 0.75);
+      this.game.ui.toast('THE FULGURANT IS CHARGING', '#7fd8ff');
+    }
+
+    if (this.state === 'windup') {
+      this.windupTimer -= dt;
+      if (this.windupTimer <= 0) {
+        this.state = 'chase';
+        const at = this.center.clone();
+        this.game.fx.explosion(at, def.novaRadius * 0.5, def.accent, 2.2);
+        this.game.fx.ring(at, 1, def.novaRadius, 0xffffff, 0.45, 1);
+        this.game.engine.addShake(0.8);
+        for (const member of this.game.party()) {
+          const d = member.position.distanceTo(this.position);
+          if (d > def.novaRadius) continue;
+          // Falls off hard, so being at the rim when it lands is survivable.
+          const k = 1 - (d / def.novaRadius) * 0.7;
+          member.takeDamage(this.damage * 2.2 * k, { source: def.name });
+          this.game.fx.lightning(at, member.chestPosition ?? member.position, def.accent, 0.3, 7);
+        }
+      }
+      return;
+    }
+
+    if (this.attackTimer > 0) return;
+    this.attackTimer = def.attackCooldown;
+    // Two strikes: one where they are, one where they are heading.
+    for (const lead of [0.1, 0.75]) {
+      const at = _v.copy(player.position).addScaledVector(player.velocity, lead);
+      at.y = world.groundHeightAt(at.x, at.z);
+      const mark = at.clone();
+      this.game.fx.ring(mark, 0.4, 4.2, def.accent, 0.85, 0.7);
+      this.game.spawnHazard(mark, {
+        radius: 4.2, damage: this.damage * 0.9, delay: 0.85, color: def.accent,
+      });
+    }
+  }
+
+  /**
+   * The Ossuary Choir: you cannot hurt it while its choir is standing.
+   *
+   * Every chorister it raises takes another sixteen percent off incoming damage,
+   * up to nearly three quarters. Ignoring the adds and focusing the boss is the
+   * obvious play and the wrong one — this is the only fight in the game that
+   * asks you to stop shooting the health bar.
+   */
+  _aiChoir(dt, player, world, dist) {
+    const def = this.def;
+    this._faceTarget(dt, player.position, 3);
+
+    // Recount the living choir a few times a second and set the ward from it.
+    this.wardTimer = (this.wardTimer ?? 0) - dt;
+    if (this.wardTimer <= 0) {
+      this.wardTimer = 0.25;
+      this.minions = (this.minions || []).filter((m) => m && !m.dead);
+      this.ward = Math.min(def.wardCap, this.minions.length * def.wardPerMinion);
+    }
+
+    // Keeps its distance; the choir is what comes to you.
+    const want = def.preferredRange;
+    if (dist < want - 4) {
+      _v2.copy(this.position).sub(player.position).setY(0).normalize()
+        .multiplyScalar(want).add(player.position);
+      this._steer(dt, _v2, 1, world);
+    } else if (dist > want + 6) {
+      this._steer(dt, player.position, 1, world);
+    } else {
+      this.velocity.x *= 0.9; this.velocity.z *= 0.9;
+    }
+
+    this.summonTimer = (this.summonTimer ?? 1.5) - dt;
+    if (this.summonTimer <= 0 && (this.minions?.length ?? 0) < def.maxMinions) {
+      this.summonTimer = def.summonInterval;
+      const count = Math.min(2, def.maxMinions - (this.minions?.length ?? 0));
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const at = _v.set(
+          this.position.x + Math.cos(a) * 4.5, 0, this.position.z + Math.sin(a) * 4.5,
+        );
+        at.y = world.groundHeightAt(at.x, at.z);
+        const id = this.game.rng.pick(def.summonPool);
+        const m = this.game.enemies.spawn(id, at.clone(), { difficulty: this.game.director.difficulty });
+        if (m) {
+          (this.minions ||= []).push(m);
+          this.game.fx.ring(at, 0.4, 3, def.accent, 0.5, 0.8);
+          this.game.fx.beam(this.center, at.clone().setY(at.y + 1), def.accent, 0.4, 0.1);
+        }
+      }
+      return;
+    }
+
+    if (this.attackTimer > 0) return;
+    this.attackTimer = def.attackCooldown;
+    // Shrapnel: a tight cone, so there is a wrong side to be standing on.
+    const base = _v.copy(player.position).sub(this.center).normalize();
+    for (let i = -4; i <= 4; i++) {
+      this.game.spawnEnemyProjectile(this, {
+        speed: 46, radius: 0.26, gravity: -3, color: def.accent,
+        damage: this.damage * 0.42, life: 3,
+        direction: base.clone().applyAxisAngle(_up, i * 0.075),
+      });
+    }
+  }
+
+  _aiSovereign(dt, player, world, dist) {
+    const frac = this.health / this.maxHealth;
+    const phase = frac > 0.66 ? 1 : frac > 0.33 ? 2 : 3;
+    if (phase !== this.phase) {
+      this.phase = phase;
+      this._sovereignPhaseShift(phase, player);
+    }
+    this._faceTarget(dt, player.position, 3.6);
+
+    // Keeps its distance, but never stops moving — it drifts around the ring.
+    const pref = this.def.preferredRange;
+    const orbit = this.game.time * (0.22 + phase * 0.1) * (this.orbitDir ?? 1);
+    _v2.set(
+      player.position.x + Math.cos(orbit) * pref,
+      this.position.y,
+      player.position.z + Math.sin(orbit) * pref,
+    );
+    this._steer(dt, _v2, phase >= 3 ? 1.25 : 1, world);
+
+    if (this.state === 'windup') {
+      this.windupTimer -= dt;
+      this.velocity.x *= 0.86;
+      this.velocity.z *= 0.86;
+      if (this.windupTimer <= 0) {
+        this.state = 'chase';
+        this._sovereignRelease(player, world);
+      }
+      return;
+    }
+    if (this.volleyLeft > 0) {
+      this.volleyTimer -= dt;
+      if (this.volleyTimer <= 0) {
+        this.volleyTimer = 0.14;
+        this.volleyLeft--;
+        this._sovereignBarrage(player, 1);
+      }
+      return;
+    }
+
+    if (this.attackTimer > 0) return;
+    // Faster and faster as it loses health.
+    this.attackTimer = this.def.attackCooldown * (phase === 1 ? 1 : phase === 2 ? 0.78 : 0.56);
+    this.state = 'windup';
+    this.windupTimer = this.def.windup * (phase === 3 ? 0.7 : 1);
+    this.pendingAttack = this._sovereignPick(phase, dist);
+    this._sovereignTelegraph(this.pendingAttack, player);
+  }
+
+  _sovereignPick(phase, dist) {
+    const pool = ['barrage', 'summon'];
+    if (phase >= 2) pool.push('rift', 'slam');
+    if (phase >= 3) pool.push('sweep', 'rift', 'barrage');
+    if (dist < 9) pool.push('slam');
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    // Never the same thing twice running; a boss that repeats reads as stuck.
+    return pick === this.lastAttack && pool.length > 1 ? this._sovereignPick(phase, dist) : pick;
+  }
+
+  _sovereignPhaseShift(phase, player) {
+    this.orbitDir = Math.random() < 0.5 ? 1 : -1;
+    if (phase === 1) return;
+    this.attackTimer = 0.9;
+    this.invulnFlash = 1;
+    this.game.fx.explosion(this.center, 16, this.def.accent, 2.2);
+    this.game.fx.ring(this.position, 2, 26, this.def.accent, 0.9, 1);
+    this.game.engine.addShake(0.9);
+    this.game.ui.toast(phase === 2 ? 'THE SOVEREIGN SHEDS ITS SHELL' : 'THE SOVEREIGN UNRAVELS', '#ff2f8f');
+    this.game.chat?.system(phase === 2 ? 'The Sovereign sheds its shell.' : 'The Sovereign unravels.', '#ff2f8f');
+    // A ring of fire on every phase change: get out of the middle.
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2;
+      this.game.spawnHazard(
+        _v.set(this.position.x + Math.cos(a) * 11, this.position.y, this.position.z + Math.sin(a) * 11),
+        { radius: 4.2, damage: this.damage * 0.7, delay: 0.7, color: this.def.accent },
+      );
+    }
+  }
+
+  _sovereignTelegraph(kind, player) {
+    const c = this.def.accent;
+    if (kind === 'slam') this.game.fx.ring(player.position, 1, 9, c, this.def.windup, 0.6);
+    else if (kind === 'sweep') this.game.fx.ring(this.position, 2, 30, c, this.def.windup, 0.5);
+    else this.game.fx.glow(this.center, { color: c, size: 4, life: this.def.windup, grow: 2.4 });
+  }
+
+  _sovereignRelease(player, world) {
+    this.lastAttack = this.pendingAttack;
+    switch (this.pendingAttack) {
+      case 'summon': return this._sovereignSummon(player, world);
+      case 'rift': return this._sovereignRift(player);
+      case 'slam': return this._sovereignSlam(player);
+      case 'sweep': return this._sovereignSweep(player);
+      default:
+        this.volleyLeft = this.phase >= 3 ? 9 : this.phase === 2 ? 6 : 4;
+        this.volleyTimer = 0;
+        return null;
+    }
+  }
+
+  /** A spiral of shots, so standing still is never the answer. */
+  _sovereignBarrage(player, count) {
+    const spokes = this.phase >= 3 ? 9 : 7;
+    this.spiral = (this.spiral ?? 0) + 0.42;
+    for (let i = 0; i < spokes; i++) {
+      const a = this.spiral + (i / spokes) * Math.PI * 2;
+      this.game.spawnEnemyProjectile(this, {
+        speed: 27 + this.phase * 3, radius: 0.38, gravity: 0, color: this.def.accent,
+        damage: this.damage * 0.45,
+        direction: _v.set(Math.cos(a), -0.05, Math.sin(a)).clone(),
+      });
+    }
+    void count;
+  }
+
+  _sovereignSummon(player, world) {
+    const room = DIRECTOR.maxActiveEnemies - this.game.enemies.aliveCount;
+    const want = Math.min(room, this.phase >= 3 ? 6 : 4);
+    for (let i = 0; i < want; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const p = this.position.clone();
+      p.x += Math.cos(a) * 7;
+      p.z += Math.sin(a) * 7;
+      p.y = world.groundHeightAt(p.x, p.z);
+      const kind = this.phase >= 2 && Math.random() < 0.45 ? 'charger' : 'husk';
+      this.game.enemies.spawn(kind, p, {
+        difficulty: this.game.director.difficulty * 0.8,
+        elite: this.phase >= 3 && Math.random() < 0.4 ? 'voidtouched' : undefined,
+      });
+      this.game.fx.explosion(p, 4, this.def.accent, 0.7);
+    }
+  }
+
+  /** Expanding rings of ground fire centred on the party. */
+  _sovereignRift(player) {
+    const rings = this.phase >= 3 ? 4 : 3;
+    for (let r = 0; r < rings; r++) {
+      const radius = 7 + r * 6;
+      const count = 6 + r * 3;
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2 + r * 0.4;
+        this.game.spawnHazard(
+          _v.set(player.position.x + Math.cos(a) * radius, player.position.y, player.position.z + Math.sin(a) * radius),
+          { radius: 3.6, damage: this.damage * 0.6, delay: 0.5 + r * 0.35, color: 0xd94bff },
+        );
+      }
+    }
+  }
+
+  /** Blinks onto whoever it is fighting and lands on them. */
+  _sovereignSlam(player) {
+    const a = Math.random() * Math.PI * 2;
+    this.position.set(
+      player.position.x + Math.cos(a) * 5,
+      player.position.y + 6,
+      player.position.z + Math.sin(a) * 5,
+    );
+    this.game.fx.explosion(this.center, 8, this.def.accent, 1.4);
+    this.game.engine.addShake(0.5);
+    const d = Math.hypot(player.position.x - this.position.x, player.position.z - this.position.z);
+    if (d < 9) player.takeDamage(this.damage * 1.5, { source: this.def.name });
+    for (let i = 0; i < 8; i++) {
+      const ang = (i / 8) * Math.PI * 2;
+      this.game.spawnHazard(
+        _v.set(this.position.x + Math.cos(ang) * 6, player.position.y, this.position.z + Math.sin(ang) * 6),
+        { radius: 3.4, damage: this.damage * 0.8, delay: 0.45, color: this.def.accent },
+      );
+    }
+  }
+
+  /** A wall of fire that crosses the whole arena. Phase three only. */
+  _sovereignSweep(player) {
+    const base = Math.atan2(player.position.x - this.position.x, player.position.z - this.position.z);
+    for (let step = 0; step < 9; step++) {
+      const reach = 6 + step * 4.5;
+      for (let i = -3; i <= 3; i++) {
+        const a = base + i * 0.24;
+        this.game.spawnHazard(
+          _v.set(this.position.x + Math.sin(a) * reach, this.position.y, this.position.z + Math.cos(a) * reach),
+          { radius: 3.6, damage: this.damage * 0.75, delay: 0.35 + step * 0.11, duration: 1.2, color: 0xff2f8f, lingering: true },
+        );
+      }
+    }
+    this.game.engine.addShake(0.4);
+  }
+
   _fireProjectile(player, isVolley = false) {
     const p = this.def.projectile;
     if (!p) return;
@@ -800,6 +1265,57 @@ export class Enemy {
       if (ud.core) ud.core.rotation.y += dt * 1.1;
     }
     if (ud.rings) { ud.rings.rotation.y += dt * 0.9; ud.rings.rotation.x += dt * 0.4; }
+
+    /* ---- the second three bosses ---- */
+    if (ud.stalkSegments) {
+      // Thornmaw undulates along its length, with the wave running up the stalk
+      // so the maw is always the last thing to move. Faster while burrowed,
+      // which is only visible for the second it takes to break the surface.
+      const t = this.game.time * (this.burrowed ? 5 : 2.2);
+      ud.stalkSegments.forEach((seg, i) => {
+        const phase = t - i * 0.55;
+        seg.rotation.x = damp(seg.rotation.x, Math.sin(phase) * 0.13, 12, dt);
+        seg.rotation.z = damp(seg.rotation.z, Math.cos(phase * 0.8) * 0.1, 12, dt);
+      });
+      if (ud.petals) {
+        // Wide open through the windup, snapping shut on the bite.
+        const open = this.state === 'windup'
+          ? 1.15 * (1 - clamp01(this.windupTimer / Math.max(0.01, this.def.windup)))
+          : 0.25 + Math.sin(this.game.time * 1.3) * 0.08;
+        for (const petal of ud.petals) {
+          petal.rotation.x = damp(petal.rotation.x, -0.5 - open, 14, dt);
+        }
+      }
+    }
+    if (ud.ringA) {
+      ud.ringA.rotation.y += dt * 1.3;
+      ud.ringB.rotation.y -= dt * 2.1;
+      ud.ringB.rotation.x += dt * 0.7;
+      const charging = this.state === 'windup' ? 1 : 0;
+      const beat = 1 + Math.sin(this.game.time * (charging ? 18 : 3)) * (charging ? 0.3 : 0.08);
+      if (ud.heart) ud.heart.scale.setScalar(beat);
+      if (ud.arms) {
+        ud.arms.forEach((arm, i) => {
+          arm.rotation.x = Math.sin(this.game.time * 1.6 + i * 2.1) * 0.18;
+          arm.rotation.z = Math.cos(this.game.time * 1.4 + i * 2.1) * 0.18;
+        });
+      }
+    }
+    if (ud.lanterns) {
+      // One lantern lit per living chorister: the ward, made legible. A player
+      // who never reads the tooltip can still see that the boss is protected
+      // and count how much of it is left.
+      ud.lanternRing.rotation.y += dt * 0.5;
+      const lit = this.minions ? this.minions.length : 0;
+      ud.lanterns.forEach((lantern, i) => {
+        const on = i < lit;
+        const flame = lantern.userData.flame;
+        flame.material.opacity = damp(flame.material.opacity, on ? 0.95 : 0.08, 5, dt);
+        const s = on ? 1 + Math.sin(this.game.time * 4 + i) * 0.12 : 0.5;
+        flame.scale.setScalar(damp(flame.scale.x, s, 5, dt));
+        lantern.position.y = Math.sin(this.game.time * 1.5 + i * 1.1) * 0.18;
+      });
+    }
     if (ud.tail) ud.tail.rotation.y = Math.sin(this.game.time * 3) * 0.35;
     if (ud.cannonL) {
       const aim = Math.atan2(player.position.x - this.position.x, player.position.z - this.position.z) - this.yaw;

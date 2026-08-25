@@ -12,11 +12,14 @@ elapsed time. Runs pay out **Echoes**, a meta currency that permanently widens t
 and unlocks weapons and characters. Now also playable **co-op, up to eight**.
 
 **Stack:** three.js (vendored, r169) + plain ES modules. **No build step, no bundler, no
-external assets, no dependencies** — every model, texture and icon is generated procedurally
-at runtime, and the multiplayer relay is hand-written Node.
+external assets, no dependencies** — every model, texture, icon, sound effect and note of the
+score is generated procedurally at runtime, and the multiplayer relay is hand-written Node.
+There is not a single binary in the repository.
 
-**Run it:** `npm start` → http://localhost:8080. The same command also hosts co-op on the
-same port and prints the LAN address to give friends. `npm run check` parses every module
+**Run it:** `node tools/serve.js` (or double-click `play.cmd`) → http://localhost:8080. npm is
+optional — `npm start` only forwards to that command, and there are no runtime dependencies to
+install. The server also hosts co-op on the same port and prints the LAN address to give
+friends; `MULTIPLAYER.md` covers playing with people outside your network. `npm run check` parses every module
 without a browser. Open the folder in VS Code and press **F5** to launch with the bundled
 config.
 
@@ -24,9 +27,11 @@ config.
 
 ## Controls
 
+All rebindable from Settings → Controls, onto keys or mouse buttons. Defaults:
+
 | Input | Action |
 | --- | --- |
-| `W A S D` | Move |
+| `W A S D` | Move — camera-relative, not character-relative |
 | Mouse | Look (click canvas to capture pointer) |
 | Left click | Weapon primary |
 | `Q` | Weapon secondary (hold to charge where applicable) |
@@ -34,8 +39,16 @@ config.
 | `R` | Character special |
 | `F` | Character ultimate — no cooldown; charges from kills and damage taken |
 | Right click | Aim (pulls camera in, narrows FOV) |
-| `E` | Interact — chests, shrines, brood eggs, the Beacon |
+| `E` | Interact — chests, shrines, eggs, the Beacon, the rift |
+| `Enter` | Chat, and the run log |
 | `Esc` | Pause — in co-op this only frees the mouse; the world keeps running |
+
+**The camera and the body are decoupled** (Risk of Rain 2 style). The mouse drives `camYaw`
+and `camPitch` and nothing else; `player.yaw` is the body, and it faces the travel direction
+while free-running, snapping to the camera only when the weapon has to point at the crosshair
+— firing, aiming, charging, or an ability. Anything that used `player.yaw` as "where you are
+looking" now uses `camYaw`; the rig gets both plus a `lookYaw`, and splits the difference
+across the head and chest.
 
 ---
 
@@ -45,24 +58,116 @@ config.
   Loader-alike), Wraith (glass cannon, blink), Bulwark (tank, shield charge + bastion),
   **Halcyon** (flies; low health, negative armour, slightly softer damage, impact bombs),
   **Javelin** (0-damage marking spear + a piercing dash that refunds itself on a marked hit).
-  A character sets base stats plus utility (Shift), special (R) and ultimate (F); weapons
-  are independent.
-- **Ultimates** — one per character, on `F`, with **no cooldown**. A meter fills from kills
+  A character sets base stats plus utility, special and ultimate; weapons are independent.
+- **Ultimates** — one per character, with **no cooldown**. A meter fills from kills
   (3 / 9 / 26 per normal / elite / boss) and from damage taken (0.6 per 1% of max health
   lost), plus a 0.35/s trickle; spending empties it. Tuning lives in `ULTIMATE` in
   `core/config.js`. They are meant to be run-swinging, not routine.
-- **8 weapons** — MK-4 Sidearm, Breach Scattergun, Arc Emitter, Rivet Driver, Seeker
-  Launcher, Photon Lance, Void Reaper, **Siege Gauntlets**. Tuned to near-identical
-  single-target DPS (~64–84 at base damage) so the choice is about *how* you fight. Every
-  ability names an `anim` and the rig acts it out (slash / punch / thrust / pump / lob).
-- **62 items** across 5 rarities. 34 unlocked on a fresh profile including some of every
-  tier, so all five can drop on run one. Each has a procedurally drawn icon.
-- **Brood lizards** — gold-bought minions hatched from eggs, four at base, and substantially
-  buffed: 135% of owner damage per fireball on a 0.85s cadence, 75% of owner health, cheaper
-  eggs with a gentler per-owned markup.
-- **10 enemies** (7 regular, 3 bosses) + 4 elite affixes.
-- **6 arena themes**, procedurally generated and dressed. Stage 1 (*Verdant Hollow*) is a
-  calm green meadow; the palette darkens as you descend.
+- **9 weapons** — MK-4 Sidearm, Breach Scattergun, Arc Emitter, Rivet Driver, Seeker
+  Launcher, Photon Lance, Void Reaper, **Sundered Gauntlets**, **Siege Gauntlets**. Tuned to
+  near-identical single-target DPS (~64–84 at base damage) so the choice is about *how* you
+  fight. Every ability names an `anim` and the rig acts it out (slash / punch / thrust /
+  pump / lob).
+- **Sundered Gauntlets** is the melee-only option: a ~3m punch that detonates whatever it
+  connects with for a further 120% in 5m, plus a lunge into the swing. Its secondary is a
+  ground slam whose damage and radius scale with the height you fell from, up to double.
+  Implemented as `ctx.punch()` and `ctx.groundSlam()` in `systems/combat.js`.
+- **Siege Gauntlets** is the other melee option, and reaches where the Sundered ones do not:
+  each punch is a 9m compression cone (`ctx.shockwave()`) and the secondary fires both
+  gauntlets at the floor to ride the blast straight up (`ctx.jetBoost()`), jumps refunded.
+- **81 items** across 5 rarities. 49 unlocked on a fresh profile — 19/18/6/4/2 by tier, so a
+  new account can find a Legendary. Each has a procedurally drawn icon.
+- **4 pet species** — lizard, beetle, wisp, shell — hatched from eggs with gold. No cap on
+  how many you keep; the eggs a stage puts out and the rising price are the limit.
+- **14 enemies** (7 regular, 6 stage bosses, 1 optional final boss) + 4 elite affixes. The new
+  three are **Thornmaw** (burrows; untouchable and faster underground, erupts under you),
+  **The Fulgurant** (hovers, strikes a lead-predicted point, periodic telegraphed nova) and
+  **The Ossuary Choir** (raises minions and takes 16% less damage per living one, capped at
+  72% — the lantern ring shows how much). Each arena draws its boss at random from its own
+  shortlist (`theme.bosses`), so the fight suits the place and is not the same twice.
+- **An optional ending.** From stage 5 a rift opens beside the Beacon; through it is the Null
+  Sanctum and a three-phase boss. Killing it wins the run.
+- **9 arena themes**, 148–176m radius, procedurally generated and dressed, each with its own
+  **landform**. Three are new: **Sunken Mire** (terraced shallow pans, dense reeds),
+  **Shattered Spires** (the most vertical ground in the game) and **Ossuary Flats** (near-flat,
+  pale, the longest sightlines). **The order is random per run** — see below.
+- **Four new interactables** beside the chests, each asking for something other than gold:
+  the **Blood Altar** (35% of max health for a guaranteed Uncommon+), the **Cursed Cache**
+  (free item, five-enemy ambush with an elite), the **Pattern Duplicator** (gold for +1 stack
+  of something you already carry) and the **Scrap Forge** (two Commons for one better, twice).
+  All four are `Chest` kinds, so they replicate, save and prompt for free.
+- **The Shrine of Ruin**, from stage two, beside the Shrine of Chance. Not a gamble: it is a
+  trade made once. It adds a guardian to the beacon and one more item per player to
+  everything the beacon and its bosses drop, for the rest of the run, and stacks twice.
+- **Settings** — volumes, sensitivity (with a separate aiming multiplier), inverted look,
+  screen shake, turn response, damage numbers, full rebinding, and an unlock-everything
+  button for people who do not want the meta-progression campaign. They live in
+  `core/settings.js` under their own storage key, not in the profile.
+
+### The landform
+
+Every theme carries `landform: { amplitude, scale, detail, ridged, bowl, terrace }`, evaluated
+by `Arena.terrainHeightAt(x, z)` — an analytic function, not a heightmap, because co-op has to
+rebuild an arena from its seed alone and because physics, the camera boom and every prop
+placement sample it thousands of times a frame. Phases come from the arena RNG, so the same
+seed grows the same hills.
+
+| Theme | Radius | Depth | Ground |
+| --- | --- | --- | --- |
+| Verdant Hollow | 148 | 1 | Rolling, gentle lift toward the rim |
+| Sunken Mire | 158 | 1 | Shallow terraced pans draining inward |
+| Tidal Shelf | 162 | 2 | ~1m terraces falling away from the centre |
+| Frozen Shelf | 170 | 3 | Big smooth drifts inside a high rim |
+| Shattered Spires | 168 | 3 | 2.4m stepped plates, the most vertical ground here |
+| Ashfall Basin | 155 | 4 | Falls away from the middle, ridged crests |
+| Ossuary Flats | 172 | 4 | Near flat and pale; the longest sightlines |
+| Void Terrace | 176 | 5 | 1.7m stepped plates |
+| Ember Depths | 166 | 5 | Short-wavelength ridging, deep clefts |
+
+**Stage order is drawn per run**, by `themeForStage(stage, rng, avoidId)`: eligible themes are
+those whose `depth` is between `stage - 4` and `stage`, the previous stage's theme is excluded,
+and stage one comes from the two depth-1 themes. **The host draws and puts the id in the stage
+packet** — deriving it from the stage seed would have been reproducible right up until somebody
+joined a run in progress, at which point their idea of "the previous stage" and the host's
+would differ and the party would be standing in two different arenas.
+
+The centre (plateau radius + 5m) and the outer 18m are masked flat, so the structures, the
+spawns and the boundary all still meet the ground.
+
+### The edge, and what is past it
+
+**There is no wall.** `_buildBackdrop` puts three instanced mountain ranges at 2.6/3.8/5.2
+arena radii under a gradient sky dome and a height-faded haze band, all `fog: false` and
+unlit — depth comes from each ring being washed further toward the horizon colour, since
+nothing out there ever moves relative to the player. `CAMERA.far` had to go 620 → 3200 to
+reach them (and `near` 0.1 → 0.2 to keep the depth precision).
+
+`_buildBarrier` is the other half: one cylinder, one shader, **no colliders**. The radial
+clamp in `moveWithCollision` has always been what stops you; the barrier is the readout.
+Opacity is driven by the distance from `arena.barrierFocus` (the player, set each frame in
+`Game._update`) to each point on the wall, so it is entirely invisible from the middle of the
+arena and lights only the panels you are pressed against.
+
+### Prop hitboxes are measured, not declared
+
+`PROP_COLLISION`'s hand-written radii are gone. `propColliders(type, geo)` in `props.js`
+measures the volumes off the geometry that was actually built, per variant, and `PROP_PHYSICS`
+now only says what *kind* of thing it is: `trunk` (narrow solid trunk, canopy as a camera-only
+blocker), `box`, `arch` (one volume per leg, walkable middle) or null. Before this, boulders
+and crystals had no collider at all, arches were solid across the opening, and every tree
+shared one radius regardless of variant or instance scale.
+
+One trap worth knowing: a trunk is a cylinder, so it has vertices at its two caps and nowhere
+between, and the bottom cap lands at `-1e-8` after a transform. The band scan starts at
+`-0.01` for exactly that reason — an exact `y >= 0` test dropped it and left every tree in the
+game with no collider. `groundHeightAt` returns the terrain
+as its baseline and boxes above it; `moveWithCollision` rests on it and lifts you up a slope
+you walk into; `raycastGround` in `physics.js` marches and bisects rather than solving a
+plane. **Camera lift and the boom's ground limit deliberately use `terrainHeightAt`, not
+`groundHeightAt`** — asking for the highest *solid* surface makes the boom hop onto the roof
+of the building it is trying to see past, which is a bug this codebase has now had twice.
+
+---
 
 ---
 
@@ -75,18 +180,21 @@ vendor/three.module.js
 src/
   main.js             entry point
   game.js             orchestrator — owns the run, the world, the frame loop
-  core/               config.js (all tuning), engine.js, input.js, rng.js, mathx.js
-  data/               items.js, itemArt.js, characters.js, weapons.js, enemies.js
+  core/               config.js (all tuning), engine.js, input.js, settings.js,
+                      audio.js, rng.js, mathx.js
+  data/               items.js, itemArt.js, characters.js, weapons.js, enemies.js, pets.js
   world/              arena.js, props.js, textures.js, themes.js
-  entities/           player.js, characterRig.js, enemy.js, minion.js,
+  entities/           player.js, characterRig.js, enemy.js, pet.js,
                       projectiles.js, interactables.js, models.js
   net/                session.js (transport), coop.js (replication), remotePlayer.js
   systems/            combat.js, inventory.js, director.js, loot.js, physics.js, fx.js
   meta/               save.js (localStorage), progression.js (Echo maths)
-  ui/                 hud.js, menus.js
+  ui/                 hud.js, menus.js, chat.js
 tools/                serve.js (+ co-op relay), relay.js, check.js, coop-check.js
 graph/                generated knowledge graph — nothing at runtime reads it
 .vscode/              launch + task config
+play.cmd / play.sh    start the server without npm, finding Node wherever it lives
+MULTIPLAYER.md        co-op setup, incl. tunnels for machines without admin rights
 ```
 
 The repository is the game: source at the root, no build step, no bundler. The one
@@ -100,17 +208,36 @@ it is, how to regenerate it, and where it disagrees with the source).
   lifesteal and on-hit procs apply in exactly one place. It is also where a co-op client
   reports what it did to the host.
 - **Proc coefficients.** Every hit carries one (sidearm 1.0, a Rivet Driver nail 0.25,
-  explosion splash 0, a brood fireball 0.15), so a 13/s weapon cannot trivially out-proc a
-  1.4/s one, and a pack of lizards cannot out-proc your gun.
+  explosion splash 0, a pet 0.1–0.5 by species), so a 13/s weapon cannot trivially out-proc a
+  1.4/s one, and a pack of pets cannot out-proc your gun.
 - **Items are declarative.** `stats(stacks, acc, run)` folds passives; `hooks.<event>(ctx,
   stacks, ev)` reacts. `ctx` is a stable façade in `systems/inventory.js`; a throwing hook is
   caught and logged, not fatal. Hooks: onHit, onCrit, onKill, onDamaged, onLowHealth, onTick,
-  onSecondary, onMinionDown, onFatal, modifyDamage, modifyIncoming.
+  onSecondary, onPetDown, onFatal, modifyDamage, modifyIncoming.
 - **Everything is procedural.** Models from primitives, textures painted to canvases, item
   icons drawn from a shape library.
 - **Body animation is a free function.** `entities/characterRig.js` poses any model built by
   `buildPlayerModel` from a plain descriptor, so the local player and a networked teammate
-  share one rig with no inheritance between them.
+  share one rig with no inheritance between them. Locomotion is three gaits — run, backpedal,
+  side-step — blended by `rig.gaitF/gaitB/gaitS` from the travel direction in the body's own
+  frame, all on one shared clock so a diagonal is a continuous gait changing shape rather than
+  a crossfade. `rig.onStep` fires on each footfall, which is what drives footstep audio.
+- **Input is addressed by action, never by key.** `input.actionDown('secondary')`, not
+  `input.down('KeyQ')`. Mouse buttons live in the same code namespace (`Mouse0/1/2`), which is
+  the whole reason the rebinding screen can offer them for anything. Bindings live in
+  `core/settings.js` under their own localStorage key, separate from the profile.
+- **Sound is synthesised, never loaded.** `core/audio.js` builds every effect from oscillators
+  and filtered noise on demand, behind three buses and a shared convolution reverb whose
+  impulse is synthesised decaying noise. A weapon's report is derived from its `model` tag, so
+  a new weapon that reuses a silhouette gets a sound for free. Voices are throttled per name
+  and capped at 28; anything inaudible is never built. The score is a generative sequencer
+  scheduled against the audio clock with a 0.25s lookahead — it skips the gap after a stall
+  rather than firing every missed note at once.
+- **Stage prices are frozen at stage build.** `game.stageDifficulty` is sampled once in
+  `_buildStage` and is what chests and eggs are priced from; `Chest.price` / `Egg.price` then
+  apply the local player's own discount on top. `cost` is the replicated stage price, `price`
+  is what you pay — a discount belongs to the payer, not to the chest, so it never crosses the
+  wire.
 
 ---
 
@@ -121,7 +248,7 @@ knows about rooms and nothing about the game. `tools/serve.js` attaches it to th
 server, so one command serves and hosts.
 
 **Authority is split.** The host owns the world: arena seed, director, enemies, bosses,
-chests, beacon. Every player owns themselves: position, items, gold, level, lizards.
+chests, beacon. Every player owns themselves: position, items, gold, level, pets.
 
 - **You hurt things locally.** Your crit, your items, your damage numbers resolve instantly
   against your copy of the enemy; the host is then told the number and applies it. Verified:
@@ -149,7 +276,11 @@ chests, beacon. Every player owns themselves: position, items, gold, level, liza
 - **Downed, not dead.** You keep looking around; a teammate standing over you for 5s revives
   you at 45%. The downed player runs their own revive timer (they already know where everyone
   is, so it costs zero messages). The run ends when the last player falls.
-- Send rates live in `COOP` in config.js: 20 Hz own state, 15 Hz host snapshot, 10 Hz minions.
+- Send rates live in `COOP` in config.js: 20 Hz own state, 15 Hz host snapshot, 10 Hz pets.
+- **Party scaling** lives in `PARTY`: the difficulty coefficient, spawn budget, enemy cap,
+  chest count and egg count all rise with the headcount. Measured for two players: coefficient
+  +22%, cap 16 → 25, banked credits 42 → 65.
+- **Chat and the pickup log** ride the same session (`k: chat`, `k: got`).
 
 Trusting peers is deliberate: this is a game you host for friends off a code you read aloud.
 
@@ -183,6 +314,39 @@ dynamic lights are the first thing dropped.
 
 ## Recently fixed (worth not regressing)
 
+- **`Object3D.add` returns the PARENT.** `g.add(mesh).rotation.z = Math.PI / 2` rotates the
+  whole group. Nine of these had accumulated across the weapon models; the one in `addAction`
+  rolled every rifle-family weapon ninety degrees onto its side, which is why the character
+  appeared to hold its gun out flat to the left. This has now shipped three separate times
+  (the missing head, the flat weapon, a chest lid), so **`npm run check` greps for it** and
+  fails the build. Do not delete that lint.
+- **Elbows bent backwards.** Arm and leg joints both used positive `rotation.x` on the lower
+  segment, but an elbow flexes forward and a knee flexes back, so one of them had to be
+  negative. Arms are now negative, and the joint pad moved to the outside of the joint
+  (`jointSide` in `articulatedLimb`) since a knee cap and an elbow cap face opposite ways.
+- **The weapon was not held by the grip.** The glove stayed with the forearm while the mount
+  rotated to track the crosshair, so the weapon floated beside a hand that was not holding it.
+  The glove is now parented into `weaponMount`. The aim is also clamped to a 72° cone around
+  the *forearm* (`-Y`, not `+Z` — measuring the cone against the wrong axis pointed the gun at
+  the sky).
+- **`Quaternion.setFromRotationMatrix` on a scaled matrix.** `poseWeapon` took the mount's
+  parent orientation from `matrixWorld`, which carries the torso's breathing scale.
+  `getWorldQuaternion` decomposes properly.
+
+- **You could not aim upwards.** A camera boom is a rigid arm: pitching up swings the far end
+  *down*, and past about 40 degrees that put it under the floor. The old code clamped the
+  camera height afterwards, which took it off the boom entirely — the arm pointed one way and
+  the camera lay on the ground looking another, so looking up simply stopped working. Now the
+  pivot rises with the pitch (`CAMERA.pitchLift`) and `Player._groundLimit` marches the arm
+  against `terrainHeightAt`, stopping it where it would go under. Max pitch 0.95 → 1.30 rad.
+- **`_placeBoom` must lift against terrain, not against `groundHeightAt`.** Using the latter
+  makes the camera hop onto the roof of whatever it is trying to see past. This bug has now
+  been introduced twice — once originally, once while adding the landform. Solid geometry
+  shortens the boom through `_probeBoom`; only the ground lifts it.
+- **Egg prices changed while you were walking back with the gold.** They were recomputed on
+  every prompt from the live difficulty and how many pets you were holding, so the number on
+  the prompt was not the number you paid, and buying one egg silently raised the price of the
+  one you were saving for. Prices are now fixed for the stage — see `game.stageDifficulty`.
 - **A "melee" weapon that fired a projectile with no swing behind it.** The Void Reaper's
   primary now resolves as a flat horizontal arc (`ctx.slashWave`) that *then* throws the cut:
   a tapered crescent mesh, not a sphere, sweeping a radius rather than raycasting its own
@@ -217,10 +381,11 @@ dynamic lights are the first thing dropped.
 - **Boss loot was one item for the whole party.** Every boss and every stage clear now drops
   one per player (`Game.bossItemCount()`), each a separately claimable networked pickup, so
   four players get four items rather than three of them watching one person collect.
-- **Blink teleported down the camera's line and landed you.** It travels the way the
-  character is moving (`Player.moveDirection()`) and holds your altitude, so blinking out of
-  a jump leaves you airborne with your fall and your second jump intact. Same rule now
-  applies to the Void Reaper's Blink Slash.
+- **Blink teleported down the camera's line and landed you.** The Wraith's blink travels the
+  way the character is moving (`Player.moveDirection()`) and holds your altitude, so blinking
+  out of a jump leaves you airborne with your fall and your second jump intact. The Void
+  Reaper's Blink Slash is the deliberate exception: it follows the aim line, up or down or
+  across a gap, and walks its landing point back until it is somewhere a body can stand.
 
 - **The character had no head.** `head.add(mesh).position.set(...)` reads like it positions
   the mesh, but `Object3D.add` returns the **parent** — so the line relocated the whole head
@@ -247,6 +412,18 @@ dynamic lights are the first thing dropped.
   falling behind produced waves bigger than the one you couldn't clear.
 - **Loot tables have a rarity floor.** Large chests never roll Common; the "nothing unlocked
   at that tier" fallback returns the best available tier rather than `pool[0]`.
+- **The camera boom hangs off a shoulder-offset pivot**, so a clear boom is not a clear view.
+  One thin ray from the pivot ran *beside* every tree trunk in the game. Probe with a bundle,
+  cast from the body as well as the pivot, and never feed the previous frame's distance back
+  into the target or it pumps in and out on the spot.
+- **`groundHeightAt` returns the top of any collider, not the terrain.** Using it to lift the
+  camera parked it on the roof of the building it was trying to see past.
+- **Foliage has no collider** — you are meant to walk under it — so the camera needs its own
+  occluder volumes (`PROP_COLLISION.camera`), and must ignore any it is standing inside.
+- **`scatterPoints` used to silently return fewer points than asked for** when the arena could
+  not fit them at the requested spacing, so whatever was placed last simply never appeared.
+- **Party size must come from the lobby, not from remote avatars** — an avatar does not exist
+  until its first state packet, which is after the host has already built stage one.
 - **A splashing projectile never resolves a direct hit** — it detonates instead. Anything
   giving a projectile splash has to put the whole payload in the splash, or it does a third
   of the damage its numbers claim.
@@ -271,8 +448,8 @@ events still fire, so replication can be tested end to end.
 headlessly (canvas stubbed, since nothing it draws reaches a collider) and asserts that two
 peers on one seed agree on every collider and on ground height across 400 sample points.
 
-Suites in use: all item hooks (all 62 items at 3 stacks each, in a live firefight with a
-brood out), all 7 weapons (damage benchmark), all 4 characters (ability displacement/damage
+Suites in use: all item hooks (all 81 items at 3 stacks each, in a live firefight with a
+brood out), all 9 weapons (damage benchmark), all 6 characters (ability displacement/damage
 vs spec), collision correctness vs brute force, a full menu→run→boss→descend→summary pass, a
 two-peer co-op pass (lobby, stage sync, damage prediction, item arbitration, revive, stage
 advance), a 10-minute leak soak, and shader-program stability.
@@ -294,8 +471,25 @@ during testing can leave you looking at code you already replaced.
   melee slams only reach the host's own lizards.
 - The scripted test bot is naive (walks into trees, no kiting), so "bot survived N minutes" is
   a weak signal. Director pressure is measured against a fixed reference DPS instead.
-- Boss AI is three fixed patterns; no phase transitions. Bosses do not scale with party size.
-- No audio at all.
-- Stage count is unbounded (themes cycle); there is no ending or victory condition beyond
-  dying.
-- `game.js` is ~800 lines and is the natural place for a split if it grows further.
+- Stage bosses are still three fixed patterns with no phase transitions. Only the Null
+  Sovereign has phases, and only it scales health directly with party size (everything else
+  scales through the difficulty coefficient).
+- Stage count is still unbounded if you ignore the rift; the Sovereign is the only ending.
+- Wraith's Blink still flattens to the horizontal and snaps to the ground. Only the Void
+  Reaper's Blink Slash was made three-dimensional, because only that one was asked for.
+- `game.js` is ~1150 lines and is the natural place for a split if it grows further.
+- The terraced landforms (Void Terrace, Tidal Shelf) put a short scramble at every shelf edge.
+  It is inside the step-up allowance so it is climbable, but a shelf lip is still a place
+  where an enemy pathing straight at you can bunch up.
+- Enemy and pet movement respect the landform through `groundHeightAt`, but none of the AI
+  reasons about height — nothing takes the high ground on purpose.
+- The music engine has one arrangement shape across all ten themes; only key, tempo and two
+  timbre dials change. A second shape — something sparser for the sanctum, something with a
+  pulse for the Spires — would be cheap and is the obvious next thing.
+- Backdrop ranges are per-arena instanced meshes rebuilt on every stage change. They are
+  cheap (three draw calls) but they are also thrown away and remade each time.
+- The Choir can summon its chorus from across a terrace edge, so on Shattered Spires the adds
+  sometimes have to path a long way round. They get there; it just looks odd.
+- `Egg.sequence` prices a clutch, but the clutch is per-stage, not per-player: in co-op two
+  people buying from the same stage both see the same list rather than each having their own
+  escalation. That is deliberate, and worth knowing before someone calls it a bug.

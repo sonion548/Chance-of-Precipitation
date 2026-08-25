@@ -1,6 +1,7 @@
-import { DIRECTOR, DIFFICULTY } from '../core/config.js';
+import { DIRECTOR, DIFFICULTY, PARTY } from '../core/config.js';
 import { ENEMIES, BOSSES, ELITE_AFFIXES } from '../data/enemies.js';
 import { clamp } from '../core/mathx.js';
+import { bossesForTheme } from '../world/themes.js';
 
 /**
  * The difficulty engine.
@@ -26,25 +27,37 @@ export class Director {
     this.stageTime = 0;
   }
 
-  /** difficulty = (1 + timeScalar × minutes) × stageMult^stagesCleared × mode */
+  /** How much of the extra pressure a full party earns. 1 player = 1. */
+  get partyScale() {
+    return 1 + (this.game.partySize - 1) * PARTY.difficultyPerPlayer;
+  }
+
+  /** Spawn volume multiplier from party size, kept separate from difficulty. */
+  get partyVolume() {
+    return 1 + (this.game.partySize - 1) * PARTY.creditsPerPlayer;
+  }
+
+  /** difficulty = (1 + timeScalar × minutes) × stageMult^cleared × mode × party */
   computeDifficulty() {
     const minutes = this.elapsed / 60;
     const timePart = 1 + DIFFICULTY.timeScalar * minutes;
     const stagePart = Math.pow(DIFFICULTY.stageMult, this.stagesCleared);
-    return timePart * stagePart * this.modeMultiplier;
+    return timePart * stagePart * this.modeMultiplier * this.partyScale;
   }
 
   /** Ceiling on banked credits, so a bad minute cannot snowball into an unplayable one. */
   get creditCap() {
-    return (DIRECTOR.creditCapBase + DIRECTOR.creditCapPerDifficulty * this.difficulty) * this.spawnMultiplier;
+    return (DIRECTOR.creditCapBase + DIRECTOR.creditCapPerDifficulty * this.difficulty)
+      * this.spawnMultiplier * this.partyVolume;
   }
 
   /** Population cap ramps with difficulty rather than sitting at the ceiling from minute one. */
   get activeEnemyCap() {
+    const party = 1 + (this.game.partySize - 1) * PARTY.capPerPlayer;
     return Math.min(
-      DIRECTOR.maxActiveEnemies,
+      Math.round(DIRECTOR.maxActiveEnemies * party),
       Math.round((DIRECTOR.activeEnemiesBase + DIRECTOR.activeEnemiesPerDifficulty * (this.difficulty - 1))
-        * this.spawnMultiplier),
+        * this.spawnMultiplier * party),
     );
   }
 
@@ -78,7 +91,7 @@ export class Director {
     // and reach a chest before the pack arrives.
     const warmup = Math.min(1, 0.45 + this.stageTime / 26);
     const rate = DIRECTOR.creditRateBase * (1 + (this.difficulty - 1) * DIRECTOR.creditRateGrowth)
-      * this.eventMultiplier * warmup * this.spawnMultiplier;
+      * this.eventMultiplier * warmup * this.spawnMultiplier * this.partyVolume;
     this.credits += rate * dt;
 
     // Cap the bank. Without this, a player who falls behind keeps banking credits
@@ -158,13 +171,22 @@ export class Director {
     this.credits = Math.max(0, this.credits - spent);
   }
 
-  /** Boss for the current stage, cycling so repeat stages vary. */
-  bossForStage(stage) {
-    return BOSSES[(stage - 1) % BOSSES.length];
+  /**
+   * Which boss guards this stage.
+   *
+   * Drawn at random from the arena's own shortlist rather than cycled by stage
+   * number, so the same place can hand you a different fight and the fight
+   * always suits the place — the Fulgurant belongs over the Spires, the Choir
+   * belongs on the Flats. A theme with no shortlist falls back to the roster.
+   */
+  bossForStage() {
+    const list = bossesForTheme(this.game.arena?.theme);
+    const pool = list ? list.map((id) => BOSSES.find((b) => b.id === id)).filter(Boolean) : BOSSES;
+    return this.game.rng.pick(pool.length ? pool : BOSSES);
   }
 
   spawnStageBoss(arena, player) {
-    const def = this.bossForStage(this.game.run.stage);
+    const def = this.bossForStage();
     const p = arena.findSpawnPoint(this.game.rng, { minDist: 18, maxDist: 30, avoid: player.position });
     const boss = this.game.enemies.spawn(def.id, p, {
       difficulty: this.difficulty,
