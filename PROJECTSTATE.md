@@ -73,9 +73,15 @@ src/
   systems/            combat.js, inventory.js, director.js, loot.js, physics.js, fx.js
   meta/               save.js (localStorage), progression.js (Echo maths)
   ui/                 hud.js, menus.js
-tools/                serve.js (+ co-op relay), relay.js, check.js
+tools/                serve.js (+ co-op relay), relay.js, check.js, coop-check.js
+graph/                generated knowledge graph — nothing at runtime reads it
 .vscode/              launch + task config
 ```
+
+The repository is the game: source at the root, no build step, no bundler. The one
+exception is `graph/`, which holds generated analysis output (`graph/README.md` says what
+it is, how to regenerate it, and where it disagrees with the source).
+
 
 **Conventions that carry weight:**
 

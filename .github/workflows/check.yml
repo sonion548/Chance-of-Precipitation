@@ -1,0 +1,21 @@
+# Every module has to parse, and co-op terrain has to agree. Both run headlessly
+# in a few seconds — there is nothing to install, since three.js is vendored.
+name: check
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Parse every module
+        run: node --experimental-vm-modules tools/check.js
+      - name: Prove co-op terrain agrees
+        run: node tools/coop-check.js

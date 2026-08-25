@@ -23,8 +23,14 @@ localhost — that is the one to give friends. Any static server works for solo 
 needs one only because ES modules can't load over `file://`.
 
 ```bash
-npm run check      # parses every module — catches syntax errors without a browser
+npm run check      # parses every module, then proves co-op terrain agrees
+npm run check:coop # just the terrain check
 ```
+
+Neither needs a browser. `check` parses every module to catch syntax errors, then builds
+arenas headlessly and asserts that two peers on the same seed produce identical colliders
+and identical ground height — the thing that, when it silently stopped being true, had
+teammates rendering knee-deep in the floor.
 
 Requires a browser with WebGL2. No install step: `three` is vendored in `vendor/`.
 
@@ -299,9 +305,14 @@ tools/
   serve.js            dev server + co-op relay on the same port
   relay.js            WebSocket rooms, written from scratch (no dependencies)
   check.js            module parser
+  coop-check.js       proves two peers on one seed build the same ground
+graph/                generated knowledge graph — see graph/README.md
 .vscode/              launch + task config (F5 to play)
 jsconfig.json         language-service config for IntelliSense
 ```
+
+Everything above `graph/` is the game. `graph/` is generated analysis output, read by
+people and agents rather than by the game — deleting it changes nothing at runtime.
 
 Systems talk through the `Game` object rather than to each other. Two conventions carry most
 of the weight:

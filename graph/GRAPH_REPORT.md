@@ -26,11 +26,11 @@ What that means for anyone reading this:
   `[n for n in graph["nodes"] if n.get("_origin") == "manual"]`. Both endpoints
   of every added edge were checked against the existing graph — there are no
   dangling edges and no duplicate ids.
-- **The 19 touched files are flagged for re-extraction** in `manifest.json`:
+- **The 19 touched files are flagged for re-extraction** in `graph/manifest.json`:
   their `ast_hash` and `semantic_hash` are cleared and `mtime` zeroed, so the
   next `graphify update .` re-reads them from disk instead of trusting a
   fingerprint taken before the change.
-- **`graph.html` and `community_summary.txt` were not regenerated.** They are
+- **`graph/graph.html` and `graph/community_summary.txt` were not regenerated.** They are
   exports, and they still describe the graph as it stood at `269beeaa`. Running
   `graphify update .` and re-exporting refreshes both.
 

@@ -1,0 +1,11 @@
+# The source is LF; graphify writes its artifacts with CRLF on Windows. Declare
+# both so a checkout on any machine leaves each exactly as the producing tool
+# wrote it, instead of rewriting every line of a 3 MB graph on the first commit.
+* text=auto eol=lf
+graph/** -text
+
+# graph/ is generated (see graph/README.md) and vendor/ is somebody else's
+# three.js build. Marking them keeps both out of GitHub's language stats and
+# collapses them in diffs, so a pull request shows the source that actually moved.
+graph/**   linguist-generated=true
+vendor/**  linguist-vendored=true
