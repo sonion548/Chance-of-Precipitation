@@ -492,7 +492,10 @@ Progress lives in `localStorage` under `chance-of-precipitation.profile.v1`: Ech
 weapon, lifetime records and the Codex. If storage is unavailable the profile falls back to
 memory for the session rather than failing. **Settings → Reset Account** wipes it — Echoes,
 unlocks, records, Codex and options alike — behind a two-click confirmation that disarms
-itself after four seconds. Options (look sensitivity, screen shake, damage numbers) live in
+itself after four seconds. **Settings → Unlock Everything** is the other direction: it grants
+the whole catalogue at no Echo cost, in one click, and disables itself once there is nothing
+left to grant. It spends nothing and loses nothing, so it needs no confirmation — Reset
+Account is the undo. Options (look sensitivity, screen shake, damage numbers) live in
 the same profile blob rather than a key of their own, so a reset genuinely takes everything.
 
 The game used to be called SONEYBUN and wrote to `soneybun.profile.v1`. A profile under the
