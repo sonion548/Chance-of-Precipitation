@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "soneybun",
+      "name": "chance-of-precipitation",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["start"],
       "port": 8080

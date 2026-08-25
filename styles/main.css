@@ -1,5 +1,5 @@
 /* ============================================================
-   SONEYBUN — Descent Protocol
+   Chance of Precipitation — Descent Protocol
    ============================================================ */
 :root {
   --bg: #06070c;
@@ -384,11 +384,20 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: none; ba
 }
 .menu-inner { position: relative; text-align: center; z-index: 2; }
 .brand h1 {
-  font-size: 82px; font-weight: 700; letter-spacing: 16px; line-height: 1;
+  /* The title is three words and 23 characters, so it is sized against the
+     viewport rather than fixed: at 82px with 16px of tracking — what the old
+     eight-letter name used — it ran off the side of every laptop. clamp keeps
+     the wide, spaced-out treatment and lets it shrink instead of wrapping. */
+  font-size: clamp(30px, 6.4vw, 68px);
+  font-weight: 700;
+  letter-spacing: clamp(2px, 0.9vw, 10px);
+  line-height: 1.05;
+  text-wrap: balance;
   background: linear-gradient(180deg, #fff 20%, #ffb347 130%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 6px 30px rgba(255,150,50,.28));
-  margin-right: -16px;
+  /* Trailing letter-space on the last glyph, cancelled so the block reads centred. */
+  margin-right: calc(clamp(2px, 0.9vw, 10px) * -1);
 }
 .tagline {
   margin-top: 6px; font-size: 14px; letter-spacing: 9px; text-transform: uppercase;
@@ -626,7 +635,6 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: none; ba
 #fatal pre { font-family: var(--mono); font-size: 12px; color: #ff8f9a; white-space: pre-wrap; line-height: 1.5; }
 
 @media (max-width: 720px) {
-  .brand h1 { font-size: 52px; letter-spacing: 9px; }
   .loadout-grid { grid-template-columns: 1fr; }
   .stat-rows { grid-template-columns: 1fr; }
   #inventory { max-width: 190px; }

@@ -1,4 +1,4 @@
-# SONEYBUN — Descent Protocol
+# Chance of Precipitation — Descent Protocol
 
 A 3D action roguelike in the vein of *Risk of Rain 2*. Kill things, take their gold, spend it
 on chests, and try to out-scale a difficulty curve that never stops climbing. When the run
@@ -428,7 +428,11 @@ recovers, with a hold either side so it never oscillates. The simulation clamps 
 
 ## Saving
 
-Progress lives in `localStorage` under `soneybun.profile.v1`: Echoes, unlocks, equipped
+Progress lives in `localStorage` under `chance-of-precipitation.profile.v1`: Echoes, unlocks, equipped
 weapon, lifetime records and the Codex. If storage is unavailable the profile falls back to
 memory for the session rather than failing. **Records → Erase All Progress** wipes it
 (two clicks, deliberately).
+
+The game used to be called SONEYBUN and wrote to `soneybun.profile.v1`. A profile under the
+old key is adopted the first time you load a build with the new one, and left where it is —
+so an older build still finds its save and nothing is stranded. Erasing progress clears both.

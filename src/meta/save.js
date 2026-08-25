@@ -8,7 +8,11 @@ import { DEFAULT_UNLOCKED_WEAPONS, DEFAULT_WEAPON } from '../data/weapons.js';
 import { DEFAULT_UNLOCKED_CHARACTERS, DEFAULT_CHARACTER } from '../data/characters.js';
 import { VERSION } from '../core/config.js';
 
-const KEY = 'soneybun.profile.v1';
+const KEY = 'chance-of-precipitation.profile.v1';
+// The game was called SONEYBUN when the first profiles were written. Renaming
+// the key without this line would present every existing player with a blank
+// save — no Echoes, no unlocks — and no way to tell that anything was lost.
+const LEGACY_KEY = 'soneybun.profile.v1';
 
 function freshProfile() {
   return {
@@ -48,7 +52,16 @@ let memoryFallback = null;
 function readRaw() {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (raw) return JSON.parse(raw);
+    // First run since the rename: adopt the old profile and leave it where it
+    // is. Copying rather than moving means an older build of the game still
+    // finds its save, so this is not a one-way door.
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) {
+      localStorage.setItem(KEY, legacy);
+      return JSON.parse(legacy);
+    }
+    return null;
   } catch {
     return memoryFallback;
   }
@@ -183,7 +196,8 @@ export class Profile {
   wipe() {
     this.data = freshProfile();
     memoryFallback = null;
-    try { localStorage.removeItem(KEY); } catch { /* ignore */ }
+    // Clear both, or a wipe would silently resurrect the pre-rename profile.
+    try { localStorage.removeItem(KEY); localStorage.removeItem(LEGACY_KEY); } catch { /* ignore */ }
     this.save();
   }
 }

@@ -8,11 +8,11 @@
       "command": "node tools/serve.js",
       "isBackground": true,
       "problemMatcher": {
-        "owner": "soneybun-serve",
+        "owner": "chance-of-precipitation-serve",
         "pattern": { "regexp": "^(?!x)x$" },
         "background": {
           "activeOnStart": true,
-          "beginsPattern": "SONEYBUN dev server",
+          "beginsPattern": "Chance of Precipitation",
           "endsPattern": "localhost:"
         }
       },

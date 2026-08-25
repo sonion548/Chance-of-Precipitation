@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Play SONEYBUN",
+      "name": "Play Chance of Precipitation",
       "type": "chrome",
       "request": "launch",
       "url": "http://localhost:8080",

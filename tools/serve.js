@@ -69,7 +69,7 @@ relay.attach(server, '/net');
 server.listen(PORT, '0.0.0.0', () => {
   const lines = [
     '',
-    '  SONEYBUN — Descent Protocol',
+    '  Chance of Precipitation — Descent Protocol',
     `  → http://localhost:${PORT}`,
   ];
   for (const ip of lanAddresses()) lines.push(`  → http://${ip}:${PORT}   (share this one for co-op)`);

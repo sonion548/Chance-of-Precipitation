@@ -146,7 +146,7 @@ older one, until both are rebuilt from one commit.
 - is
 - qp
 - Step 6: Obsidian Vault + HTML Export
-- SONEYBUN — Descent Protocol (README)
+- Chance of Precipitation — Descent Protocol (README)
 - bi
 - cp
 - cs
@@ -161,7 +161,7 @@ older one, until both are rebuilt from one commit.
 - fm
 - Step 4: Build Graph, Cluster, Analyze
 - Step 3: Extract Entities & Relationships
-- SONEYBUN — Descent Protocol (Project State)
+- Chance of Precipitation — Descent Protocol (Project State)
 - zp
 - qu
 - pm
@@ -248,7 +248,7 @@ older one, until both are rebuilt from one commit.
   index.html → README.md
 - `Project graphify Usage Rules` --conceptually_related_to--> `--update Incremental Re-extraction`  [INFERRED]
   CLAUDE.md → .claude/skills/graphify/references/update.md
-- `Six Arena Themes + Triplanar Projection` --conceptually_related_to--> `SONEYBUN — Descent Protocol (Project State)`  [INFERRED]
+- `Six Arena Themes + Triplanar Projection` --conceptually_related_to--> `Chance of Precipitation — Descent Protocol (Project State)`  [INFERRED]
   README.md → PROJECTSTATE.md
 
 ## Import Cycles
@@ -257,7 +257,7 @@ older one, until both are rebuilt from one commit.
 ## Hyperedges (group relationships)
 - **Core Graphify Pipeline (Detect -> Extract -> Build -> Label -> Cleanup)** — _claude_skills_graphify_skill_step2_detect, _claude_skills_graphify_skill_step3_extract, _claude_skills_graphify_skill_step4_build, _claude_skills_graphify_skill_step5_label, _claude_skills_graphify_skill_step9_cleanup [INFERRED 0.85]
 - **Graph Query Sub-Commands (query/path/explain/add)** — _claude_skills_graphify_references_query_bfs_dfs, _claude_skills_graphify_references_query_path_command, _claude_skills_graphify_references_query_explain_command, _claude_skills_graphify_references_add_watch_add_command [INFERRED 0.85]
-- **SONEYBUN Co-op Authority Design** — projectstate_coop_authority_split, projectstate_combat_damageenemy, projectstate_party_scaling [INFERRED 0.85]
+- **Chance of Precipitation Co-op Authority Design** — projectstate_coop_authority_split, projectstate_combat_damageenemy, projectstate_party_scaling [INFERRED 0.85]
 
 ## Communities (182 total, 115 thin omitted)
 
@@ -437,7 +437,7 @@ Nodes (10): weaponById(), Combat, _dir, _origin, _ray, SECONDARY_ACTION, SPECIAL
 Cohesion: 0.22
 Nodes (9): Token Reduction Benchmark, FalkorDB Export (--falkordb/--falkordb-push), MCP stdio Server (graphify.serve), Neo4j Export (--neo4j/--neo4j-push), SVG/GraphML Export, Wiki Export (--wiki), Native CLAUDE.md Integration (graphify claude install), Step 6: Obsidian Vault + HTML Export (+1 more)
 
-### Community 95 - "SONEYBUN — Descent Protocol (README)"
+### Community 95 - "Chance of Precipitation — Descent Protocol (README)"
 Cohesion: 0.31
 Nodes (9): index.html Shell (HUD + Screens Markup), In-Run HUD Markup, Importmap (three -> vendor/three.module.js), Screen System (menu/loadout/coop/unlocks/codex/stats/help/pause/summary), Combat.damageEnemy Single Entry Point, PARTY Co-op Scaling Config, Co-op Lobby Flow, 62-Item Rarity System (+1 more)
 
@@ -461,9 +461,9 @@ Nodes (6): god_nodes / surprising_connections / suggest_questions Analysis, Shri
 Cohesion: 0.47
 Nodes (6): Step 1: Ensure Graphify Installed, Step 2: Detect Files, Step 3: Extract Entities & Relationships, Part A: Structural (AST) Extraction, Part B: Semantic Extraction (Subagents), Part C: Merge AST + Semantic
 
-### Community 112 - "SONEYBUN — Descent Protocol (Project State)"
+### Community 112 - "Chance of Precipitation — Descent Protocol (Project State)"
 Cohesion: 0.33
-Nodes (6): Split Co-op Authority Model, SONEYBUN — Descent Protocol (Project State), Six Arena Themes + Triplanar Projection, Optional Ending: Null Sanctum / Null Sovereign, Four Pet Species, Unloader Grapple -> Overcharged Fist Combo
+Nodes (6): Split Co-op Authority Model, Chance of Precipitation — Descent Protocol (Project State), Six Arena Themes + Triplanar Projection, Optional Ending: Null Sanctum / Null Sovereign, Four Pet Species, Unloader Grapple -> Overcharged Fist Combo
 
 ### Community 116 - "qu"
 Cohesion: 0.40
