@@ -65,9 +65,11 @@ across the head and chest.
   player. Legs trail and scissor, ankles point, the trunk pitches with the throttle, and the
   arms yield to aiming and to attack animations rather than fighting them.
 - **Ultimates** — one per character, with **no cooldown**. A meter fills from kills
-  (3 / 9 / 26 per normal / elite / boss) and from damage taken (0.6 per 1% of max health
-  lost), plus a 0.35/s trickle; spending empties it. Tuning lives in `ULTIMATE` in
-  `core/config.js`. They are meant to be run-swinging, not routine.
+  (0.28 / 0.9 / 11 per normal / elite / boss) and from damage taken (0.06 per 1% of max
+  health lost), plus a 0.035/s trickle; spending empties it. Tuning lives in `ULTIMATE` in
+  `core/config.js`, priced against the director for roughly **one ultimate every two
+  stages** — the old rates paid out 3–5.5 meters per stage, which made them a rotation
+  rather than the run-swinging thing they are meant to be.
 - **9 weapons** — MK-4 Sidearm, Breach Scattergun, Arc Emitter, Rivet Driver, Seeker
   Launcher, Photon Lance, Void Reaper, **Siege Gauntlets**, **Meridian Longrifle**. All but
   the Longrifle are tuned to near-identical single-target DPS (~64–84 at base damage) so the

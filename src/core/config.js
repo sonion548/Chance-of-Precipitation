@@ -170,13 +170,26 @@ export const PETS = {
  */
 export const ULTIMATE = {
   max: 100,
-  perKill: 3.0,
-  perEliteKill: 9,
-  perBossKill: 26,
-  // Per 1% of your max health actually lost. Losing a third of your bar is
-  // worth about a fifth of the meter.
-  perHealthPercent: 0.6,
-  perSecond: 0.35,
+  /* Priced for roughly one ultimate every two stages.
+   *
+   * Measured against the director rather than guessed: a five-minute stage
+   * spawns about 56 bodies at stage one and about 90 with a dozen elites by
+   * stage five, and at the old rates that paid out three to five and a half
+   * full meters *per stage* — an ultimate every ninety seconds, which is not
+   * a run-swinging ability, it is a rotation. These numbers land the same
+   * stages at 0.46 / 0.49 / 0.52 / 0.70 meters, so the ability arrives about
+   * every second stage early on and a little more often deep into a run,
+   * which is where you want it.
+   *
+   * The boss is deliberately the single largest source: it is the one
+   * landmark every stage has, and a fifth of the meter for killing it is what
+   * makes the pacing legible rather than arbitrary. */
+  perKill: 0.28,
+  perEliteKill: 0.9,
+  perBossKill: 11,
+  // Per 1% of your max health actually lost. A full bar is worth six points.
+  perHealthPercent: 0.06,
+  perSecond: 0.035,
   startCharge: 0,
 };
 
