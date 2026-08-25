@@ -310,56 +310,6 @@ export const WEAPONS = [
     },
   },
 
-  /* ------------------------------------------------------------------ */
-  {
-    id: 'sundered_gauntlets',
-    name: 'Sundered Gauntlets',
-    icon: '🤜',
-    tag: 'Melee · Detonation',
-    color: 0xff5a2a,
-    model: 'fists',
-    unlocked: false,
-    echoCost: 1150,
-    desc: 'Two industrial breaching claws worn as gloves. There is no barrel and no ammunition; there is a kinetic charge that discharges through whatever the knuckles arrive at, and whatever the knuckles arrive at comes apart. Everything standing near it shares the experience.',
-    displayStats: { Damage: '190% + 120% AoE', 'Swing Rate': '2.9/s', Range: '~3m', Proc: '1.0' },
-    primary: {
-      name: 'Pulverise', key: 'M1', icon: '✊', hold: true,
-      desc: 'Punch for 190% damage. Anything hit detonates for a further 120% in 5m, and the swing carries you into it.',
-      cooldown: 0.34, scalesWithAttackSpeed: true,
-      fire(ctx) {
-        ctx.punch({
-          damage: ctx.dmg * 1.9,
-          burst: ctx.dmg * 1.2,
-          burstRadius: 5.2,
-          radius: 2.9,
-          reach: 2.4,
-          proc: 1.0,
-          knockback: 16,
-          lunge: 4.5,
-          color: 0xff5a2a,
-        });
-      },
-    },
-    secondary: {
-      name: 'Ground Slam', key: 'Q', icon: '💥',
-      // Silent because the slam has a sound of its own, and a weapon report on
-      // top of it makes the impact land twice.
-      silent: true,
-      desc: 'Drive into the ground for 480% damage in 11m, launching everything away. Falling further before it lands makes it hit harder and wider — up to double.',
-      cooldown: 6.5,
-      fire(ctx) {
-        ctx.groundSlam({
-          damage: ctx.dmg * 4.8,
-          radius: 11,
-          knockback: 34,
-          proc: 1.0,
-          heightReference: 11,
-          heightBonus: 1.0,
-          color: 0xff5a2a,
-        });
-      },
-    },
-  },
 
   /* ------------------------------------------------------------------ */
   {

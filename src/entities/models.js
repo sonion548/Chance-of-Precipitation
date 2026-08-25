@@ -579,13 +579,24 @@ export function buildPlayerModel(char) {
   // looked like the knees were being pressed together.
   const legL = articulatedLimb(pelvis, -P.w * 0.32, 0, 0, { ...legSpec, side: -1 }, m);
   const legR = articulatedLimb(pelvis, P.w * 0.32, 0, 0, { ...legSpec, side: 1 }, m);
-  // A few degrees of splay, so the legs form an A rather than two parallel
-  // posts. Real legs converge from hip to knee; a chunky low-poly one reads
-  // better doing the opposite, because the silhouette is the whole character.
-  legL.rotation.z = 0.05;
-  legR.rotation.z = -0.05;
-  legL.userData.restZ = 0.05;
-  legR.userData.restZ = -0.05;
+  /* A few degrees of splay, so the legs form an A rather than two parallel
+     posts. Real legs converge from hip to knee; a chunky low-poly one reads
+     better doing the opposite, because the silhouette is the whole character.
+
+     The sign matters and used to be backwards. A positive Z rotation swings a
+     limb's downward axis toward +X, so the left leg — the one at negative X —
+     needs a *negative* angle to lean away from the body. Positive on both made
+     a V instead of an A: knees drawn together, feet inboard of the hips, which
+     is most of what read as a goofy walk.
+
+     `outZ` is which way is outboard for each leg, so nothing downstream has to
+     re-derive it from the sign of a magnitude. */
+  legL.rotation.z = -0.06;
+  legR.rotation.z = 0.06;
+  legL.userData.restZ = -0.06;
+  legR.userData.restZ = 0.06;
+  legL.userData.outZ = -1;
+  legR.userData.outZ = 1;
 
   // --- torso ---
   const torso = new THREE.Group();
@@ -1310,86 +1321,6 @@ export function buildWeaponModel(weapon) {
         }
       }
       muzzle.position.set(0, 0, bladeLen + 0.4);
-      break;
-    }
-    case 'fists': {
-      /* A breaching gauntlet rather than a boxing glove.
-         The weapon mount is the right hand, so the whole thing is built forward
-         along +Z from the wrist: brace, wrist collar, fist block, knuckle
-         plates. The charge core sits on the back of the hand where the player
-         can actually see it — it is the only part of the weapon that tells you
-         it is doing anything, since there is no muzzle flash to read. */
-      const plate = mat(0x4a3228, { roughness: 0.5, metalness: 0.72, flat: true });
-      const hot = mat(weapon.color, { emissive: weapon.color, emissiveIntensity: 1.4, roughness: 0.3, metalness: 0.5 });
-
-      // Forearm brace with strapping.
-      const brace = cyl(0.115, 0.135, 0.42, 8, plate, 0, 0, -0.2);
-      brace.rotation.x = Math.PI / 2;
-      g.add(brace);
-      for (let i = 0; i < 3; i++) {
-        const strap = new THREE.Mesh(new THREE.TorusGeometry(0.125, 0.018, 4, 10), grip);
-        strap.rotation.y = Math.PI / 2;
-        strap.rotation.x = Math.PI / 2;
-        strap.position.z = -0.34 + i * 0.11;
-        g.add(strap);
-      }
-      // Piston housings running the length of the forearm — this is where the
-      // charge is supposed to come from.
-      for (const sx of [-1, 1]) {
-        g.add(box(0.05, 0.05, 0.34, steel, sx * 0.11, 0.055, -0.2));
-        g.add(box(0.035, 0.035, 0.1, accent, sx * 0.11, 0.055, -0.02));
-      }
-      ventStack(g, dark, { pos: [0, -0.1, -0.2], count: 4, size: [0.16, 0.02, 0.03], spacing: 0.075, axis: 'z' });
-
-      // Wrist collar.
-      const collar = cyl(0.155, 0.15, 0.09, 8, steel, 0, 0, 0.03);
-      collar.rotation.x = Math.PI / 2;
-      g.add(collar);
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 4, 12), accent);
-      ring.rotation.y = 0;
-      ring.position.z = 0.03;
-      g.add(ring);
-
-      // Fist block.
-      g.add(box(0.24, 0.235, 0.3, body, 0, 0, 0.22));
-      g.add(box(0.255, 0.09, 0.31, plate, 0, 0.085, 0.22));
-      g.add(box(0.255, 0.09, 0.31, plate, 0, -0.085, 0.22));
-      // Finger segments, curled: three ridges down the striking face.
-      for (let i = 0; i < 3; i++) {
-        const y = 0.075 - i * 0.075;
-        g.add(box(0.235, 0.055, 0.09, plate, 0, y, 0.375));
-        g.add(box(0.245, 0.02, 0.03, steel, 0, y, 0.425));
-      }
-      // Knuckle spikes — four short wedges on the face.
-      for (let i = 0; i < 4; i++) {
-        const x = -0.085 + i * 0.057;
-        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.11, 4), steel);
-        spike.rotation.x = Math.PI / 2;
-        spike.position.set(x, 0.055, 0.46);
-        spike.castShadow = true;
-        g.add(spike);
-      }
-      // Thumb, folded across.
-      g.add(box(0.07, 0.09, 0.15, plate, -0.15, -0.02, 0.26));
-
-      // Charge core on the back of the hand.
-      g.add(box(0.14, 0.05, 0.16, dark, 0, 0.13, 0.2));
-      const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.055, 0), hot);
-      core.position.set(0, 0.165, 0.2);
-      g.add(core);
-      for (const sx of [-1, 1]) {
-        g.add(box(0.02, 0.03, 0.12, accent, sx * 0.075, 0.145, 0.2));
-      }
-      cableRun(g, dark, [0.06, 0.11, 0.1], [0.09, 0.04, -0.26], 0.05, 5, 0.014);
-      boltRow(g, steel, { from: [0.115, -0.06, 0.12], to: [0.115, -0.06, 0.32], count: 3, r: 0.011 });
-
-      // The strike point sits just past the knuckles, so procs and impacts
-      // resolve where the fist actually arrives rather than at the wrist.
-      muzzle.position.set(0, 0.02, 0.52);
-      // Built at true hand scale and then oversized, on purpose. At life size it
-      // reads as a glove rather than as the weapon, and this is the one weapon
-      // whose entire silhouette has to say "melee" from the third-person camera.
-      g.scale.setScalar(1.35);
       break;
     }
     default:

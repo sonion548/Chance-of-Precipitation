@@ -265,12 +265,21 @@ than the baseline — and its bombs (three per Bomb Cluster, twenty-eight per bo
 off on whatever they touch first. Landing early cuts the thrusters and refunds half the time
 you did not use.
 
+Under thrust it has a pose of its own rather than a walk cycle with the floor deleted. The
+throttle is what the whole body answers to: climbing stands it upright with the legs hanging
+and the chest tipped back over the thrust, cruising pitches it forward with the legs streamed
+out behind, hovering leaves it loose and drifting. It blends in and out over about half a
+second, so a takeoff eases out of the run rather than cutting, and it gives the arms straight
+back the moment you aim or use an ability — those poses have the weapon on them.
+
 **Javelin** is the one built around a weapon that deals no damage at all. The Marking Spear
 hurts nobody: what it buys is a mark on everything within 13m of where it sticks, for ten
 seconds. Lance Dash then goes *through* people for 360% damage — and if it strikes something
-marked, the dash comes straight back. Only the enemy actually struck spends its mark;
-everything else the spear painted stays painted, so one good throw is a chain of dashes
-across a crowd rather than a single reset.
+marked, the dash comes straight back. On its own the dash is expensive, ten seconds, which is
+the point: the mark is not a bonus on top of a cheap ability, it is how you avoid paying for
+an expensive one. A dash into open air costs you the next ten seconds of mobility. Only the
+enemy actually struck spends its mark; everything else the spear painted stays painted, so
+one good throw is a chain of dashes across a crowd rather than a single reset.
 
 **Unloader** is the combo character. The grapple anchors to terrain *or* enemies and reels
 you in at 40 u/s, and — critically — it hands that momentum back on release instead of
@@ -332,7 +341,7 @@ tier is unlocked yet" fallback cannot drop below, so an expensive chest can neve
 hand back a white item. **Fortune Clover** rerolls every rarity roll and keeps the better
 result.
 
-**9 weapons**, one starting and eight unlockable, each with a distinct primary and secondary.
+**8 weapons**, one starting and seven unlockable, each with a distinct primary and secondary.
 They are deliberately tuned to near-identical single-target DPS (~64–84 at base damage) so
 the choice is about *how* you fight, not which is strongest:
 
@@ -345,7 +354,6 @@ the choice is about *how* you fight, not which is strongest:
 | Seeker Launcher | Homing explosive arcs | Cluster Barrage — 9 mortars on your aim point |
 | Photon Lance | Beam that ramps to 3× on a held target | Prism Burst — discharge stored heat |
 | Void Reaper | Flat horizontal slash that **throws the cut** as a crescent wave | Blink Slash — phase 14m along your line of sight, cutting the path |
-| Sundered Gauntlets | Punches at ~3m; anything hit **detonates** | Ground Slam — drive into the floor, scaled by the fall |
 | Siege Gauntlets | Punches a 9m compression wave out of the knuckles | Jet Boost — ride the blast straight up |
 
 **Every weapon acts its attack out.** A weapon ability names an `anim` — `slash`, `punch`,
@@ -369,12 +377,6 @@ resistance rather than ignoring the line entirely.
 The **Siege Gauntlets** have no muzzle: the reach *is* the ability. Each punch resolves a 9m
 cone with three upright crescents marching away from the fist, and the secondary fires both
 gauntlets at the floor — straight up, jumps refunded, with a 260% blast under you.
-
-**Sundered Gauntlets** is the one weapon with no range at all. The punch carries you into the
-swing, and a connecting hit detonates the target for a further 120% in five metres, so it
-gets better the worse your position is. Ground Slam drives you straight down and lets the
-floor do the rest — damage and radius scale with how far you fell to get there, up to double,
-which makes it one idea with the jump rather than a second button.
 
 **13 enemy types** (7 regulars, 6 bosses) with melee, ranged, flying, charging and artillery
 behaviours, plus **4 elite affixes** — Blazing, Glacial, Overcharged, Voidtouched — that

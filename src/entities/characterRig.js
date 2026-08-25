@@ -65,6 +65,10 @@ export function createRig(yaw = 0) {
     // Damped bases for the limbs the attack poses add on top of. Keeping these
     // apart from the Object3D rotations is what stops a swing from feeding its
     // own offset back into the smoothing every frame and over-rotating.
+    // Thrusters: how far into the flight pose the body is, and a slow phase of
+    // its own so the drift under thrust is not locked to the walk cycle.
+    fly: 0,
+    flyPhase: Math.random() * 10,
     armRX: 0, armRY: 0, armRZ: 0, armRLower: 0,
     armLX: 0, armLY: 0, armLZ: 0, armLLower: 0,
     torsoY: 0, torsoZ: 0, torsoX: 0,
@@ -257,14 +261,36 @@ export function updateRig(model, rig, dt, s) {
   const idle = 1 - stride;                      // how "at rest" the body is
   const airborne = s.grounded ? 0 : clamp01(rig.airTime * 4);
 
-  poseLegs(ud, rig, dt, { stride, dirSign, ph, airborne, land: rig.land, strafe: rig.strafe });
-  posePelvis(ud, rig, dt, { stride, ph, land: rig.land, strafe: rig.strafe, breath, idle });
+  /* How far the pelvis twists into this step.
+     Computed here rather than inside `posePelvis` because the legs need the
+     same number: they hang off the pelvis, so whatever it does to them has to
+     be answered at the hip. See `poseLegs`. */
+  const pelvisSwing = -Math.sin(ph) * PELVIS_SWING * stride * (rig.gaitF + rig.gaitB);
+
+  poseLegs(ud, rig, dt, { stride, dirSign, ph, airborne, land: rig.land, strafe: rig.strafe, pelvisSwing });
+  posePelvis(ud, rig, dt, { stride, ph, land: rig.land, strafe: rig.strafe, breath, idle, pelvisSwing });
   poseTorso(ud, rig, dt, s, { stride, ph, breath, idle, airborne, land: rig.land });
   poseHead(ud, rig, dt, s, { breath, idle, ph, stride });
   poseArms(ud, rig, dt, s, { stride, ph, airborne, breath, idle });
+  // After the gait, before the weapon: flight overrides the limbs, and the
+  // weapon mount has to be resolved from wherever the arms actually ended up.
+  poseFlight(ud, rig, dt, s);
   poseWeapon(ud, rig, dt, s);
   applyCloak(model, s.cloaked);
 }
+
+/* How far the pelvis twists into each step, in radians at a full stride.
+   Seventeen degrees was about double a real running gait, and because both legs
+   hang rigidly off the pelvis it did not read as hip rotation — it swung the
+   whole leg sideways, carrying the forward foot across the centreline. */
+const PELVIS_SWING = 0.15;
+
+/* How much of that twist the hips answer, so the legs keep tracking the way the
+   body is going. This is what a femur does: the pelvis rotates and the leg
+   rotates back under it, which is why a person's feet land in a line and not in
+   a plait. Short of 1 on purpose — fully cancelling it reads as a mannequin
+   sliding along a rail rather than someone walking. */
+const LEG_TRACK = 0.75;
 
 /* ------------------------------------------------------------------ legs */
 /**
@@ -281,7 +307,7 @@ export function updateRig(model, rig, dt, s) {
  */
 function poseLegs(ud, rig, dt, o) {
   if (!ud.legL || !ud.legR) return;
-  const { stride, dirSign, ph, airborne, land } = o;
+  const { stride, dirSign, ph, airborne, land, pelvisSwing } = o;
   const wF = rig.gaitF, wB = rig.gaitB, wS = rig.gaitS;
   const side = rig.strafeSign || 1;
 
@@ -324,10 +350,20 @@ function poseLegs(ud, rig, dt, o) {
     const rest = leg.userData.restZ ?? 0;
     leg.rotation.z = damp(leg.rotation.z, rest - abduct + cross, 12, dt);
 
-    // Feet turn out towards the direction of travel; a side-step turns them
-    // much further than a diagonal run does.
+    /* --- yaw: where the foot points, and undoing the pelvis ---
+       Feet turn out towards the direction of travel; a side-step turns them
+       much further than a diagonal run does. That part is damped, because it
+       follows your intent and should not snap.
+
+       The pelvis compensation is not, and must not be: it cancels something
+       that oscillates at stride frequency, and a damped answer would lag a
+       quarter of a cycle behind the thing it is answering and leave the foot
+       swinging out anyway. So the damped toe-out is kept on the leg itself and
+       the counter-rotation is added on top of it, undamped — the same
+       separation the arms use for their attack poses, and for the same reason. */
     const toeOut = rig.strafe * (0.42 + wS * 0.55) + wB * -rig.strafe * 0.2;
-    leg.rotation.y = damp(leg.rotation.y, toeOut, 10, dt);
+    leg.userData.toeOut = damp(leg.userData.toeOut ?? 0, toeOut, 10, dt);
+    leg.rotation.y = leg.userData.toeOut - pelvisSwing * LEG_TRACK;
   };
   legPose(ud.legL, ph, 1);
   legPose(ud.legR, ph + Math.PI, -1);
@@ -337,8 +373,13 @@ function poseLegs(ud, rig, dt, o) {
     const k = airborne;
     ud.legL.rotation.x = lerp(ud.legL.rotation.x, -0.62, k);
     ud.legR.rotation.x = lerp(ud.legR.rotation.x, 0.34, k);
-    ud.legL.rotation.z = lerp(ud.legL.rotation.z, (ud.legL.userData.restZ ?? 0) + 0.06, k);
-    ud.legR.rotation.z = lerp(ud.legR.rotation.z, (ud.legR.userData.restZ ?? 0) - 0.06, k);
+    // Tucked legs come together a little. Written as "inboard of rest" rather
+    // than as a fixed sign, so it still means that after the splay was flipped.
+    for (const leg of [ud.legL, ud.legR]) {
+      const rest = leg.userData.restZ ?? 0;
+      const out = leg.userData.outZ ?? 1;
+      leg.rotation.z = lerp(leg.rotation.z, rest - out * 0.06, k);
+    }
     if (ud.legL.userData.lower) ud.legL.userData.lower.rotation.x = lerp(ud.legL.userData.lower.rotation.x, 1.15, k);
     if (ud.legR.userData.lower) ud.legR.userData.lower.rotation.x = lerp(ud.legR.userData.lower.rotation.x, 0.5, k);
     if (ud.legL.userData.ankle) ud.legL.userData.ankle.rotation.x = lerp(ud.legL.userData.ankle.rotation.x, 0.34, k);
@@ -367,7 +408,10 @@ function posePelvis(ud, rig, dt, o) {
   const sway = Math.sin(ph) * 0.06 * rig.gaitS * stride * (rig.strafeSign || 1);
   ud.pelvis.position.y = ud.hipY - 0.045 * stride - land * 0.26 + bob + idleBob;
   ud.pelvis.position.x = (ud.hipX ??= ud.pelvis.position.x) + sway;
-  ud.pelvis.rotation.y = -Math.sin(ph) * 0.3 * stride * (rig.gaitF + rig.gaitB) + strafe * 0.24;
+  // The swing half comes in from `updateRig` so the legs can answer the exact
+  // same number. The strafe offset stays here: it is a standing orientation
+  // rather than part of the step, and the feet are meant to follow it.
+  ud.pelvis.rotation.y = o.pelvisSwing + strafe * 0.24;
   ud.pelvis.rotation.z = Math.sin(ph) * (0.1 + rig.gaitS * 0.12) * stride - strafe * 0.12;
   ud.pelvis.rotation.x = damp(ud.pelvis.rotation.x, land * 0.2 - rig.gaitB * stride * 0.1, 12, dt);
 }
@@ -428,6 +472,101 @@ function poseTorso(ud, rig, dt, s, o) {
   // "statue with moving legs" read more than any of the big rotations do.
   const swell = 1 + breath * (0.012 + idle * 0.016);
   torso.scale.set(swell, 1 + breath * 0.006, swell);
+}
+
+/* ---------------------------------------------------------------- flight */
+/**
+ * Under thrust.
+ *
+ * Everything else here is a gait: it reads the horizontal speed and works out
+ * how the feet should be meeting the ground. Flight has no ground to meet, and
+ * it is not a gait with the floor deleted — that is what it looked like before,
+ * and a walk cycle with nothing under it is the most obviously wrong thing a
+ * character can do. Under thrust the legs stop being what moves you and become
+ * what trails behind you, and the throttle takes over from the stride as the
+ * thing the whole body answers to:
+ *
+ *   climbing   vertical, legs hanging, chest tipped back over the thrust
+ *   cruising   pitched forward into the direction of travel, legs streamed out
+ *   hovering   upright and loose, drifting on its own slow phase
+ *
+ * Written as a blend over the finished ground pose rather than as a branch
+ * around it. Taking off then eases out of the walk instead of cutting, landing
+ * eases back in, and anything that still has a claim on the arms — aiming, or
+ * an ability mid-flight — keeps them by holding its own weight back.
+ */
+function poseFlight(ud, rig, dt, s) {
+  // Slightly slower in than out: a takeoff wants to look like it is being
+  // fought for, a landing wants the legs under you before you touch.
+  const want = s.flying ? 1 : 0;
+  rig.fly = damp(rig.fly, want, want > rig.fly ? 6 : 10, dt);
+  if (rig.fly < 0.002) return;
+
+  const k = rig.fly;
+  rig.flyPhase += dt * 1.5;
+  const sway = Math.sin(rig.flyPhase);
+  const sway2 = Math.sin(rig.flyPhase * 0.73 + 1.1);
+
+  const climb = clamp(s.flightClimb ?? 0, -1, 1);
+  const drive = clamp01(rig.stride);            // how hard you are going somewhere
+
+  /* --- trunk ---
+     Nose down into a cruise, chest up under climb. This is the whole read: a
+     flying body says which way it is going with its spine, not its legs. */
+  const lean = drive * 0.34 - climb * 0.44;
+  if (ud.torso) {
+    ud.torso.rotation.x = lerp(ud.torso.rotation.x, lean + sway * 0.03, k);
+    ud.torso.rotation.z = lerp(ud.torso.rotation.z, -rig.strafe * 0.44 + sway2 * 0.03, k);
+  }
+  if (ud.pelvis) {
+    // The pelvis follows the chest at half depth and stops counter-rotating —
+    // there is no step for it to counter.
+    ud.pelvis.rotation.x = lerp(ud.pelvis.rotation.x, lean * 0.55, k);
+    ud.pelvis.rotation.y = lerp(ud.pelvis.rotation.y, 0, k);
+    ud.pelvis.rotation.z = lerp(ud.pelvis.rotation.z, -rig.strafe * 0.2, k);
+    ud.pelvis.position.y = lerp(ud.pelvis.position.y, ud.hipY ?? ud.pelvis.position.y, k);
+  }
+
+  /* --- legs ---
+     Trailing, toes pointed, scissoring gently against each other. How far they
+     trail is the throttle: streamed out behind a fast cruise, hanging straight
+     down off a hard climb. */
+  const trail = 0.22 + drive * 0.6 - climb * 0.18;
+  const knee = 0.55 - drive * 0.3;
+  for (const [leg, sign] of [[ud.legL, 1], [ud.legR, -1]]) {
+    if (!leg) continue;
+    const scissor = sway * 0.11 * sign;
+    const rest = leg.userData.restZ ?? 0;
+    const out = leg.userData.outZ ?? 1;
+    leg.rotation.x = lerp(leg.rotation.x, trail + scissor, k);
+    leg.rotation.z = lerp(leg.rotation.z, rest + out * 0.06 + sway2 * 0.025 * sign, k);
+    leg.rotation.y = lerp(leg.rotation.y, 0, k);
+    if (leg.userData.lower) {
+      leg.userData.lower.rotation.x = lerp(leg.userData.lower.rotation.x, knee - scissor * 1.1, k);
+    }
+    if (leg.userData.ankle) {
+      // Pointed. A flat foot in the air is a person standing on nothing.
+      leg.userData.ankle.rotation.x = lerp(leg.userData.ankle.rotation.x, 0.6 + scissor * 0.5, k);
+    }
+  }
+
+  /* --- arms ---
+     Swept back and out, the way somebody hanging off their own shoulders holds
+     them. Yielded entirely the moment the weapon comes up or an ability plays:
+     those poses are load-bearing — the weapon is cone-clamped to the arm, so an
+     arm left out here would drag the gun off the crosshair. */
+  const free = k * (1 - rig.ready) * (1 - clamp01(rig.attack));
+  if (free > 0.002) {
+    for (const [arm, sign] of [[ud.armR, 1], [ud.armL, -1]]) {
+      if (!arm) continue;
+      arm.rotation.x = lerp(arm.rotation.x, 0.4 + sway * 0.1 * sign, free);
+      arm.rotation.y = lerp(arm.rotation.y, -0.16 * sign, free);
+      arm.rotation.z = lerp(arm.rotation.z, sign * (0.9 + sway2 * 0.06), free);
+      if (arm.userData.lower) {
+        arm.userData.lower.rotation.x = lerp(arm.userData.lower.rotation.x, -0.24, free);
+      }
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ head */

@@ -850,6 +850,13 @@ export class Player {
       grapple: !!this.grapple,
       cloaked: this.buffs.has('cloak'),
       aimPoint: this.aimPoint,
+      flying: !!this.flight,
+      // Normalised throttle: +1 climbing flat out, 0 holding height, -1 sinking.
+      // Read off the velocity rather than the button so it eases with the
+      // damping the thrusters already have instead of snapping on the keypress.
+      flightClimb: this.flight
+        ? clamp(this.velocity.y / (this.flight.riseSpeed || 11), -1, 1)
+        : 0,
     });
     this.modelYaw = this.rig.modelYaw;
     this._readMuzzle();
