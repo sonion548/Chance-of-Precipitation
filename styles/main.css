@@ -459,6 +459,9 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: none; ba
 }
 .panel-foot.stack { flex-direction: column; }
 .panel-foot.stack > * { width: 100%; }
+/* Push a pair of footer actions to opposite ends: the safe one and the one
+   that erases the account should not sit next to each other under the thumb. */
+.panel-foot.spread { justify-content: space-between; }
 .big-btn {
   flex: 1; padding: 13px 24px; border-radius: 6px; font-size: 17px; letter-spacing: 4px;
   text-transform: uppercase; font-weight: 600;
@@ -623,6 +626,8 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: none; ba
   color: #ff8f9a; background: rgba(255,77,94,.07); transition: .15s;
 }
 .danger-btn:hover { border-color: var(--danger); background: rgba(255,77,94,.16); color: #ffc4ca; }
+.ghost-btn:disabled { opacity: .45; cursor: default; }
+.ghost-btn:disabled:hover { border-color: var(--line); color: var(--muted); background: none; }
 .danger-btn.armed {
   letter-spacing: 1.5px; color: #fff; background: var(--danger); border-color: var(--danger);
   animation: armedPulse .9s ease-in-out infinite;

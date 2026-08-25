@@ -3,9 +3,9 @@
  * Stored in localStorage; degrades gracefully to an in-memory profile when
  * storage is unavailable (private browsing, file:// sandboxes).
  */
-import { DEFAULT_UNLOCKED_ITEMS } from '../data/items.js';
-import { DEFAULT_UNLOCKED_WEAPONS, DEFAULT_WEAPON } from '../data/weapons.js';
-import { DEFAULT_UNLOCKED_CHARACTERS, DEFAULT_CHARACTER } from '../data/characters.js';
+import { ITEMS, DEFAULT_UNLOCKED_ITEMS } from '../data/items.js';
+import { WEAPONS, DEFAULT_UNLOCKED_WEAPONS, DEFAULT_WEAPON } from '../data/weapons.js';
+import { CHARACTERS, DEFAULT_UNLOCKED_CHARACTERS, DEFAULT_CHARACTER } from '../data/characters.js';
 import { VERSION } from '../core/config.js';
 
 const KEY = 'chance-of-precipitation.profile.v1';
@@ -207,6 +207,34 @@ export class Profile {
     s.highestDifficulty = Math.max(s.highestDifficulty, result.difficulty);
     for (let i = 1; i <= result.stagesCleared; i++) this.data.stagesEverCleared[i] = true;
     this.save();
+  }
+
+  /**
+   * Grants every item, weapon and character at once.
+   *
+   * Echoes are deliberately left alone: this hands over the catalogue, not the
+   * currency, so the counter still reads as what you actually earned. Returns
+   * how many things were newly unlocked, which is the only interesting thing to
+   * say about it afterwards.
+   */
+  unlockAll() {
+    const before = this.data.unlockedItems.length
+      + this.data.unlockedWeapons.length
+      + this.data.unlockedCharacters.length;
+    this.data.unlockedItems = [...new Set([...this.data.unlockedItems, ...ITEMS.map((i) => i.id)])];
+    this.data.unlockedWeapons = [...new Set([...this.data.unlockedWeapons, ...WEAPONS.map((w) => w.id)])];
+    this.data.unlockedCharacters = [...new Set([...this.data.unlockedCharacters, ...CHARACTERS.map((c) => c.id)])];
+    this.save();
+    return this.data.unlockedItems.length
+      + this.data.unlockedWeapons.length
+      + this.data.unlockedCharacters.length - before;
+  }
+
+  /** True once there is nothing left to unlock. */
+  get everythingUnlocked() {
+    return this.data.unlockedItems.length >= ITEMS.length
+      && this.data.unlockedWeapons.length >= WEAPONS.length
+      && this.data.unlockedCharacters.length >= CHARACTERS.length;
   }
 
   /**

@@ -161,6 +161,24 @@ export class Menus {
     });
 
     $('reset-btn').addEventListener('click', () => this._resetAccount());
+    $('unlock-all-btn').addEventListener('click', () => this._unlockEverything());
+  }
+
+  /**
+   * Hands over the whole catalogue.
+   *
+   * One click, no confirmation: nothing is lost — Echoes and records are
+   * untouched, and Reset Account puts it all back if it was a misclick. Making
+   * a purely additive button ask twice is friction for its own sake.
+   */
+  _unlockEverything() {
+    const granted = this.profile.unlockAll();
+    this._renderSettings();
+    this._renderMenu();
+    this.game.hud.toast(
+      granted > 0 ? `Unlocked ${granted} item${granted === 1 ? '' : 's'}, weapons and characters` : 'Everything was already unlocked',
+      '#ffcf5c',
+    );
   }
 
   /**
@@ -698,13 +716,21 @@ export class Menus {
       <div class="stat-rows">
         <div class="stat-row"><span>Echoes Available</span><b>${formatNumber(this.profile.echoes)}</b></div>
         <div class="stat-row"><span>Runs Recorded</span><b>${formatNumber(s.runs)}</b></div>
-        <div class="stat-row"><span>Unlocks Owned</span><b>${
-          this.profile.data.unlockedItems.length
-          + this.profile.data.unlockedWeapons.length
-          + this.profile.data.unlockedCharacters.length}</b></div>
+        <div class="stat-row"><span>Items Unlocked</span><b>${this.profile.data.unlockedItems.length} / ${ITEMS.length}</b></div>
+        <div class="stat-row"><span>Weapons Unlocked</span><b>${this.profile.data.unlockedWeapons.length} / ${WEAPONS.length}</b></div>
+        <div class="stat-row"><span>Characters Unlocked</span><b>${this.profile.data.unlockedCharacters.length} / ${CHARACTERS.length}</b></div>
       </div>
-      <p class="set-warn">Resetting the account erases every Echo, unlock, record and option on this
-      device and puts the game back to a first launch. There is no undo and no backup.</p>`;
+      <p class="set-warn"><b>Unlock Everything</b> grants the whole catalogue at no Echo cost — it
+      spends nothing and loses nothing, but it does end the Sanctum as something to work toward.
+      <b>Reset Account</b> erases every Echo, unlock, record and option on this device and puts the
+      game back to a first launch. There is no undo and no backup.</p>`;
+
+    const unlockBtn = $('unlock-all-btn');
+    if (unlockBtn) {
+      const done = this.profile.everythingUnlocked;
+      unlockBtn.disabled = done;
+      unlockBtn.textContent = done ? 'Everything Unlocked' : 'Unlock Everything';
+    }
   }
 
   // ------------------------------------------------------------------ help
