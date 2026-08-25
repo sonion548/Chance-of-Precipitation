@@ -1,3 +1,5 @@
+import { settings } from './settings.js';
+
 /**
  * True when a key event belongs to something the player is typing into.
  *
@@ -20,7 +22,13 @@ export function isTextTarget(target) {
   return !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(type);
 }
 
-/** Keyboard + mouse with pointer lock. Exposes edge-triggered and held state. */
+/**
+ * Keyboard + mouse with pointer lock, addressed by *action* rather than by key.
+ *
+ * Mouse buttons live in the same code namespace as keys (`Mouse0`, `Mouse1`,
+ * `Mouse2`), which is what makes the rebinding screen able to offer them for
+ * any action: there is no separate "mouse binding" path to keep in step.
+ */
 export class Input {
   constructor(domElement) {
     this.dom = domElement;
@@ -32,21 +40,61 @@ export class Input {
     this.everLocked = false;
     this.sensitivityScale = 1;
     this.enabled = true;
+    // While the rebinding screen is listening, every press is a candidate
+    // binding and none of them are gameplay.
+    this.captureNext = null;
     this._bind();
+  }
+
+  /* ------------------------------------------------------------- bindings */
+  bindingsFor(action) { return settings.bindingsFor(action); }
+
+  /** Is any code bound to `action` currently held? */
+  actionDown(action) {
+    const list = settings.data.bindings[action];
+    if (!list) return false;
+    for (const c of list) if (this.keys.has(c)) return true;
+    return false;
+  }
+
+  actionPressed(action) {
+    const list = settings.data.bindings[action];
+    if (!list) return false;
+    for (const c of list) if (this.pressed.has(c)) return true;
+    return false;
+  }
+
+  actionReleased(action) {
+    const list = settings.data.bindings[action];
+    if (!list) return false;
+    for (const c of list) if (this.released.has(c)) return true;
+    return false;
   }
 
   _bind() {
     const kd = (e) => {
+      const c = e.code;
+      if (this.captureNext) {
+        // Escape cancels a capture rather than being bound to anything. Either
+        // way the press belongs to the rebind and to nothing else — without
+        // stopping it here, cancelling a rebind would also unpause the run.
+        if (c !== 'Escape') e.preventDefault();
+        e.stopImmediatePropagation();
+        const fn = this.captureNext;
+        this.captureNext = null;
+        fn(c === 'Escape' ? null : c);
+        return;
+      }
       if (!this.enabled) return;
       // Typing into a field is not input to the game — do not read it, and do
       // not preventDefault it, or the character never lands in the box.
       if (isTextTarget(e.target)) { this.keys.clear(); return; }
       if (e.repeat) return;
-      const c = e.code;
       this.keys.add(c);
       this.pressed.add(c);
       // Stop the browser from scrolling / activating on gameplay keys.
-      if (['Space', 'Tab', 'KeyE', 'KeyR', 'KeyQ', 'KeyF', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(c)) e.preventDefault();
+      if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(c)
+        || this._isBound(c)) e.preventDefault();
     };
     const ku = (e) => {
       if (isTextTarget(e.target)) return;
@@ -55,7 +103,10 @@ export class Input {
     };
     window.addEventListener('keydown', kd);
     window.addEventListener('keyup', ku);
-    window.addEventListener('blur', () => { this.keys.clear(); this.mouse.left = this.mouse.right = false; });
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.mouse.left = this.mouse.right = false;
+    });
     // Clicking into a field mid-stride would otherwise leave that key held down
     // forever, because the keyup lands on the field and never reaches us.
     document.addEventListener('focusin', (e) => { if (isTextTarget(e.target)) this.keys.clear(); });
@@ -63,17 +114,27 @@ export class Input {
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.dom;
       if (this.locked) { this.everLocked = true; return; }
-      this.mouse.left = this.mouse.right = false;
+      this._clearMouse();
       this.onUnlock?.();
     });
     document.addEventListener('pointerlockerror', () => { this.locked = false; });
 
     this.dom.addEventListener('mousedown', (e) => {
+      if (this.captureNext) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const fn = this.captureNext;
+        this.captureNext = null;
+        fn(`Mouse${e.button}`);
+        return;
+      }
       if (!this.locked || !this.enabled) return;
+      this._pressCode(`Mouse${e.button}`);
       if (e.button === 0) { this.mouse.left = true; this.mouse.leftPressed = true; }
       if (e.button === 2) { this.mouse.right = true; this.mouse.rightPressed = true; }
     });
     window.addEventListener('mouseup', (e) => {
+      this._releaseCode(`Mouse${e.button}`);
       if (e.button === 0) { this.mouse.left = false; this.mouse.leftReleased = true; }
       if (e.button === 2) { this.mouse.right = false; this.mouse.rightReleased = true; }
     });
@@ -84,6 +145,27 @@ export class Input {
     });
     this.dom.addEventListener('contextmenu', (e) => e.preventDefault());
     this.dom.addEventListener('wheel', (e) => { if (this.locked) { this.mouse.wheel += Math.sign(e.deltaY); e.preventDefault(); } }, { passive: false });
+  }
+
+  /** True when the code drives any action — used to decide about preventDefault. */
+  _isBound(code) {
+    for (const list of Object.values(settings.data.bindings)) {
+      if (list.includes(code)) return true;
+    }
+    return false;
+  }
+
+  _pressCode(c) { this.keys.add(c); this.pressed.add(c); }
+  _releaseCode(c) { this.keys.delete(c); this.released.add(c); }
+
+  _clearMouse() {
+    this.mouse.left = this.mouse.right = false;
+    for (let b = 0; b < 5; b++) this.keys.delete(`Mouse${b}`);
+  }
+
+  /** Ask for the next key or button the player presses. `fn(code|null)`. */
+  captureBinding(fn) {
+    this.captureNext = fn;
   }
 
   requestLock() {
@@ -107,12 +189,19 @@ export class Input {
   /** Movement vector in local space: x = strafe, y = forward. */
   moveAxis() {
     let x = 0, y = 0;
-    if (this.anyDown('KeyW', 'ArrowUp')) y += 1;
-    if (this.anyDown('KeyS', 'ArrowDown')) y -= 1;
-    if (this.anyDown('KeyD', 'ArrowRight')) x += 1;
-    if (this.anyDown('KeyA', 'ArrowLeft')) x -= 1;
+    if (this.actionDown('moveForward')) y += 1;
+    if (this.actionDown('moveBack')) y -= 1;
+    if (this.actionDown('moveRight')) x += 1;
+    if (this.actionDown('moveLeft')) x -= 1;
     const len = Math.hypot(x, y);
     return len > 1 ? { x: x / len, y: y / len } : { x, y };
+  }
+
+  /** Look delta for this frame, with sensitivity and inversion already applied. */
+  lookDelta(aiming = false) {
+    const s = settings.data;
+    const scale = s.sensitivity * this.sensitivityScale * (aiming ? s.aimSensitivity : 1);
+    return { x: this.mouse.dx * scale, y: this.mouse.dy * scale * (s.invertY ? -1 : 1) };
   }
 
   /** Call once at the end of each frame. */

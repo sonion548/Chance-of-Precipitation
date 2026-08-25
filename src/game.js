@@ -2,14 +2,18 @@ import * as THREE from 'three';
 import { Engine } from './core/engine.js';
 import { Input, isTextTarget } from './core/input.js';
 import { RNG } from './core/rng.js';
-import { TELEPORTER, PLAYER, MINIONS, RARITY, COOP } from './core/config.js';
+import { TELEPORTER, DIFFICULTY, PLAYER, ECONOMY, PETS, RARITY, PARTY, FINAL, COOP } from './core/config.js';
+import { clamp01, formatTime, formatNumber } from './core/mathx.js';
+import { audio } from './core/audio.js';
 
 import { Arena } from './world/arena.js';
 import { Player } from './entities/player.js';
 import { EnemyManager } from './entities/enemy.js';
 import { ProjectileManager } from './entities/projectiles.js';
-import { Chest, Teleporter, PickupManager, Egg } from './entities/interactables.js';
-import { MinionManager } from './entities/minion.js';
+import { Chest, Teleporter, PickupManager, Egg, Portal } from './entities/interactables.js';
+import { PetManager } from './entities/pet.js';
+import { rollPetSpecies } from './data/pets.js';
+import { finalTheme } from './world/themes.js';
 import { characterById } from './data/characters.js';
 import { itemById } from './data/items.js';
 import { Coop } from './net/coop.js';
@@ -22,6 +26,7 @@ import { rollItem } from './systems/loot.js';
 
 import { HUD } from './ui/hud.js';
 import { Menus } from './ui/menus.js';
+import { Chat } from './ui/chat.js';
 
 import { profile } from './meta/save.js';
 import { computeEchoes, runModeById } from './meta/progression.js';
@@ -46,6 +51,7 @@ export class Game {
     this.hud = new HUD(this);
     this.ui = this.hud;                 // systems address floating text via game.ui
     this.coop = new Coop(this);
+    this.chat = new Chat(this);
     this.menus = new Menus(this);
 
     this.state = 'menu';                // menu | running | paused | dead
@@ -63,34 +69,28 @@ export class Game {
     // never granted at all (embedded frames, some kiosk setups), keep playing
     // rather than trapping them on the pause screen.
     this.input.onUnlock = () => {
+      // Opening the chat releases the mouse on purpose; that is not a pause.
+      if (this.chat?.open) return;
       if (this.state === 'running' && this.input.everLocked) this.pause();
     };
 
     window.addEventListener('keydown', (e) => this._onKey(e));
+    // Browsers refuse to make a sound until the page has been touched. Both of
+    // these fire once and then cost nothing.
+    const wake = () => audio.unlock();
+    window.addEventListener('pointerdown', wake);
+    window.addEventListener('keydown', wake);
     document.addEventListener('click', () => {
       // Clicking the canvas while a run is live re-acquires pointer lock.
-      if (this.state === 'running' && !this.input.locked && this.menus.current === 'none') {
+      if (this.state === 'running' && !this.input.locked && !this.chat?.open
+        && this.menus.current === 'none') {
         this.input.requestLock();
       }
     });
 
-    this.applySettings();
 
     this._loop = this._loop.bind(this);
     this._lastFrame = performance.now();
-  }
-
-  /**
-   * Pushes the saved options into the systems that act on them.
-   *
-   * Called at boot, whenever a setting changes, and after an account reset —
-   * a reset that left the old sensitivity in place would be a reset in name only.
-   */
-  applySettings() {
-    const st = this.profile.data.settings || {};
-    this.input.sensitivityScale = st.sensitivity ?? 1;
-    this.engine.shakeScale = st.screenShake ?? 1;
-    this.hud.showDamageNumbers = st.damageNumbers !== false;
   }
 
   // ==================================================================== run
@@ -116,6 +116,7 @@ export class Game {
       chestsOpened: 0,
       mode: mode.id,
       killedBy: null,
+      victory: false,
       // Scratch space items persist values in (Eclipse Crown, Infusion Core, …)
       infusion: 0,
       crown: 0,
@@ -130,7 +131,7 @@ export class Game {
     this.enemies = new EnemyManager(this);
     this.projectiles = new ProjectileManager(this);
     this.pickups = new PickupManager(this);
-    this.minions = new MinionManager(this);
+    this.pets = new PetManager(this);
     this.inventory = new Inventory(this);
 
     // A client has no stage until the host sends one, but it still needs an
@@ -149,12 +150,15 @@ export class Game {
     this.hud.buildAbilities(this.combat.weapon, this.combat.character);
     this.hud.show();
     this.hud.lastInventorySignature = '';
+    this.chat.clear();
     this.menus.hide();
 
     this.state = 'running';
     this.paused = false;
     this.time = 0;
     this._lastFrame = performance.now();
+    audio.unlock();
+    audio.setIntensity(0.1);
     this.input.requestLock();
     this.hud.toast(`${this.player.char.name} — ${this.arena.theme.name}`, '#46e0c0');
     if (this.coop?.isHost) this.coop.onStageBuilt();
@@ -164,13 +168,16 @@ export class Game {
     this.enemies?.clear();
     this.projectiles?.clear();
     this.pickups?.clear();
-    this.minions?.clear();
+    this.pets?.clear();
     for (const c of this.chests || []) c.dispose();
     this.chests = [];
     for (const e of this.eggs || []) e.dispose();
     this.eggs = [];
     this.teleporter?.dispose();
     this.teleporter = null;
+    this.portal?.dispose();
+    this.portal = null;
+    this.finalStage = false;
     if (this.player) {
       this.player.model.parent?.remove(this.player.model);
       this.player = null;
@@ -190,7 +197,7 @@ export class Game {
    * placed *on* it (chests, eggs, the beacon) is sent over the wire instead,
    * because those carry state that has to agree, not just geometry.
    */
-  _buildStage(stage, layout = null) {
+  _buildStage(stage, layout = null, opts = {}) {
     // A client waiting on the host builds one agreed placeholder rather than an
     // arena of its own: an arena only it can see is an arena it stands on at a
     // height nobody else believes in, which is exactly how a teammate ends up
@@ -198,11 +205,28 @@ export class Game {
     const seed = layout?.pending
       ? COOP.pendingSeed
       : (layout?.seed ?? this.rng.int(1, 0x7ffffffe));
+    const final = opts.final ?? !!layout?.final;
     this.stageSeed = seed;
     this.stagePending = !!layout?.pending;
+    this.finalStage = final;
+    /* One difficulty reading, taken here, that prices everything on the stage.
+     *
+     * Chests and eggs both used to sample `director.difficulty` whenever they
+     * felt like it, which climbs every second — so the price of a thing changed
+     * between seeing it and reaching it. Freezing it at the door means the
+     * stage is a shop with a price list, and the list only changes when you
+     * descend. */
+    this.stageDifficulty = layout?.diff ?? this.director?.difficulty ?? 1;
+    const previousTheme = this.arena?.theme?.id ?? null;
     this.arena?.dispose();
-    this.arena = new Arena(this.engine.scene, seed, stage);
+    this.arena = new Arena(this.engine.scene, seed, stage, {
+      theme: final ? finalTheme() : null,
+      themeId: layout?.theme ?? null,
+      avoidTheme: previousTheme,
+    });
+    this.stageThemeId = this.arena.theme.id;
     this.engine.setTheme(this.arena.theme);
+    audio.setMusic(this.arena.theme.id);
 
     for (const c of this.chests) c.dispose();
     this.chests = [];
@@ -210,16 +234,38 @@ export class Game {
     this.eggs = [];
     this.teleporter?.dispose();
     this.teleporter = null;
+    this.portal?.dispose();
+    this.portal = null;
     this.stageCleared = false;
     this.bossRefs = [];
 
     if (layout?.pending) return;              // waiting on the host's packet
+    // The sanctum has no shops and no way onward. Nothing to place.
+    if (final) return;
     if (layout) { this._placeFromLayout(layout); return; }
 
     // Interactable placement: mostly ordinary chests, with rarer, richer options.
-    const eggCount = this.rng.int(MINIONS.eggsPerStage[0], MINIONS.eggsPerStage[1]);
-    const chestCount = 6 + this.rng.int(0, 3) + Math.min(3, stage - 1);
-    const points = this.arena.scatterPoints(this.rng, chestCount + 5 + eggCount, { minSeparation: 13, minRadius: 17 });
+    // More people means more buyers, so the stage has to stock more shelves —
+    // otherwise the second player through the door finds an empty arena.
+    const extra = Math.max(0, this.partySize - 1);
+    const eggBonus = Math.round(extra * PARTY.eggsPerPlayer) + (this.player?.stats.extraEggs ?? 0);
+    // Interactable counts scale with the floor area, not just with the party.
+    // The arenas are between a third and a half again as wide as they were, and
+    // a stage stocked for the old disc reads as an empty field with a chest in
+    // the corner of it.
+    const spread = Math.min(3.4, Math.pow(this.arena.radius / 78, 1.35));
+    // Eggs scale at half the rate the shelves do. A chest is a purchase you
+    // make once; a lizard is a permanent addition to the party, so eight of
+    // them a stage is a different game rather than a bigger one.
+    const eggSpread = 1 + (spread - 1) * 0.45;
+    const eggCount = Math.round(this.rng.int(PETS.eggsPerStage[0], PETS.eggsPerStage[1]) * eggSpread) + eggBonus;
+    const chestCount = Math.round((6 + this.rng.int(0, 3) + Math.min(4, stage - 1)) * spread)
+      + Math.round(extra * PARTY.chestsPerPlayer);
+    const shrineCount = 2 + this.rng.int(0, 2);
+    const points = this.arena.scatterPoints(
+      this.rng, chestCount + shrineCount + eggCount + 8,
+      { minSeparation: 15, minRadius: (this.arena.theme.terrain?.plateauRadius ?? 16) + 3 },
+    );
 
     let i = 0;
     for (; i < chestCount && i < points.length; i++) {
@@ -229,8 +275,22 @@ export class Game {
       if (roll > 0.975) kind = 'legendary';
       this.chests.push(new Chest(this, kind, points[i]));
     }
-    const shrines = 1 + (this.rng.next() < 0.45 ? 1 : 0);
-    for (let s = 0; s < shrines && i < points.length; s++, i++) {
+
+    /* Devices.
+     *
+     * Two or three a stage, drawn without replacement, so you get a couple of
+     * the four rather than one of each every time — which is what makes finding
+     * a Blood Altar worth crossing the arena for. They are placed after the
+     * chests and before the shrines so they land on the good open points. */
+    const deviceKinds = ['altar', 'cache', 'duplicator', 'forge'];
+    const deviceCount = Math.min(deviceKinds.length, 2 + (this.rng.next() < 0.55 ? 1 : 0)
+      + Math.round(extra * 0.4));
+    for (let d = 0; d < deviceCount && i < points.length; d++, i++) {
+      const pick = this.rng.int(0, deviceKinds.length - 1);
+      const kind = deviceKinds.splice(pick, 1)[0];
+      this.chests.push(new Chest(this, kind, points[i]));
+    }
+    for (let s = 0; s < shrineCount && i < points.length; s++, i++) {
       this.chests.push(new Chest(this, 'shrine', points[i]));
     }
     // The Shrine of Ruin stays rare, and never on the opening stage: it is a
@@ -245,12 +305,12 @@ export class Game {
       ?? characterById(this.profile.data.equippedCharacter)?.accent
       ?? 0xff8a3d;
     for (let e = 0; e < eggCount && i < points.length; e++, i++) {
-      this.eggs.push(new Egg(this, points[i], accent));
+      this.eggs.push(new Egg(this, points[i], accent, rollPetSpecies(this.rng), e));
     }
     this.chests.forEach((c, idx) => { c.index = idx; });
     this.eggs.forEach((e, idx) => { e.index = idx; });
 
-    const tpPoint = this.arena.findSpawnPoint(this.rng, { minDist: 30, maxDist: 60 });
+    const tpPoint = this.arena.findSpawnPoint(this.rng, { minDist: 34, maxDist: this.arena.radius - 22 });
     this.teleporter = new Teleporter(this, tpPoint);
   }
 
@@ -268,14 +328,19 @@ export class Game {
       this.chests.push(chest);
     });
     layout.eggs.forEach((e, idx) => {
-      const egg = new Egg(this, _v.set(e.x, e.y, e.z), accent);
+      const egg = new Egg(this, _v.set(e.x, e.y, e.z), accent, e.s || 'lizard', e.q ?? idx);
       egg.index = idx;
+      // The host's price list is authoritative: two people standing at the same
+      // egg must be quoted the same number.
+      if (typeof e.cost === 'number') egg.cost = e.cost;
       egg.hatched = !!e.h;
       this.eggs.push(egg);
     });
-    this.teleporter = new Teleporter(this, _v.set(layout.tp.x, layout.tp.y, layout.tp.z));
-    this.teleporter.state = layout.tp.state || 'idle';
-    this.teleporter.charge = layout.tp.charge || 0;
+    if (layout.tp) {
+      this.teleporter = new Teleporter(this, _v.set(layout.tp.x, layout.tp.y, layout.tp.z));
+      this.teleporter.state = layout.tp.state || 'idle';
+      this.teleporter.charge = layout.tp.charge || 0;
+    }
   }
 
   /* ------------------------------------------------------ co-op replication */
@@ -284,6 +349,9 @@ export class Game {
       k: 'stage',
       stage: this.run.stage,
       seed: this.stageSeed,
+      theme: this.stageThemeId,
+      final: this.finalStage ? 1 : 0,
+      portal: this.portal ? { x: this.portal.position.x, y: this.portal.position.y, z: this.portal.position.z } : null,
       // The seed is the instruction; the hash is the receipt. A client that
       // rebuilds and gets a different number knows immediately, instead of
       // finding out when a teammate walks through a wall that is not there.
@@ -294,24 +362,38 @@ export class Game {
         k: c.kind, x: c.position.x, y: c.position.y, z: c.position.z,
         cost: c.cost, uses: c.uses, o: c.opened ? 1 : 0,
       })),
-      eggs: this.eggs.map((e) => ({ x: e.position.x, y: e.position.y, z: e.position.z, h: e.hatched ? 1 : 0 })),
-      tp: {
+      diff: this.stageDifficulty,
+      eggs: this.eggs.map((e) => ({
+        x: e.position.x, y: e.position.y, z: e.position.z, h: e.hatched ? 1 : 0, s: e.species,
+        cost: e.cost, q: e.sequence,
+      })),
+      // The sanctum has no Beacon. Reading one unconditionally threw here and
+      // the exception ate the whole packet, so the boss replicated to clients
+      // but the arena it lives in did not.
+      tp: this.teleporter ? {
         x: this.teleporter.position.x, y: this.teleporter.position.y, z: this.teleporter.position.z,
         state: this.teleporter.state, charge: this.teleporter.charge,
-      },
+      } : null,
     };
   }
 
   applyStagePacket(m) {
-    const advancing = this.run.stage !== m.stage || this.stageSeed !== m.seed || this.stagePending;
+    const advancing = this.run.stage !== m.stage || this.stageSeed !== m.seed
+      || this.stageThemeId !== m.theme || this.stagePending;
     this.run.stage = m.stage;
     if (typeof m.bosses === 'number') this.run.bossCountBonus = m.bosses;
     if (typeof m.bossItems === 'number') this.run.bossItemBonus = m.bossItems;
     this.enemies.clear();
     this.projectiles.clear();
     this.pickups.clear();
-    this._buildStage(m.stage, m);
+    this._buildStage(m.stage, m, { final: !!m.final });
     this._verifyTerrain(m.th);
+    if (m.final) {
+      this.hud.setObjective('The Null Sovereign', 0, 'Kill it, or do not leave');
+      this.hud.toast('THE NULL SANCTUM', '#ff2f8f');
+    } else if (m.portal) {
+      this.applyPortalState(m.portal);
+    }
     if (!advancing) return;
 
     const p = this.player;
@@ -322,12 +404,31 @@ export class Game {
       p.snapCamera();
       if (p.dead) this.revivePlayer(1);
       else p.heal(p.stats.maxHealth * 0.25, 'Descent');
+      this.spendGoldOnDescent();
     }
-    this.minions.regroup();
+    this.pets.regroup();
     this.hud.setBoss(null);
     this.hud.setObjective(null);
     this.hud.toast(`${this.arena.theme.name} — Stage ${this.run.stage}`, '#46e0c0');
     this.engine.addShake(0.5);
+  }
+
+  /**
+   * Gold does not survive a stage.
+   *
+   * Chest prices climb with the difficulty coefficient, so gold hoarded on
+   * stage one buys almost nothing on stage five — carrying it forward only ever
+   * rewarded not spending it. Wiping the purse at every descent makes each
+   * stage a closed economy: everything you earn here is meant to be spent here,
+   * and standing in front of a chest you cannot quite afford is a real decision
+   * rather than a reason to walk away and come back richer.
+   */
+  spendGoldOnDescent() {
+    const p = this.player;
+    if (!p) return;
+    const had = p.gold;
+    p.gold = 0;
+    if (had > 0) this.hud.toast(`${formatNumber(had)} gold spent on the descent`, '#ffcf5c');
   }
 
   /**
@@ -400,6 +501,8 @@ export class Game {
       if (!egg || egg.hatched) return;
       egg.hatched = true;
       this.coop.onEggState(m.i);
+    } else if (m.kind === 'portal') {
+      if (this.portal?.interactable) this.enterFinalArena();
     } else if (m.kind === 'tp') {
       const tp = this.teleporter;
       if (!tp) return;
@@ -435,9 +538,9 @@ export class Game {
   }
 
   /** Rebuilds a teammate's lizards from their state stream: puppets, no AI. */
-  applyRemoteMinions(peerId, list, owner) {
+  applyRemotePets(peerId, list, owner) {
     if (!owner) return;
-    this.minions.applyRemote(peerId, list, owner);
+    this.pets.applyRemote(peerId, list, owner);
   }
 
   spawnRemoteShot(m) {
@@ -480,12 +583,39 @@ export class Game {
     this.fx.ring(p.position, 0.5, 5, 0x4be08a, 0.6, 1);
     this.fx.explosion(p.chestPosition, 3, 0x4be08a, 0.7);
     this.hud.toast('BACK ON YOUR FEET', '#4be08a');
+    this.chat.system('You are back on your feet', '#4be08a');
   }
 
   /** Everyone is down (or the host said the run is over). */
   finishCoopRun() {
     if (this.state === 'menu') return;
     this._finishRun(false);
+  }
+
+  /**
+   * How many people are in this run, alive or downed.
+   *
+   * Distinct from `party()`, which is who the enemies can currently chase — the
+   * world should not get easier the moment somebody goes down.
+   */
+  get partySize() {
+    if (!this.coop?.active) return 1;
+    // Count the lobby, not the avatars. A remote body is only created when its
+    // first state packet arrives, which is *after* the host has already built
+    // stage one — so asking the scene how many players there are gave the first
+    // arena of every run a solo stocking.
+    return Math.max(1, 1 + this.coop.session.peers.size);
+  }
+
+  /**
+   * What everything on the stage costs you, as a fraction of its listed price.
+   *
+   * Read live rather than baked into each interactable, so picking up a
+   * Covenant of Debt marks down the chest you are already standing in front of
+   * rather than only the ones on the next stage.
+   */
+  get priceMultiplier() {
+    return 1 - (this.player?.stats.priceMult ?? 0);
   }
 
   /** Who the enemies are allowed to fight. */
@@ -513,13 +643,15 @@ export class Game {
     p.velocity.set(0, 0, 0);
     p.snapCamera();
     p.heal(p.stats.maxHealth * 0.25, 'Descent');
+    this.spendGoldOnDescent();
     // The brood comes down with you, whole — they are a purchase, not a rental.
-    this.minions.regroup();
+    this.pets.regroup();
 
     this.director.eventMultiplier = 1;
     this.hud.setObjective(null);
     this.hud.toast(`${this.arena.theme.name} — Stage ${this.run.stage}`, '#46e0c0');
     this.engine.addShake(0.5);
+    audio.descend();
     // Descending is also how a downed party gets back on its feet.
     if (p.dead) this.revivePlayer(1);
     this.coop?.onStageBuilt();
@@ -543,6 +675,8 @@ export class Game {
     if (this.bossRefs.length) this.hud.setBoss(this.bossRefs[0], this.bossRefs.length);
     this.hud.toast(count > 1 ? `BEACON ACTIVE — ${count} guardians` : 'BEACON ACTIVE — hold the ring', '#46e0c0');
     this.engine.addShake(0.6);
+    audio.teleporter('charging');
+    if (this.bossRef) audio.bossSpawn();
   }
 
   /** The living guardians of the current beacon event, host side. */
@@ -564,11 +698,13 @@ export class Game {
       if (charged && bossDown) {
         tp.state = 'ready';
         this.coop?.onTeleporterState();
+        this._openFinalPortal();
         this.director.eventMultiplier = 1;
         this.enemies.killAll('teleporter');
         const bonus = Math.round(this.player.gold * TELEPORTER.postClearGoldBonus) + 25;
         this.player.addGold(bonus);
         this.hud.toast('STAGE CLEAR', '#ffb347');
+        audio.teleporter('ready');
         this.hud.setObjective('Beacon Ready', 1, 'Interact to descend');
         // Clearing a stage always yields one good item — each.
         this.spawnBossLoot(tp.position.clone().setY(tp.position.y + 2.5));
@@ -583,6 +719,16 @@ export class Game {
     } else if (tp.state === 'idle') {
       const d = this.player.position.distanceTo(tp.position);
       this.hud.setObjective('Locate the Beacon', 0, d < 900 ? `${Math.round(d)}m away` : '');
+    }
+  }
+
+  /** In the sanctum there is exactly one objective, and it has a health bar. */
+  _updateFinalObjective() {
+    const boss = this.bossRef;
+    if (boss && !boss.dead) {
+      this.hud.setObjective('The Null Sovereign', 1 - boss.health / boss.maxHealth, 'Kill it, or do not leave');
+    } else if (this.run.victory) {
+      this.hud.setObjective('Sanctum Silent', 1, 'The descent is over');
     }
   }
 
@@ -603,6 +749,110 @@ export class Game {
       const d = this.player.position.distanceTo(tp.position);
       this.hud.setObjective('Locate the Beacon', 0, `${Math.round(d)}m away`);
     }
+  }
+
+  /* ------------------------------------------------------- the final fight */
+  /**
+   * Opens the rift beside the Beacon, once the descent is deep enough.
+   *
+   * It appears at the same moment the Beacon turns green, so clearing a stage
+   * from stage five onward presents two doors rather than one: keep descending
+   * forever, or take the ending. Nobody is pushed through it.
+   */
+  _openFinalPortal() {
+    if (this.coopClient || this.run.stage < FINAL.unlockStage || this.portal) return;
+    const tp = this.teleporter;
+    if (!tp) return;
+    const at = tp.position.clone();
+    at.x += 9;
+    at.y = this.arena.groundHeightAt(at.x, at.z);
+    this.portal = new Portal(this, at);
+    this.portal.armed = true;
+    this.hud.toast('A RIFT HAS OPENED BESIDE THE BEACON', '#ff2f8f');
+    this.chat.system('A rift has torn open beside the Beacon. Something is waiting on the other side.', '#ff2f8f');
+    this.coop?.onPortalState();
+  }
+
+  /** Client mirror: the host tells us the rift exists and where. */
+  applyPortalState(m) {
+    if (!m || this.portal) return;
+    this.portal = new Portal(this, _v.set(m.x, m.y, m.z));
+    this.portal.armed = true;
+    this.hud.toast('A RIFT HAS OPENED BESIDE THE BEACON', '#ff2f8f');
+  }
+
+  /**
+   * Steps the whole party through into the Null Sanctum.
+   *
+   * A one-way door: no chests, no eggs, no Beacon, and nothing to descend to.
+   * Whatever build you walked in with is the build you finish on.
+   */
+  enterFinalArena() {
+    if (this.finalStage) return;
+    this.finalStage = true;
+    this.run.stage++;
+    this.run.stagesCleared++;
+    this.director.onStageCleared();
+    this.director.eventMultiplier = FINAL.directorMultiplier;
+
+    this.enemies.clear();
+    this.projectiles.clear();
+    this.pickups.clear();
+    this.hud.setBoss(null);
+    this._buildStage(this.run.stage, null, { final: true });
+
+    const p = this.player;
+    p.position.copy(this.arena.findSpawnPoint(this.rng, { minDist: 0, maxDist: 8 }));
+    p.position.y += 0.2;
+    p.velocity.set(0, 0, 0);
+    p.snapCamera();
+    if (p.dead) this.revivePlayer(1);
+    else p.heal(p.stats.maxHealth * 0.5, 'The Rift');
+    this.spendGoldOnDescent();
+    this.pets.regroup();
+
+    this.hud.setObjective('The Null Sovereign', 0, 'Kill it, or do not leave');
+    this.hud.toast('THE NULL SANCTUM', '#ff2f8f');
+    this.chat.system('The rift closes behind you.', '#ff2f8f');
+    this.engine.addShake(1.2);
+    audio.descend();
+    audio.bossSpawn();
+
+    if (!this.coopClient) {
+      // Hand out the arena *before* putting anything in it. Applying a stage
+      // packet clears the enemy list, so a boss announced first is a boss the
+      // clients immediately throw away.
+      this.coop?.onStageBuilt();
+      const at = this.arena.findSpawnPoint(this.rng, { minDist: 26, maxDist: 40 });
+      at.y += this.arena.groundHeightAt(at.x, at.z) + 6;
+      // Scales with the party on top of the difficulty coefficient: this is the
+      // one fight that is supposed to be a wall.
+      const boss = this.enemies.spawn('sovereign', at, {
+        difficulty: this.director.difficulty,
+        healthMult: FINAL.bossHealthMult * (1 + (this.partySize - 1) * FINAL.bossHealthPerPlayer),
+      });
+      this.bossRef = boss;
+      if (boss) this.hud.setBoss(boss);
+    }
+  }
+
+  /** The Sovereign is down. That is the end of the run, and a win. */
+  _onFinalBossDown() {
+    if (this.state === 'menu' || this.run.victory) return;
+    this.run.victory = true;
+    this.hud.toast('THE SOVEREIGN FALLS', '#ffcf5c');
+    this.chat.system('The Sovereign falls. The descent is over.', '#ffcf5c');
+    this.engine.addShake(1.6);
+    this.coop?.onVictory();
+    setTimeout(() => { if (this.state !== 'menu') this._finishRun(true); }, 2600);
+  }
+
+  /** A teammate finished it on their machine. */
+  applyVictory() {
+    if (this.state === 'menu' || this.run.victory) return;
+    this.run.victory = true;
+    this.hud.toast('THE SOVEREIGN FALLS', '#ffcf5c');
+    setTimeout(() => { if (this.state !== 'menu') this._finishRun(true); }, 2600);
   }
 
   // ==================================================================== events
@@ -628,6 +878,7 @@ export class Game {
 
     const color = enemy.elite ? enemy.elite.color : enemy.def.accent;
     this.fx.deathBurst(enemy.center, color, enemy.boss ? 3.5 : enemy.elite ? 1.7 : 1);
+    audio.enemyDeath(enemy.center, enemy.boss ? 2.4 : enemy.elite ? 1.5 : 1);
     if (enemy.boss) this.engine.addShake(0.7);
 
     if (!silent) {
@@ -651,6 +902,11 @@ export class Game {
       }
     }
 
+    if (enemy.def.final) {
+      this.hud.setBoss(null);
+      this._onFinalBossDown();
+      return;
+    }
     if (enemy.boss) {
       const living = this.livingBosses();
       if (living.length) this.hud.setBoss(living[0], living.length);
@@ -666,10 +922,12 @@ export class Game {
 
   onPlayerDeath(source) {
     this.run.killedBy = source || 'the descent';
+    audio.playerDeath();
     if (this.coop?.active) {
       // Downed, not finished: keep playing as a spectator until a teammate
       // stands you back up or the last of you falls.
       this.hud.toast('YOU ARE DOWN — a teammate can revive you', '#ff4d5e');
+      this.chat.system(`You went down to ${this.run.killedBy}`, '#ff4d5e');
       return;
     }
     this.state = 'dead';
@@ -705,7 +963,7 @@ export class Game {
       tierName: this.director.tier.name,
       level: this.player?.level ?? 1,
       mode: this.run.mode,
-      victory,
+      victory: victory || !!this.run.victory,
       killedBy: abandoned ? 'withdrawal' : this.run.killedBy,
     };
 
@@ -722,6 +980,8 @@ export class Game {
     this.hud.setObjective(null);
     this.hud.setBoss(null);
     this.input.exitLock();
+    audio.setMusic('menu');
+    audio.setIntensity(0);
     this.menus.showSummary(result, echoes);
     this._teardownRun();
   }
@@ -731,16 +991,19 @@ export class Game {
     this.profile.noteItemSeen(item.id);
     this.profile.save();
     this.player.recomputeStats();
-    // Lizards wear what you pick up.
-    this.minions.refreshTrophies(this.player);
+    // Pets wear what you pick up.
+    this.pets.refreshTrophies(this.player);
     this.hud.showPickup(item, stacks);
+    audio.pickup(RARITY[item.rarity]?.order ?? 0);
+    this.chat.itemPickup('You', item, true);
+    this.coop?.announcePickup(item.id);
   }
 
   /** Hatches a lizard for `owner`, keeping the networked side in step. */
-  hatchMinion(owner, position) {
-    const minion = this.minions.hatch(owner, position);
-    if (minion) this.coop?.onMinionHatched(minion);
-    return minion;
+  hatchPet(owner, position, species) {
+    const pet = this.pets.hatch(owner, position, { species });
+    if (pet) this.coop?.onPetHatched(pet);
+    return pet;
   }
 
   // ==================================================================== spawn helpers
@@ -761,12 +1024,7 @@ export class Game {
   bossItemCount() {
     const perPlayer = TELEPORTER.bossItemsPerPlayer
       + Math.min(TELEPORTER.maxBossItemBonus, this.run.bossItemBonus | 0);
-    return Math.max(1, Math.round(this.partySize() * perPlayer));
-  }
-
-  /** Everyone in the descent, standing or downed. One, in a solo run. */
-  partySize() {
-    return this.coop?.active ? this.coop.partySize() : 1;
+    return Math.max(1, Math.round(this.partySize * perPlayer));
   }
 
   /** Boss-table loot, spread in a ring so it does not land in one heap. */
@@ -929,14 +1187,31 @@ export class Game {
       if (e.code === 'Escape') e.target.blur();
       return;
     }
+    // While the chat box is open every key belongs to it. Its own handler stops
+    // propagation, so anything arriving here is from outside the field.
+    if (this.chat?.open) {
+      if (e.code === 'Escape') this.chat.close();
+      return;
+    }
+    if (this.input.bindingsFor('chat').includes(e.code) && this.state === 'running') {
+      e.preventDefault();
+      this.chat.openBox();
+      return;
+    }
     if (e.code === 'Escape') {
+      // The settings panel is a layer over whatever opened it, so Esc there
+      // steps back one screen rather than resuming a run you are still tuning.
+      if (this.menus.current === 'settings') {
+        this.menus.show(this.menus.settingsReturn === 'pause' ? 'pause' : 'menu');
+        return;
+      }
       if (this.coopPaused) this.resume();
       else if (this.state === 'running') this.pause();
       else if (this.state === 'paused') this.resume();
-      else if (['loadout', 'unlocks', 'codex', 'stats', 'help', 'coop'].includes(this.menus.current)) this.menus.show('menu');
+      else if (['loadout', 'unlocks', 'codex', 'stats', 'help', 'coop', 'settings'].includes(this.menus.current)) this.menus.show('menu');
       return;
     }
-    if (e.code === 'KeyE' && this.state === 'running') this._interact();
+    if (this.input.bindingsFor('interact').includes(e.code) && this.state === 'running') this._interact();
   }
 
   _interact() {
@@ -950,7 +1225,8 @@ export class Game {
     if (!p) return null;
     let best = null;
     let bestDist = PLAYER.interactRange;
-    const candidates = [...this.chests, ...this.eggs, this.teleporter].filter((c) => c && c.interactable);
+    const candidates = [...this.chests, ...this.eggs, this.teleporter, this.portal]
+      .filter((c) => c && c.interactable);
     for (const c of candidates) {
       const extra = c === this.teleporter ? 3.4 : 0;
       const d = p.position.distanceTo(c.position);
@@ -978,10 +1254,14 @@ export class Game {
       this.arena.update(dt, this.time);
     }
 
+    if (this.player) this.engine.followShadows(this.player.position);
+    audio.updateListener(this.engine.camera);
+    audio.update(dt);
     this.fx.update(dt, this.engine.camera);
     if (this.state === 'running' || this.state === 'dead') {
       this.engine.applyShake(dt, this.time);
       this.hud.update(dt);
+      this.chat.update(dt);
     }
     this.engine.render();
     this.input.endFrame();
@@ -1007,15 +1287,19 @@ export class Game {
     this.projectiles.update(dt, player, arena);
     this.pickups.update(dt, player, arena);
 
-    this.minions.update(dt, arena);
+    this.pets.update(dt, arena);
     for (const c of this.chests) c.update(dt, this.time);
     for (const e of this.eggs) e.update(dt, this.time);
+    if (this.portal) this.portal.update(dt, this.time);
+    if (this.finalStage) this._updateFinalObjective();
     if (this.teleporter) {
       this.teleporter.update(dt, this.time, player);
       if (player.dead && this.coop?.active) this.hud.downedObjective(this.coop.reviveProgress);
       else if (this.coopClient) this._updateClientObjective();
       else this._updateTeleporterEvent(dt);
     }
+    // The containment field only draws near whoever is looking at it.
+    arena.barrierFocus = player.position;
     arena.update(dt, this.time);
     this.coop?.update(dt);
 
@@ -1024,7 +1308,9 @@ export class Game {
       const target = this._nearestInteractable();
       if (target) {
         const text = target.promptText();
-        const affordable = target === this.teleporter || player.gold >= target.cost;
+        // Not every device is bought with gold any more — the altar takes health
+        // and the forge takes junk items — so each one answers for itself.
+        const affordable = target === this.teleporter || target.affordable?.(player) !== false;
         this.hud.showPrompt(text, 'E');
         if (!affordable) this.hud.el.prompt.classList.add('locked');
         else if (this.hud.lockedTimer <= 0) this.hud.el.prompt.classList.remove('locked');
@@ -1033,6 +1319,27 @@ export class Game {
       }
     }
 
-    player.updateCamera(dt, arena, this.input.mouse.right && !player.dead);
+    player.updateCamera(dt, arena, player.aiming && !player.dead);
+    this._updateMusicIntensity(dt);
+  }
+
+  /**
+   * How loud the score gets.
+   *
+   * Driven by what is actually happening rather than by the clock: a boss, a
+   * crowd, or being hurt all open the arrangement up, and a quiet minute
+   * between waves closes it again. The floor rises with the difficulty
+   * coefficient so late stages never fully relax.
+   */
+  _updateMusicIntensity(dt) {
+    if (this.frame % 12 !== 0) return;
+    const p = this.player;
+    const near = this.enemies?.nearest(p.position, 40, 12).length ?? 0;
+    const floor = clamp01((this.director.difficulty - 1) * 0.06);
+    let want = floor + clamp01(near / 9) * 0.55;
+    if (p.combatTimer > 0) want += 0.15;
+    if (this.bossRef && !this.bossRef.dead) want = Math.max(want, 0.85);
+    if (p.health / p.stats.maxHealth < 0.3) want = Math.max(want, 0.7);
+    audio.setIntensity(clamp01(want));
   }
 }

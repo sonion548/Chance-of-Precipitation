@@ -41,16 +41,23 @@ New symbols in the graph: `Arena.terrainHash`, `isTextTarget`, `FX.slash`,
 `Coop.requestStage`, `Coop.partySize`, `Coop.onBoon`, `Chest.isShrine`,
 `Player.moveDirection`, and the `tools/coop-check.js` file node.
 
-### The graph is one step ahead of the source in this repository
-The graph was built from a working tree this repository does not contain. It
-carries nodes for `src/core/audio.js`, `src/core/settings.js`, `src/ui/chat.js`,
+### Where the graph stands against the source
+The graph was built from a working tree this repository did not contain at the
+time: one carrying `src/core/audio.js`, `src/core/settings.js`, `src/ui/chat.js`,
 `src/data/pets.js` and `src/entities/pet.js`, plus `Arena._initLandform`,
 `Arena.terrainHeightAt`, `Arena._terrainGeometry`, `Input.captureBinding`,
 `Director.partyScale`, `Game.partySize`, `Coop.onPortalState` and a `Portal`
-interactable — none of which exist in the uploaded snapshot the source here was
-edited from (that snapshot still has `src/entities/minion.js`, since renamed to
-`pet.js`). Read the graph as describing the newer tree and the source as the
-older one, until both are rebuilt from one commit.
+interactable. **That tree is now the base of this repository**, so those nodes
+describe real code again rather than somewhere else.
+
+The graph is still behind in the other direction. It has no nodes for the
+ultimates, for Halcyon or Javelin, for the Siege Gauntlets, for `rigAttack` and
+the attack-animation rig, or for `ctx.slashWave` / `ctx.shockwave` /
+`ctx.jetBoost` / `ctx.meteorSlam` — all of which landed after it was built. It
+also still lists nothing for the symbols the rebuild deleted when the two
+settings systems were collapsed into one (`Profile.setSetting`,
+`Profile.unlockAll`, `Game.applySettings`), which is correct by accident: it
+never had them. `graphify update .` reconciles both directions at no API cost.
 
 ## Community Hubs (Navigation)
 - three.module.js

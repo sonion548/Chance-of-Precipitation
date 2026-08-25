@@ -3,17 +3,18 @@ import { weaponById } from '../data/weapons.js';
 import { characterById } from '../data/characters.js';
 import { buildWeaponModel } from '../entities/models.js';
 import { rigAttack } from '../entities/characterRig.js';
-import { raycastWorld } from '../systems/physics.js';
+import { raycastWorld, distanceToBody } from '../systems/physics.js';
 import { clamp01, damp, TAU } from '../core/mathx.js';
 import { ULTIMATE } from '../core/config.js';
+import { audio } from '../core/audio.js';
 
 /**
  * Where a teleport puts you, and whether you are still airborne when it lands.
  *
- * Both the Wraith's blink and the Reaper's blink slash hold the altitude they
- * left from — crossing a gap must not plant you on the floor — and rise only if
- * the ground under the exit is higher than you already are. Mutates `end.y` and
- * returns whether the player should stay off the ground.
+ * The Wraith's blink holds the altitude it left from — crossing a gap must not
+ * plant you on the floor — and rises only if the ground under the exit is
+ * higher than you already are. Mutates `end.y` and returns whether the player
+ * should stay off the ground.
  */
 function settleTeleport(player, arena, start, end) {
   const ground = arena.groundHeightAt(end.x, end.z, Math.max(start.y, end.y) + 2.5);
@@ -27,10 +28,12 @@ const _dir = new THREE.Vector3();
 const _origin = new THREE.Vector3();
 const _ray = new THREE.Vector3();   // hitscan direction — must survive item procs
 
-export const SECONDARY_KEY = 'KeyQ';
-export const UTILITY_KEYS = ['ShiftLeft', 'ShiftRight'];
-export const SPECIAL_KEY = 'KeyR';
-export const ULTIMATE_KEY = 'KeyF';
+/* Abilities are addressed by action, not by key: the settings screen can move
+   any of them onto any key or mouse button, and nothing downstream cares. */
+export const SECONDARY_ACTION = 'secondary';
+export const UTILITY_ACTION = 'utility';
+export const SPECIAL_ACTION = 'special';
+export const ULTIMATE_ACTION = 'ultimate';
 
 /**
  * Weapon handling and damage resolution.
@@ -158,7 +161,7 @@ export class Combat {
     const canAct = !this.game.paused;
 
     // ---- Secondary: Q, charged or instant ----
-    const secondaryHeld = input.down(SECONDARY_KEY);
+    const secondaryHeld = input.actionDown(SECONDARY_ACTION);
     if (secondary.charge) {
       if (secondaryHeld && this.secondaryTimer <= 0 && canAct) {
         this.charging = true;
@@ -169,7 +172,7 @@ export class Combat {
         if (this.chargeTime >= (secondary.minCharge ?? 0.15)) this._fireAbility(secondary, t);
         this.chargeTime = 0;
       }
-    } else if (input.justPressed(SECONDARY_KEY) && this.secondaryTimer <= 0 && canAct) {
+    } else if (input.actionPressed(SECONDARY_ACTION) && this.secondaryTimer <= 0 && canAct) {
       this._fireAbility(secondary, 1);
     }
 
@@ -187,7 +190,7 @@ export class Combat {
       } else {
         this.utilityTimer = 0;
       }
-      if (canAct && this.utilityCharges > 0 && UTILITY_KEYS.some((k) => input.justPressed(k))) {
+      if (canAct && this.utilityCharges > 0 && input.actionPressed(UTILITY_ACTION)) {
         // Impaling Storm suspends the cost entirely rather than shortening it,
         // so a dash taken during it is genuinely free rather than merely cheap.
         if (!player.buffs.has('freedash')) {
@@ -202,7 +205,7 @@ export class Combat {
     const special = this.character?.special;
     if (special) {
       this.specialTimer = Math.max(0, this.specialTimer - dt);
-      if (canAct && this.specialTimer <= 0 && input.justPressed(SPECIAL_KEY)) {
+      if (canAct && this.specialTimer <= 0 && input.actionPressed(SPECIAL_ACTION)) {
         this.specialTimer = special.cooldown * stats.cooldownMult;
         this._fireAbility(special, 1, false, 'special');
       }
@@ -212,7 +215,7 @@ export class Combat {
     const ult = this.character?.ultimate;
     if (ult) {
       this.addUltimateCharge(ULTIMATE.perSecond * dt);
-      if (canAct && this.ultimateReady && input.justPressed(ULTIMATE_KEY)) {
+      if (canAct && this.ultimateReady && input.actionPressed(ULTIMATE_ACTION)) {
         this.ultimateCharge = 0;
         this._ultimateAnnounced = false;
         this.game.ui.toast(ult.name.toUpperCase(), '#ffcf5c');
@@ -227,18 +230,19 @@ export class Combat {
     this._tickSlam(dt, player);
 
     // ---- Primary ----
-    const wantPrimary = primary.hold ? input.mouse.left : input.mouse.leftPressed;
+    const wantPrimary = primary.hold ? input.actionDown('primary') : input.actionPressed('primary');
     if (wantPrimary && this.primaryTimer <= 0 && canAct && !this.charging) {
       const interval = primary.cooldown / Math.max(0.05, stats.attackSpeed);
       this.primaryTimer = interval;
       this.firing = true;
       this._fireAbility(primary, 1, true);
     }
-    if (!input.mouse.left && primary.beam) {
+    const primaryHeld = input.actionDown('primary');
+    if (!primaryHeld && primary.beam) {
       this.heat = damp(this.heat, 0, 2.4, dt);
       primary.onRelease?.(this.ctx);
     }
-    this.beamActive = !!(primary.beam && input.mouse.left);
+    this.beamActive = !!(primary.beam && primaryHeld);
 
     // Weapon visual: emitter glow tracks heat/charge.
     if (this.weaponModel?.userData.glow) {
@@ -259,6 +263,12 @@ export class Combat {
     this.ctx.aimPoint = player.aimPoint;
     this.ctx.chargeRatio = chargeRatio;
 
+    // One report per ability, before it fires: a weapon whose ability kills the
+    // frame it goes off should still have been heard going off.
+    if (!ability.silent) {
+      audio.shoot(this.weapon?.model || 'pistol', _origin,
+        kind === 'secondary' ? 0.72 : kind === 'primary' ? 1 : 0.85);
+    }
     // The body acts the ability out: a swing swings, a punch punches. The rig
     // owns what that looks like; all that is decided here is which one to play.
     if (ability.anim) rigAttack(player.rig, ability.anim, chargeRatio);
@@ -422,6 +432,11 @@ export class Combat {
       if (isCrit) this.game.inventory.trigger('onCrit', { enemy, damage: dealt, proc });
     }
 
+    // The hit sound is pitched by how much of the target it removed, so a
+    // chip and a nearly-lethal blow do not read the same.
+    if (dealt > 0) {
+      audio.hit(opts.hitPoint || enemy.center, clamp01(dealt / Math.max(1, enemy.maxHealth) * 3), isCrit);
+    }
     this.game.ui.flashCrosshair(enemy.dead ? 'kill' : 'hit');
     return dealt;
   }
@@ -764,26 +779,42 @@ export class Combat {
         player.addRecoil(3);
       },
 
-      /** Teleporting slash that damages everything along the path. */
+      /**
+       * Teleporting slash that damages everything along the path.
+       *
+       * Goes exactly where you are looking, in three dimensions. It used to
+       * flatten the aim to the horizontal and then drop you onto the ground at
+       * the far end, which meant it could not be used to cross a gap, get onto
+       * a ledge, or extend a jump — the three things a blink is for. Now it
+       * takes the full aim vector, and if you were in the air you stay there.
+       */
       blinkSlash(spec) {
         const player = game.player;
-        // Own the vector: the shared scratch is written again inside the damage
-        // loop below, and this direction is still needed after it.
-        const dir = self.ctx.dir.clone().setY(0).normalize();
-        const start = player.position.clone();
-        const hit = raycastWorld(
-          player.chestPosition, dir, spec.distance, game.arena,
-        );
-        const dist = hit ? Math.max(1, hit.distance - 1) : spec.distance;
-        const end = start.clone().addScaledVector(dir, dist);
-        const airborne = settleTeleport(player, game.arena, start, end);
+        const dir = player.aimDirection(_v).clone();
+        if (dir.lengthSq() < 1e-6) dir.set(Math.sin(player.yaw), 0, Math.cos(player.yaw));
+        dir.normalize();
 
-        // Damage everything on the swept line. The path is marked by crescents
-        // laid along it — the cut you made, not a row of glowing lumps.
-        const steps = Math.ceil(dist / 2);
+        const start = player.position.clone();
+        const from = player.chestPosition.clone();
+        const hit = raycastWorld(from, dir, spec.distance, game.arena);
+        let dist = hit ? Math.max(1, hit.distance - 1) : spec.distance;
+
+        // Walk the landing point back until it is somewhere a body can be.
+        const end = new THREE.Vector3();
+        for (let i = 0; i < 6; i++) {
+          end.copy(start).addScaledVector(dir, dist);
+          const floor = game.arena.groundHeightAt(end.x, end.z, end.y + player.height);
+          if (end.y < floor) end.y = floor;
+          if (!game.arena.isInsideSolid(end.x, end.y + player.height * 0.5, end.z, player.radius)) break;
+          dist *= 0.7;
+        }
+
+        // Damage everything on the swept line.
+        const steps = Math.max(2, Math.ceil(dist / 2));
         const hitSet = new Set();
+        const p = new THREE.Vector3();
         for (let i = 0; i <= steps; i++) {
-          const p = start.clone().lerp(end, i / steps);
+          p.copy(start).lerp(end, i / steps);
           p.y += 1;
           for (const e of game.enemies.inRadius(p, spec.radius)) {
             if (hitSet.has(e)) continue;
@@ -799,15 +830,127 @@ export class Combat {
             });
           }
         }
+        game.fxApi.beam(start.clone().setY(start.y + 1), end.clone().setY(end.y + 1), spec.color, 0.3, 0.3);
         // The cut that lands: one wide arc across the far end of the dash.
         game.fxApi.slash(end.clone().setY(end.y + 1.1), dir, {
           color: spec.color, radius: spec.radius * 2.1, life: 0.3, tilt: 0.25, grow: 1.6,
         });
+
         player.position.copy(end);
-        player.velocity.x *= 0.3;
-        player.velocity.z *= 0.3;
-        if (airborne) player.grounded = false;
+        // Keep the momentum you arrived with rather than being planted. Blinking
+        // upward gives you the height; blinking mid-jump does not cancel it.
+        player.velocity.multiplyScalar(0.3);
+        if (dir.y > 0.05) player.velocity.y = Math.max(player.velocity.y, dir.y * 6);
+        player.grounded = false;
+        player.dashIFrames = Math.max(player.dashIFrames || 0, 0.2);
         player.snapCamera();
+      },
+
+      /**
+       * A punch that takes the target apart.
+       *
+       * Everything a gun does happens at the far end of a line; a fist has to
+       * be earned by standing in the thing's reach. The payoff for that is that
+       * a connecting hit does not just damage what it lands on — it detonates
+       * it, and whatever is standing next to it takes the blast. Which is why
+       * the weapon gets better the worse your position is.
+       */
+      punch(spec) {
+        const player = game.player;
+        const dir = self.ctx.dir;
+        // The strike volume sits in front of the chest rather than at the
+        // muzzle: a gauntlet aimed steeply down should still hit the thing
+        // standing on your toes.
+        const centre = player.chestPosition.clone().addScaledVector(dir, spec.reach ?? 2.4);
+        const targets = game.enemies.inRadius(centre, spec.radius ?? 2.9);
+
+        let landed = 0;
+        for (const e of targets) {
+          const dealt = self.damageEnemy(e, spec.damage, {
+            proc: spec.proc ?? 1, source: self.weapon?.name,
+            lifesteal: spec.lifesteal ?? 0,
+            knockback: spec.knockback ?? 14,
+            knockbackDir: _v.copy(e.center).sub(player.chestPosition).setY(0.45).normalize().clone(),
+            hitPoint: e.center.clone(),
+          });
+          if (dealt <= 0) continue;
+          landed++;
+
+          // The detonation. Excluding the struck enemy keeps the direct hit and
+          // the blast from stacking on the same body, which would make the
+          // weapon's single-target damage twice what its card claims.
+          if (spec.burst) {
+            self.areaDamage(e.center, spec.burstRadius ?? 5.2, spec.burst, {
+              proc: 0.5, source: self.weapon?.name, exclude: e,
+              force: (spec.knockback ?? 14) * 0.8,
+            });
+          }
+          game.fxApi.explosion(e.center, spec.burstRadius ?? 5.2, spec.color ?? 0xff5a2a, e.dead ? 1.1 : 0.7);
+          game.fxApi.bloodSpray(e.center, dir, spec.color ?? 0xff5a2a, e.dead ? 16 : 7);
+          audio.gib(e.center);
+        }
+
+        // Feedback happens whether or not it connected — a whiffed punch that
+        // makes no sound and moves nothing feels like the input was dropped.
+        game.fxApi.ring(centre, 0.3, spec.radius ?? 2.9, spec.color ?? 0xff5a2a, 0.26, landed ? 0.9 : 0.4);
+        game.fxApi.muzzle(centre, dir, spec.color ?? 0xff5a2a, landed ? 2.2 : 1);
+        player.addRecoil(landed ? 2.6 : 1.2);
+        game.engine.addShake(landed ? 0.16 : 0.04);
+        // A small step into the swing, so a fight at fist range is a forward
+        // press rather than a shuffle to stay in contact.
+        if (spec.lunge) player.velocity.addScaledVector(dir.clone().setY(0).normalize(), spec.lunge);
+        return landed;
+      },
+
+      /**
+       * Ground slam.
+       *
+       * Drives the player straight into the floor and lets the floor do the
+       * rest. Damage and radius scale with how far they fell to get there, so
+       * the ability reads as one continuous idea with the jump: get high, come
+       * down on something. Used flat-footed it is still a decent panic button,
+       * just not the one worth setting up for.
+       */
+      groundSlam(spec) {
+        const player = game.player;
+        const floor = game.arena.groundHeightAt(player.position.x, player.position.z, player.position.y + 0.6);
+        const fell = Math.max(0, player.position.y - floor);
+        const scale = 1 + clamp01(fell / (spec.heightReference ?? 11)) * (spec.heightBonus ?? 1.0);
+
+        player.position.y = floor;
+        player.velocity.set(0, 0, 0);
+        player.grounded = true;
+        player.jumpsUsed = 0;
+        player.dashIFrames = Math.max(player.dashIFrames || 0, 0.28);
+        player.snapCamera();
+
+        const radius = (spec.radius ?? 11) * scale;
+        const centre = player.position.clone();
+        centre.y += 0.35;
+        self.areaDamage(centre, radius, spec.damage * scale, {
+          proc: spec.proc ?? 1, source: self.weapon?.name,
+          force: (spec.knockback ?? 30) * scale,
+        });
+
+        const color = spec.color ?? 0xff5a2a;
+        game.fxApi.explosion(centre, radius * 0.62, color, 1.5 * scale);
+        game.fxApi.ring(centre, 0.6, radius, color, 0.55, 1);
+        game.fxApi.ring(centre, 0.4, radius * 0.6, 0xffd58a, 0.4, 0.9);
+        // Debris thrown up around the impact ring reads the radius better than
+        // the ring alone, which is gone in half a second.
+        for (let i = 0; i < 22; i++) {
+          const a = (i / 22) * Math.PI * 2 + game.rng.next() * 0.2;
+          const r = radius * (0.35 + game.rng.next() * 0.6);
+          const at = centre.clone().add(_v.set(Math.cos(a) * r, 0, Math.sin(a) * r));
+          at.y = game.arena.groundHeightAt(at.x, at.z) + 0.2;
+          game.fxApi.spawnParticle(at,
+            new THREE.Vector3(Math.cos(a) * 3, 6 + game.rng.next() * 7, Math.sin(a) * 3),
+            { color, size: 0.22, life: 0.7, gravity: -22 });
+        }
+        game.engine.addShake(0.5 + scale * 0.5);
+        player.addRecoil(5);
+        audio.slam(centre);
+        if (fell > 6) game.ui.toast(`SLAM ×${scale.toFixed(1)}`, '#ff8a3d');
       },
 
       chain(fromEnemy, jumps, damage, range, color, falloff) {
@@ -885,8 +1028,30 @@ export class Combat {
         game.fxApi.ring(centre, 1, spec.radius * 1.5, spec.color ?? 0xffd24b, 0.5, 0.9);
         game.engine.addShake(0.35 + t * 0.7);
         player.addRecoil(4 + t * 4);
-        // A charged punch carries you through the target.
-        player.applyImpulse(dir.clone().setY(0).normalize().multiplyScalar(4 + t * 8).setY(3 + t * 3));
+
+        /* The punch is also the movement.
+         *
+         * It used to be a shove — an impulse applied after the blast, which the
+         * ground friction ate in half a second. As a dash it becomes a way to
+         * cross a room, and because the dash sweeps, everything between you and
+         * where you land gets hit on the way through. The distance scales with
+         * the same momentum the damage does, so a grapple into a punch throws
+         * you the length of the arena and a standing punch barely steps. */
+        const lunge = dir.clone().setY(0);
+        if (lunge.lengthSq() < 1e-6) lunge.set(Math.sin(player.yaw), 0, Math.cos(player.yaw));
+        player.startDash({
+          dir: lunge.normalize(),
+          speed: (spec.dashSpeed ?? 30) * (1 + t * 0.9),
+          duration: (spec.dashTime ?? 0.22) * (1 + t * 0.55),
+          iframes: 0.3,
+          damage: damage * (spec.sweepFraction ?? 0.45),
+          radius: spec.radius * 0.42,
+          proc: 0.6,
+          source: 'Overcharged Fist',
+          knockback: (spec.knockback ?? 26) * 0.7,
+          color: spec.color ?? 0xffd24b,
+        });
+        player.velocity.y = Math.max(player.velocity.y, 2.5 + t * 3);
         if (t > 0.7) game.ui.toast(`OVERCHARGED ×${(1 + t * 3).toFixed(1)}`, '#ffd24b');
       },
 

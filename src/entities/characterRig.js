@@ -30,6 +30,20 @@ const _offsetQuat = new THREE.Quaternion();
 const _parentQuat = new THREE.Quaternion();
 const _euler = new THREE.Euler();
 const _tmpAim = new THREE.Vector3();
+const _restQuat = new THREE.Quaternion();
+const _restFwd = new THREE.Vector3();
+/** How far off the arm's own direction the weapon may be aimed. */
+const WEAPON_CONE = 1.25;   // ~72 degrees
+/**
+ * The weapon's resting orientation in the hand.
+ *
+ * A barrel continues the line of the forearm, and the forearm runs down the
+ * mount's local −Y, not its +Z. Rotating +Z onto −Y is a quarter turn about X;
+ * the 0.3 taken off it is the wrist, which does not hold a gun perfectly in
+ * line with the arm.
+ */
+const _holdOffset = new THREE.Quaternion().setFromEuler(
+  new THREE.Euler(Math.PI / 2 - 0.3, 0, 0, 'XYZ'));
 
 export function createRig(yaw = 0) {
   return {
@@ -63,6 +77,15 @@ export function createRig(yaw = 0) {
     forward: 0,
     turnRate: 0,
     prevYaw: yaw,
+    // Gait blend weights: how much of this frame's pose is a forward run, a
+    // backpedal, and a side-step. They are not exclusive — running diagonally
+    // is genuinely part of two gaits at once, and the legs should say so.
+    gaitF: 1,
+    gaitB: 0,
+    gaitS: 0,
+    lookOffset: 0,
+    stepIndex: 0,
+    onStep: null,
   };
 }
 
@@ -135,6 +158,14 @@ export function updateRig(model, rig, dt, s) {
   rig.turnRate = damp(rig.turnRate, clamp(turn / Math.max(dt, 0.001) * 0.02, -1, 1), 8, dt);
   model.rotation.y = rig.modelYaw;
 
+  /* How far the camera has swung off the body.
+     The body is allowed to face its travel direction while the camera looks
+     somewhere else entirely, so the head — and, to a lesser degree, the chest —
+     turn to split the difference. Without this a character sprinting east while
+     the player studies something to the north reads as if nobody is driving. */
+  const lookTarget = s.lookYaw === undefined ? rig.modelYaw : s.lookYaw;
+  rig.lookOffset = damp(rig.lookOffset, clamp(wrapAngle(lookTarget - rig.modelYaw), -1.5, 1.5), 11, dt);
+
   // Travel direction in the body's own frame.
   _fwd.set(Math.sin(rig.modelYaw), 0, Math.cos(rig.modelYaw));
   _right.set(-_fwd.z, 0, _fwd.x);
@@ -147,12 +178,43 @@ export function updateRig(model, rig, dt, s) {
   rig.forward = damp(rig.forward, vz / ref * stride, 10, dt);
   rig.strafe = damp(rig.strafe, vx / ref * stride, 10, dt);
 
-  // Backing up runs the cycle the other way so the feet do not moonwalk.
-  const dirSign = rig.forward < -0.25 ? -1 : 1;
-  rig.walkPhase += dt * (2.0 + speed * 0.95) * dirSign;
+  /* ---- gait blend ----
+     Three cycles share one clock. Which of them you are actually watching is
+     decided by where the body is travelling *in its own frame*: straight ahead
+     is a run, straight back is a backpedal, sideways is a shuffle, and anything
+     between is a weighted sum of them. Sharing the clock is what keeps the feet
+     from stuttering as the blend moves — a diagonal is one continuous gait
+     changing shape, not a crossfade between two animations. */
+  const fAmt = clamp01(rig.forward);
+  const bAmt = clamp01(-rig.forward);
+  const sAmt = clamp01(Math.abs(rig.strafe));
+  const total = Math.max(0.0001, fAmt + bAmt + sAmt);
+  rig.gaitF = damp(rig.gaitF, fAmt / total, 12, dt);
+  rig.gaitB = damp(rig.gaitB, bAmt / total, 12, dt);
+  rig.gaitS = damp(rig.gaitS, sAmt / total, 12, dt);
+  rig.strafeSign = Math.abs(rig.strafe) < 0.02 ? (rig.strafeSign || 1) : Math.sign(rig.strafe);
+
+  // Backing up runs the cycle the other way so the feet do not moonwalk, and a
+  // side-step is a shorter, quicker cycle than a run of the same speed.
+  const dirSign = rig.gaitB > 0.55 ? -1 : 1;
+  const cadence = 2.0 + speed * (0.95 + rig.gaitS * 0.35 + rig.gaitB * 0.2);
+  const prevPhase = rig.walkPhase;
+  rig.walkPhase += dt * cadence * dirSign;
   rig.breathPhase += dt * (1.05 + stride * 0.9);
   rig.swayPhase += dt * 0.53;
   const ph = rig.walkPhase;
+
+  // A foot lands every half cycle. Reporting it here rather than guessing from
+  // the speed means the sound is on the frame the foot actually arrives, at
+  // whatever cadence the blend happens to be running.
+  if (rig.onStep && s.grounded && stride > 0.14) {
+    const a = Math.floor(prevPhase / Math.PI);
+    const b = Math.floor(ph / Math.PI);
+    if (a !== b) {
+      rig.stepIndex++;
+      rig.onStep(stride, rig.stepIndex);
+    }
+  }
 
   // Airborne / landing bookkeeping.
   if (s.grounded) {
@@ -205,38 +267,78 @@ export function updateRig(model, rig, dt, s) {
 }
 
 /* ------------------------------------------------------------------ legs */
+/**
+ * The legs carry the whole read of which way the body is travelling.
+ *
+ * Three poses are evaluated for every leg and mixed by the gait weights:
+ *
+ *   run        long swing about X, stance leg straight, swing leg folded hard
+ *   backpedal  shorter swing, higher knee, toes reaching behind — a backwards
+ *              walk is not a forwards walk played in reverse, the knee leads
+ *   side-step  swing about Z instead: the leading leg abducts out into the
+ *              direction of travel while the trailing leg crosses under, and
+ *              the feet turn out so the ankles do not read as broken
+ */
 function poseLegs(ud, rig, dt, o) {
   if (!ud.legL || !ud.legR) return;
-  const { stride, dirSign, ph, airborne, land, strafe } = o;
+  const { stride, dirSign, ph, airborne, land } = o;
+  const wF = rig.gaitF, wB = rig.gaitB, wS = rig.gaitS;
+  const side = rig.strafeSign || 1;
 
-  const legPose = (leg, phase) => {
+  const legPose = (leg, phase, mirror) => {
     const sw = Math.sin(phase);
-    // Real gait is asymmetric: the stance leg is straight and slow, the swing
-    // leg bends hard and moves fast. One sine driving both reads as marching.
-    leg.rotation.x = sw * 0.78 * stride * dirSign;
     const swingAmt = Math.max(0, -Math.cos(phase));
-    const lower = leg.userData.lower;
-    if (lower) lower.rotation.x = (0.12 + swingAmt * 1.15) * stride;
-    if (leg.userData.ankle) {
-      leg.userData.ankle.rotation.x = (-sw * 0.42 * dirSign - swingAmt * 0.25) * stride;
-    }
-    // Feet turn out toward the direction of travel when strafing.
-    leg.rotation.y = damp(leg.rotation.y, strafe * 0.42, 10, dt);
-    leg.rotation.z = 0;
-  };
-  legPose(ud.legL, ph);
-  legPose(ud.legR, ph + Math.PI);
 
-  // Crossover: the trailing leg swings across the body during a hard strafe.
-  const cross = clamp(strafe, -1, 1) * 0.16;
-  ud.legL.rotation.z = damp(ud.legL.rotation.z, cross, 10, dt);
-  ud.legR.rotation.z = damp(ud.legR.rotation.z, cross, 10, dt);
+    // --- swing about X: forwards and backwards gaits ---
+    const runX = sw * 0.78;
+    const backX = sw * 0.46 - 0.10;              // sits behind the hip throughout
+    const sideX = sw * 0.20;                     // a shuffle barely leaves the ground
+    leg.rotation.x = (runX * wF + backX * wB + sideX * wS) * stride * dirSign;
+
+    // --- knee ---
+    const lower = leg.userData.lower;
+    if (lower) {
+      const runK = 0.12 + swingAmt * 1.15;
+      const backK = 0.30 + swingAmt * 1.55;      // knee leads a backwards step
+      const sideK = 0.18 + swingAmt * 0.7;
+      lower.rotation.x = (runK * wF + backK * wB + sideK * wS) * stride;
+    }
+
+    // --- ankle ---
+    if (leg.userData.ankle) {
+      const runA = -sw * 0.42 * dirSign - swingAmt * 0.25;
+      const backA = -sw * 0.2 * dirSign + 0.18;  // toes reach for the ground behind
+      const sideA = -sw * 0.14 * dirSign;
+      leg.userData.ankle.rotation.x = (runA * wF + backA * wB + sideA * wS) * stride;
+    }
+
+    /* --- swing about Z: the side-step ---
+       The two legs are half a cycle apart, so one abducts out into the travel
+       direction while the other adducts under the body. `mirror` is which leg
+       this is, and it biases the resting stance wider on the leading side. */
+    const abduct = (Math.sin(phase) * 0.40 + 0.10 * mirror) * wS * stride * side;
+    // Running keeps a hint of the old crossover so a hard diagonal still leans.
+    const cross = clamp(rig.strafe, -1, 1) * 0.16 * (wF + wB);
+    // The rest splay set at build time is the baseline, not zero — writing an
+    // absolute here is what collapsed the stance back to parallel on frame one.
+    const rest = leg.userData.restZ ?? 0;
+    leg.rotation.z = damp(leg.rotation.z, rest - abduct + cross, 12, dt);
+
+    // Feet turn out towards the direction of travel; a side-step turns them
+    // much further than a diagonal run does.
+    const toeOut = rig.strafe * (0.42 + wS * 0.55) + wB * -rig.strafe * 0.2;
+    leg.rotation.y = damp(leg.rotation.y, toeOut, 10, dt);
+  };
+  legPose(ud.legL, ph, 1);
+  legPose(ud.legR, ph + Math.PI, -1);
 
   if (airborne > 0.01) {
     // Tuck: lead leg pulls up, trailing leg extends.
     const k = airborne;
     ud.legL.rotation.x = lerp(ud.legL.rotation.x, -0.62, k);
     ud.legR.rotation.x = lerp(ud.legR.rotation.x, 0.34, k);
+    ud.legL.rotation.z = lerp(ud.legL.rotation.z, (ud.legL.userData.restZ ?? 0) + 0.06, k);
+    ud.legR.rotation.z = lerp(ud.legR.rotation.z, (ud.legR.userData.restZ ?? 0) - 0.06, k);
     if (ud.legL.userData.lower) ud.legL.userData.lower.rotation.x = lerp(ud.legL.userData.lower.rotation.x, 1.15, k);
     if (ud.legR.userData.lower) ud.legR.userData.lower.rotation.x = lerp(ud.legR.userData.lower.rotation.x, 0.5, k);
     if (ud.legL.userData.ankle) ud.legL.userData.ankle.rotation.x = lerp(ud.legL.userData.ankle.rotation.x, 0.34, k);
@@ -256,13 +358,18 @@ function poseLegs(ud, rig, dt, o) {
 function posePelvis(ud, rig, dt, o) {
   if (!ud.pelvis) return;
   const { stride, ph, land, strafe, breath, idle } = o;
-  // Hips rise twice per stride and counter-rotate against the shoulders.
-  const bob = Math.abs(Math.sin(ph)) * 0.085 * stride;
+  // Hips rise twice per stride and counter-rotate against the shoulders. A
+  // side-step bobs less and swings the pelvis laterally instead, which is the
+  // difference between a shuffle and a strange sideways march.
+  const bobScale = 0.085 * (1 - rig.gaitS * 0.55);
+  const bob = Math.abs(Math.sin(ph)) * bobScale * stride;
   const idleBob = breath * 0.012 * idle;
+  const sway = Math.sin(ph) * 0.06 * rig.gaitS * stride * (rig.strafeSign || 1);
   ud.pelvis.position.y = ud.hipY - 0.045 * stride - land * 0.26 + bob + idleBob;
-  ud.pelvis.rotation.y = -Math.sin(ph) * 0.3 * stride + strafe * 0.24;
-  ud.pelvis.rotation.z = Math.sin(ph) * 0.1 * stride - strafe * 0.12;
-  ud.pelvis.rotation.x = damp(ud.pelvis.rotation.x, land * 0.2, 12, dt);
+  ud.pelvis.position.x = (ud.hipX ??= ud.pelvis.position.x) + sway;
+  ud.pelvis.rotation.y = -Math.sin(ph) * 0.3 * stride * (rig.gaitF + rig.gaitB) + strafe * 0.24;
+  ud.pelvis.rotation.z = Math.sin(ph) * (0.1 + rig.gaitS * 0.12) * stride - strafe * 0.12;
+  ud.pelvis.rotation.x = damp(ud.pelvis.rotation.x, land * 0.2 - rig.gaitB * stride * 0.1, 12, dt);
 }
 
 /* ----------------------------------------------------------------- torso */
@@ -276,13 +383,20 @@ function poseTorso(ud, rig, dt, s, o) {
   torso.position.y = ud.torsoBaseY - 0.03 * stride - land * 0.24 + bob + breathe;
 
   // Shoulders counter-rotate against the hips; a lean into the turn on top.
-  const counter = Math.sin(ph) * 0.28 * stride;
+  const counter = Math.sin(ph) * 0.28 * stride * (rig.gaitF + rig.gaitB);
   const bank = -rig.strafe * 0.2 - rig.turnRate * 0.12;
-  rig.torsoY = damp(rig.torsoY, counter - rig.turnRate * 0.22 + rig.flinch * rig.flinchDir * 0.2, 14, dt);
+  // A quarter of the camera's offset is carried by the chest; the head takes
+  // most of the rest. Splitting it across the spine is what stops the neck
+  // doing all of the work and looking snapped.
+  const chestLook = rig.lookOffset * 0.24 * (1 - rig.ready * 0.7);
+  rig.torsoY = damp(rig.torsoY,
+    counter - rig.turnRate * 0.22 + chestLook + rig.flinch * rig.flinchDir * 0.2, 14, dt);
   rig.torsoZ = damp(rig.torsoZ, -Math.sin(ph) * 0.11 * stride + bank, 12, dt);
 
   // Spine pitch: follows the aim, leans into a run, folds on recoil and impacts.
-  const lean = clamp(rig.forward * 0.22, -0.14, 0.22);
+  // Backing up leans away rather than into it, which is most of what sells a
+  // retreat as deliberate instead of as a run played backwards.
+  const lean = clamp(rig.forward * 0.22, -0.2, 0.22);
   const target = -s.pitch * 0.38 + lean - rig.recoil * 0.12 - rig.flinch * 0.16
     + land * 0.34 + airborne * 0.12;
   rig.torsoX = damp(rig.torsoX, target, 12, dt);
@@ -327,8 +441,11 @@ function poseHead(ud, rig, dt, s, o) {
   // its own slow drift while idle so it never sits perfectly still.
   const drift = Math.sin(rig.swayPhase * 1.7) * 0.05 * idle;
   const nod = Math.sin(rig.swayPhase * 1.1) * 0.03 * idle + breath * 0.02 * idle;
+  // The head is where the decoupled camera is most visible: it goes on looking
+  // at whatever you are looking at while the body runs somewhere else.
   head.rotation.y = damp(head.rotation.y,
-    -torso.rotation.y * 0.75 + drift + rig.turnRate * 0.3, 16, dt);
+    -torso.rotation.y * 0.75 + drift + rig.turnRate * 0.3
+    + clamp(rig.lookOffset, -1.1, 1.1) * 0.62, 16, dt);
   head.rotation.z = damp(head.rotation.z, -torso.rotation.z * 0.6 - rig.strafe * 0.07, 16, dt);
   head.rotation.x = damp(head.rotation.x,
     -torso.rotation.x * 0.35 - s.pitch * 0.28 + nod + rig.recoil * 0.1 + rig.flinch * 0.22, 16, dt);
@@ -356,15 +473,21 @@ function poseArms(ud, rig, dt, s, o) {
 
   // Down-arm swing is a real gait swing; braced arms only get a fraction of it,
   // because a braced weapon damps the shoulder.
-  const swingR = Math.sin(ph + Math.PI) * 0.62 * stride;
-  const swingL = Math.sin(ph) * 0.62 * stride;
+  // A side-step barely swings the arms and a backpedal swings them short, so
+  // the amplitude is a blend too rather than one constant.
+  const swingAmp = 0.62 * rig.gaitF + 0.42 * rig.gaitB + 0.20 * rig.gaitS;
+  const swingR = Math.sin(ph + Math.PI) * swingAmp * stride;
+  const swingL = Math.sin(ph) * swingAmp * stride;
+  // Arms drift across the chest during a shuffle, the way they do when you are
+  // side-stepping and keeping your guard between you and something.
+  const sideDrift = rig.gaitS * stride * (rig.strafeSign || 1) * 0.22;
 
   /* ---- right arm: the weapon hand ---- */
   const bracedR = (-1.15 + aimLift) - rig.recoil * 0.55;
   const loweredR = -0.16 + swingR;
   rig.armRX = damp(rig.armRX,
     lerp(loweredR, bracedR + swingR * 0.5, ready) - airborne * 0.2, 18, dt);
-  rig.armRZ = damp(rig.armRZ, lerp(0.06, -0.12, ready), 12, dt);
+  rig.armRZ = damp(rig.armRZ, lerp(0.06, -0.12, ready) - sideDrift, 12, dt);
   rig.armRY = damp(rig.armRY, -rig.turnRate * 0.2 * ready, 12, dt);
 
   /* ---- left arm: supports the weapon, or reaches out on a grapple ---- */
@@ -372,16 +495,20 @@ function poseArms(ud, rig, dt, s, o) {
   const loweredL = -0.16 + swingL;
   const supportPose = s.grapple ? -1.5 : lerp(loweredL, bracedL - swingL * 0.5, ready);
   rig.armLX = damp(rig.armLX, supportPose - airborne * 0.2, 18, dt);
-  rig.armLZ = damp(rig.armLZ, s.grapple ? 0.1 : lerp(-0.06, 0.34, ready), 12, dt);
+  rig.armLZ = damp(rig.armLZ, s.grapple ? 0.1 : lerp(-0.06, 0.34, ready) - sideDrift, 12, dt);
   rig.armLY = damp(rig.armLY, s.grapple ? 0 : lerp(0.04, -0.28, ready), 12, dt);
 
-  // Elbows.
-  // Elbows pump either way: a braced arm still absorbs the stride, it just does
-  // it with the forearm instead of the shoulder.
+  /* Elbows.
+     Negative bends the forearm *forward*, which is the only direction a human
+     elbow goes. Every one of these used to be positive, which folded both arms
+     backwards at the elbow — most obvious with the weapon lowered, where the
+     hands ended up behind the hips.
+     Elbows pump either way: a braced arm still absorbs the stride, it just does
+     it with the forearm instead of the shoulder. */
   rig.armRLower = damp(rig.armRLower,
-    lerp(0.34, 0.5 + rig.recoil * 0.5, ready) + Math.abs(swingR) * lerp(0.3, 0.22, ready), 18, dt);
+    -(lerp(0.34, 0.42 + rig.recoil * 0.5, ready) + Math.abs(swingR) * lerp(0.3, 0.22, ready)), 18, dt);
   rig.armLLower = damp(rig.armLLower,
-    s.grapple ? -0.35 : lerp(0.3, 0.85, ready) + Math.abs(swingL) * lerp(0.3, 0.22, ready), 14, dt);
+    s.grapple ? -0.35 : -(lerp(0.3, 0.7, ready) + Math.abs(swingL) * lerp(0.3, 0.22, ready)), 14, dt);
 
   const atk = poseAttackArms(rig);
   ud.armR.rotation.x = rig.armRX + atk.rx;
@@ -527,7 +654,32 @@ function poseWeapon(ud, rig, dt, s) {
   _offsetQuat.setFromEuler(_euler);
   _aimQuat.multiply(_offsetQuat);
 
-  _parentQuat.setFromRotationMatrix(mount.parent.matrixWorld).invert();
+  /* Bring the world-space aim back into the mount's parent.
+   *
+   * `setFromRotationMatrix` assumes a pure rotation, and `matrixWorld` here is
+   * not one: the torso group is scaled every frame by the breathing, which
+   * propagates down the arm. `getWorldQuaternion` decomposes properly, which
+   * costs a little more and is right. */
+  mount.parent.getWorldQuaternion(_parentQuat);
+  _restQuat.copy(_parentQuat);
+  _parentQuat.invert();
+
+  /* Clamp the weapon to a cone around the arm.
+   *
+   * The weapon tracks the crosshair and the arm does not, so when the body is
+   * facing its travel direction rather than the camera — which is most of the
+   * time now that the two are decoupled — an unclamped aim swings the gun to
+   * point somewhere the hand plainly is not. Limiting it to what the shoulder
+   * could plausibly reach keeps the pose honest; the body snaps to the camera
+   * the moment you actually fire, so the clamp is a backstop rather than
+   * something you feel. */
+  _restQuat.multiply(_holdOffset);
+  const restFwd = _restFwd.set(0, 0, 1).applyQuaternion(_restQuat);
+  const angle = Math.acos(clamp(restFwd.dot(_aimDir), -1, 1));
+  if (angle > WEAPON_CONE) {
+    _aimQuat.slerpQuaternions(_restQuat, _aimQuat, WEAPON_CONE / angle);
+  }
+
   mount.quaternion.copy(_parentQuat).multiply(_aimQuat);
 }
 
@@ -555,7 +707,7 @@ function poseDeath(ud, rig, dt) {
     if (!arm) continue;
     arm.rotation.x = damp(arm.rotation.x, 0.4 * fall, 5, dt);
     arm.rotation.z = damp(arm.rotation.z, 0, 5, dt);
-    if (arm.userData.lower) arm.userData.lower.rotation.x = damp(arm.userData.lower.rotation.x, 0.2 * fall, 5, dt);
+    if (arm.userData.lower) arm.userData.lower.rotation.x = damp(arm.userData.lower.rotation.x, -0.2 * fall, 5, dt);
   }
 }
 

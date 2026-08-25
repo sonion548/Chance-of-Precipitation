@@ -130,6 +130,7 @@ export class ProjectileManager {
       burn: spec.burn || null,
       knockback: spec.knockback ?? 0,
       source: spec.source ?? null,
+      spin: spec.spin ?? 0,
       onHit: spec.onHit || null,
       hits: new Set(),
       trailTimer: 0,
@@ -138,6 +139,7 @@ export class ProjectileManager {
       lifesteal: spec.lifesteal ?? 0,
       dagger: !!spec.dagger,
       disc: !!spec.disc,
+      slash: !!spec.slash,
       // Aura carriers (e.g. Overload Sphere) pass through everything and damage
       // purely through their pulse, so a stray wall does not end them early.
       ghost: !!spec.ghost || (!!spec.aura && !(spec.damage > 0) && !spec.splash),
@@ -150,6 +152,9 @@ export class ProjectileManager {
     mesh.scale.setScalar(scale);
     mesh.position.copy(p.position);
     if (p.disc) mesh.scale.set(scale * 2.6, scale * 0.5, scale * 2.6);
+    // A slash is a standing blade of energy: wide, tall, and paper thin, turned
+    // to face the way it is travelling.
+    if (p.slash) mesh.scale.set(scale * 2.2, scale * 2.9, scale * 0.32);
     if (p.wave) {
       const w = p.wave.width ?? p.radius * 1.4;
       mesh.scale.set(w, 1, w);
@@ -270,7 +275,7 @@ export class ProjectileManager {
         if (d < p.radius + player.radius + 0.2) entityHit = { entity: player, distance: 0 };
         else {
           // Lizards are not targeted, but they do stop bullets meant for you.
-          const shielded = this.game.minions?.inRadius(p.position, p.radius + 0.7) || [];
+          const shielded = this.game.pets?.inRadius(p.position, p.radius + 0.7) || [];
           if (shielded.length) entityHit = { entity: shielded[0], distance: 0 };
         }
       } else {
@@ -324,6 +329,11 @@ export class ProjectileManager {
 
       p.mesh.position.copy(p.position);
       if (p.disc) p.mesh.rotation.y += dt * 26;
+      if (p.slash) {
+        _v2.copy(p.position).add(p.velocity);
+        p.mesh.lookAt(_v2);
+        p.mesh.rotateZ(p.spin ?? 0);
+      }
       if (p.wave) {
         // Fade and spread as it goes, so a wave reads as losing coherence
         // rather than as a solid object that suddenly stops existing.
@@ -406,7 +416,7 @@ export class ProjectileManager {
         const falloff = 1 - Math.min(1, d / s.radius) * 0.5;
         this.game.player.takeDamage(s.damage * falloff, { source: p.source });
       }
-      for (const m of this.game.minions?.inRadius(p.position, s.radius) || []) {
+      for (const m of this.game.pets?.inRadius(p.position, s.radius) || []) {
         const md = m.position.distanceTo(p.position);
         m.takeDamage(s.damage * (1 - Math.min(1, md / s.radius) * 0.5) * 0.6, { source: p.source });
       }

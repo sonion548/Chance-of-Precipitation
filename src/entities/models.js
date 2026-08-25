@@ -351,24 +351,31 @@ function articulatedLimb(parent, x, y, z, spec, materials) {
     low.add(ankle);
     root.userData.ankle = ankle;
   }
-  // Armour plate over the joint (knee or elbow). Kept shallow and only slightly
-  // wider than the limb — a full hemisphere at this radius reads as a balloon.
+  /* Armour plate over the joint (knee or elbow). Kept shallow and only slightly
+     wider than the limb — a full hemisphere at this radius reads as a balloon.
+
+     Which side it goes on is not cosmetic. A knee points forward and an elbow
+     points backward, so a pad hard-coded to +Z is correct on a leg and on the
+     inside of the elbow crease on an arm. `spec.foot` is only ever set on legs,
+     which is what tells the two apart. */
+  const jointSide = spec.foot ? 1 : -1;
   if (spec.pad) {
     const pad = new THREE.Mesh(
       new THREE.SphereGeometry(rMid * 1.08, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.5), materials.trim);
     pad.scale.set(1, 0.5, 1);
-    pad.position.set(0, -rMid * 0.15, rMid * 0.5);
-    pad.rotation.x = Math.PI / 2.1;
+    pad.position.set(0, -rMid * 0.15, jointSide * rMid * 0.5);
+    pad.rotation.x = jointSide * Math.PI / 2.1;
     pad.castShadow = true;
     low.add(pad);
     const ridge = new THREE.Mesh(new THREE.BoxGeometry(rMid * 0.32, rMid * 0.9, rMid * 0.22), materials.accent);
-    ridge.position.set(0, -rMid * 0.35, rMid * 0.92);
+    ridge.position.set(0, -rMid * 0.35, jointSide * rMid * 0.92);
     low.add(ridge);
   }
   if (spec.hand) {
     const hand = glove(low, materials, rBot * 0.9, spec.side ?? 1);
     hand.position.y = -lower - rBot * 0.5;
     root.userData.hand = hand;
+    root.userData.handRest = hand.position.clone();
   }
   parent.add(root);
   return root;
@@ -567,8 +574,18 @@ export function buildPlayerModel(char) {
   hipPlate.castShadow = true;
   pelvis.add(hipPlate);
   const legSpec = { upper: 0.44, lower: 0.42, rTop: P.legR[0], rMid: P.legR[1], rBot: P.legR[2], foot: true, pad: true };
-  const legL = articulatedLimb(pelvis, -P.w * 0.24, 0, 0, { ...legSpec, side: -1 }, m);
-  const legR = articulatedLimb(pelvis, P.w * 0.24, 0, 0, { ...legSpec, side: 1 }, m);
+  // Hips set wide enough that the feet do not collide at mid-stride. At the old
+  // 0.24 the two boots were 7cm apart on a body 62cm across, so every walk cycle
+  // looked like the knees were being pressed together.
+  const legL = articulatedLimb(pelvis, -P.w * 0.32, 0, 0, { ...legSpec, side: -1 }, m);
+  const legR = articulatedLimb(pelvis, P.w * 0.32, 0, 0, { ...legSpec, side: 1 }, m);
+  // A few degrees of splay, so the legs form an A rather than two parallel
+  // posts. Real legs converge from hip to knee; a chunky low-poly one reads
+  // better doing the opposite, because the silhouette is the whole character.
+  legL.rotation.z = 0.05;
+  legR.rotation.z = -0.05;
+  legL.userData.restZ = 0.05;
+  legR.userData.restZ = -0.05;
 
   // --- torso ---
   const torso = new THREE.Group();
@@ -584,8 +601,10 @@ export function buildPlayerModel(char) {
   const armR = articulatedLimb(torso, P.shoulder, P.torso * 0.82, 0, { ...armSpec, side: 1 }, m);
   armR.rotation.x = -1.15;
   armL.rotation.x = -0.85;
-  armR.userData.lower.rotation.x = 0.45;
-  armL.userData.lower.rotation.x = 0.6;
+  // Negative bends the forearm forward, which is the direction an elbow goes.
+  // These were positive, which folded both arms backwards at the elbow.
+  armR.userData.lower.rotation.x = -0.45;
+  armL.userData.lower.rotation.x = -0.6;
 
   // Pauldrons: the single biggest readability win at distance.
   for (const [side, arm] of [[-1, armL], [1, armR]]) {
@@ -796,15 +815,32 @@ export function buildPlayerModel(char) {
     }
   }
 
-  // Weapon mount sits at the right hand. Its orientation is driven every frame
-  // by the player so the muzzle tracks the crosshair regardless of arm pose.
+  /* Weapon mount sits at the right hand, and the hand goes with it.
+   *
+   * The mount's orientation is driven every frame so the muzzle tracks the
+   * crosshair, and it used to be the only thing that moved — the glove stayed
+   * with the forearm, so the weapon floated next to a hand that was not holding
+   * it. Re-parenting the glove into the mount means the fingers are rigidly
+   * attached to the grip: however the weapon turns, the hand turns with it, and
+   * it always reads as being held rather than carried alongside.
+   *
+   * Every weapon is authored with its grip just below the origin (see
+   * `buildWeaponModel`), so one offset works for the whole arsenal. */
   const weaponMount = new THREE.Group();
   weaponMount.position.set(0, -0.34, 0.02);
   armR.userData.lower.add(weaponMount);
 
+  const gripHand = armR.userData.hand;
+  if (gripHand) {
+    gripHand.parent.remove(gripHand);
+    gripHand.position.set(0, -0.055, -0.015);
+    gripHand.rotation.set(0.34, 0, 0);
+    weaponMount.add(gripHand);
+  }
+
   g.userData = {
     torso, torsoBaseY: torso.position.y, head, armL, armR, legL, legR, pelvis,
-    weaponMount, visor: m.visor, build, hipY: P.hipY,
+    weaponMount, gripHand, visor: m.visor, build, hipY: P.hipY,
   };
   return mergeStaticMeshes(g);
 }
@@ -904,8 +940,9 @@ export function buildWeaponModel(weapon) {
     const handle = box(0.075 * scale, 0.022 * scale, 0.05 * scale, steel, 0.05 * scale, 0.055 * scale, z - 0.09 * scale);
     g.add(handle);
     // Selector switch and magazine release.
-    g.add(cyl(0.016 * scale, 0.016 * scale, 0.03 * scale, 6, steel, 0.05 * scale, -0.035 * scale, z - 0.13 * scale))
-      .rotation.z = Math.PI / 2;
+    const selector = cyl(0.016 * scale, 0.016 * scale, 0.03 * scale, 6, steel, 0.05 * scale, -0.035 * scale, z - 0.13 * scale);
+    selector.rotation.z = Math.PI / 2;
+    g.add(selector);
     g.add(box(0.018 * scale, 0.03 * scale, 0.022 * scale, steel, 0.05 * scale, -0.02 * scale, z + 0.02 * scale));
   };
 
@@ -966,8 +1003,12 @@ export function buildWeaponModel(weapon) {
       g.add(box(0.05, 0.02, 0.24, steel, 0, 0.04, -0.16));
       // Shell loops on the receiver, each with a visible brass head.
       for (let i = 0; i < 4; i++) {
-        g.add(cyl(0.022, 0.022, 0.055, 6, dark, -0.07, -0.02 - i * 0.05, 0.06)).rotation.x = Math.PI / 2;
-        g.add(cyl(0.019, 0.019, 0.012, 6, accent, -0.07, -0.02 - i * 0.05, 0.09)).rotation.x = Math.PI / 2;
+        const shell = cyl(0.022, 0.022, 0.055, 6, dark, -0.07, -0.02 - i * 0.05, 0.06);
+        shell.rotation.x = Math.PI / 2;
+        g.add(shell);
+        const primer = cyl(0.019, 0.019, 0.012, 6, accent, -0.07, -0.02 - i * 0.05, 0.09);
+        primer.rotation.x = Math.PI / 2;
+        g.add(primer);
       }
       addIronSights(0.78, 0.06, 0.095, 1.15);
       addAction(0.16, 1.1);
@@ -1049,7 +1090,9 @@ export function buildWeaponModel(weapon) {
       const flare = cyl(0.19, 0.14, 0.16, 12, steel, 0, 0, 0.68);
       flare.rotation.x = Math.PI / 2;
       g.add(flare);
-      g.add(new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.022, 4, 16), accent)).position.z = 0.7;
+      const muzzleRing = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.022, 4, 16), accent);
+      muzzleRing.position.z = 0.7;
+      g.add(muzzleRing);
       g.children[g.children.length - 1].rotation.y = Math.PI / 2;
       g.children[g.children.length - 1].rotation.x = Math.PI / 2;
       // Revolver cylinder of charges.
@@ -1104,7 +1147,9 @@ export function buildWeaponModel(weapon) {
       const tank = cyl(0.07, 0.07, 0.24, 10, dark, 0, -0.14, 0.02);
       tank.rotation.z = Math.PI / 2;
       g.add(tank);
-      g.add(cyl(0.045, 0.045, 0.26, 8, glass, 0, -0.14, 0.02)).rotation.z = Math.PI / 2;
+      const coolant = cyl(0.045, 0.045, 0.26, 8, glass, 0, -0.14, 0.02);
+      coolant.rotation.z = Math.PI / 2;
+      g.add(coolant);
       addGrip(-0.04, 0.3, 1.05);
       addOptic(0.08);
       addSling(0.34, -0.16, 1.05);
@@ -1113,7 +1158,9 @@ export function buildWeaponModel(weapon) {
         const cap = cyl(0.032, 0.032, 0.13, 8, dark, 0, 0.13, -0.02 + i * 0.11);
         cap.rotation.z = Math.PI / 2;
         g.add(cap);
-        g.add(cyl(0.036, 0.036, 0.02, 8, accent, 0, 0.13, 0.04 + i * 0.11)).rotation.z = Math.PI / 2;
+        const band = cyl(0.036, 0.036, 0.02, 8, accent, 0, 0.13, 0.04 + i * 0.11);
+        band.rotation.z = Math.PI / 2;
+        g.add(band);
       }
       for (const sx of [-1, 1]) {
         cableRun(g, dark, [sx * 0.07, -0.12, 0.0], [sx * 0.11, 0.02, 0.3], 0.05, 5, 0.013);
@@ -1263,6 +1310,86 @@ export function buildWeaponModel(weapon) {
         }
       }
       muzzle.position.set(0, 0, bladeLen + 0.4);
+      break;
+    }
+    case 'fists': {
+      /* A breaching gauntlet rather than a boxing glove.
+         The weapon mount is the right hand, so the whole thing is built forward
+         along +Z from the wrist: brace, wrist collar, fist block, knuckle
+         plates. The charge core sits on the back of the hand where the player
+         can actually see it — it is the only part of the weapon that tells you
+         it is doing anything, since there is no muzzle flash to read. */
+      const plate = mat(0x4a3228, { roughness: 0.5, metalness: 0.72, flat: true });
+      const hot = mat(weapon.color, { emissive: weapon.color, emissiveIntensity: 1.4, roughness: 0.3, metalness: 0.5 });
+
+      // Forearm brace with strapping.
+      const brace = cyl(0.115, 0.135, 0.42, 8, plate, 0, 0, -0.2);
+      brace.rotation.x = Math.PI / 2;
+      g.add(brace);
+      for (let i = 0; i < 3; i++) {
+        const strap = new THREE.Mesh(new THREE.TorusGeometry(0.125, 0.018, 4, 10), grip);
+        strap.rotation.y = Math.PI / 2;
+        strap.rotation.x = Math.PI / 2;
+        strap.position.z = -0.34 + i * 0.11;
+        g.add(strap);
+      }
+      // Piston housings running the length of the forearm — this is where the
+      // charge is supposed to come from.
+      for (const sx of [-1, 1]) {
+        g.add(box(0.05, 0.05, 0.34, steel, sx * 0.11, 0.055, -0.2));
+        g.add(box(0.035, 0.035, 0.1, accent, sx * 0.11, 0.055, -0.02));
+      }
+      ventStack(g, dark, { pos: [0, -0.1, -0.2], count: 4, size: [0.16, 0.02, 0.03], spacing: 0.075, axis: 'z' });
+
+      // Wrist collar.
+      const collar = cyl(0.155, 0.15, 0.09, 8, steel, 0, 0, 0.03);
+      collar.rotation.x = Math.PI / 2;
+      g.add(collar);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 4, 12), accent);
+      ring.rotation.y = 0;
+      ring.position.z = 0.03;
+      g.add(ring);
+
+      // Fist block.
+      g.add(box(0.24, 0.235, 0.3, body, 0, 0, 0.22));
+      g.add(box(0.255, 0.09, 0.31, plate, 0, 0.085, 0.22));
+      g.add(box(0.255, 0.09, 0.31, plate, 0, -0.085, 0.22));
+      // Finger segments, curled: three ridges down the striking face.
+      for (let i = 0; i < 3; i++) {
+        const y = 0.075 - i * 0.075;
+        g.add(box(0.235, 0.055, 0.09, plate, 0, y, 0.375));
+        g.add(box(0.245, 0.02, 0.03, steel, 0, y, 0.425));
+      }
+      // Knuckle spikes — four short wedges on the face.
+      for (let i = 0; i < 4; i++) {
+        const x = -0.085 + i * 0.057;
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.11, 4), steel);
+        spike.rotation.x = Math.PI / 2;
+        spike.position.set(x, 0.055, 0.46);
+        spike.castShadow = true;
+        g.add(spike);
+      }
+      // Thumb, folded across.
+      g.add(box(0.07, 0.09, 0.15, plate, -0.15, -0.02, 0.26));
+
+      // Charge core on the back of the hand.
+      g.add(box(0.14, 0.05, 0.16, dark, 0, 0.13, 0.2));
+      const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.055, 0), hot);
+      core.position.set(0, 0.165, 0.2);
+      g.add(core);
+      for (const sx of [-1, 1]) {
+        g.add(box(0.02, 0.03, 0.12, accent, sx * 0.075, 0.145, 0.2));
+      }
+      cableRun(g, dark, [0.06, 0.11, 0.1], [0.09, 0.04, -0.26], 0.05, 5, 0.014);
+      boltRow(g, steel, { from: [0.115, -0.06, 0.12], to: [0.115, -0.06, 0.32], count: 3, r: 0.011 });
+
+      // The strike point sits just past the knuckles, so procs and impacts
+      // resolve where the fist actually arrives rather than at the wrist.
+      muzzle.position.set(0, 0.02, 0.52);
+      // Built at true hand scale and then oversized, on purpose. At life size it
+      // reads as a glove rather than as the weapon, and this is the one weapon
+      // whose entire silhouette has to say "melee" from the third-person camera.
+      g.scale.setScalar(1.35);
       break;
     }
     default:
@@ -1631,6 +1758,300 @@ export function buildEnemyModel(def) {
       parts.hover = true;
       break;
     }
+    case 'thornmaw': {
+      /* A jaw on the end of a stalk, and the stalk goes back into the ground.
+         Built leaning, because a thing that erupts does not come up straight —
+         the lean is most of what says "this was underground a second ago". */
+      const stalk = new THREE.Group();
+      stalk.position.y = 0.1;
+      stalk.rotation.x = -0.16;
+      g.add(stalk);
+
+      const SEGS = 6;
+      let node = stalk;
+      const rings = [];
+      for (let i = 0; i < SEGS; i++) {
+        const t = i / (SEGS - 1);
+        const r = 1.05 - t * 0.42;
+        const seg = new THREE.Group();
+        seg.position.y = i === 0 ? 0.4 : 0.62;
+        const body = cyl(r * 0.92, r, 0.68, 8, base, 0, 0, 0);
+        body.castShadow = true;
+        seg.add(body);
+        // A collar of husk plates at each joint, flaring outward.
+        for (let k = 0; k < 6; k++) {
+          const a = (k / 6) * Math.PI * 2 + i * 0.4;
+          const plate = box(r * 0.42, 0.12, r * 0.5, dark,
+            Math.cos(a) * r * 0.95, -0.24, Math.sin(a) * r * 0.95);
+          plate.rotation.y = -a;
+          plate.rotation.x = -0.5;
+          seg.add(plate);
+        }
+        node.add(seg);
+        rings.push(seg);
+        node = seg;
+      }
+
+      // The maw: four petal jaws round a throat, on the last segment.
+      const maw = new THREE.Group();
+      maw.position.y = 0.5;
+      node.add(maw);
+      const throat = cyl(0.34, 0.5, 0.5, 8, accent, 0, 0.1, 0);
+      maw.add(throat);
+      const petals = [];
+      for (let k = 0; k < 4; k++) {
+        const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+        const petal = new THREE.Group();
+        petal.position.set(Math.cos(a) * 0.34, 0.16, Math.sin(a) * 0.34);
+        petal.rotation.y = -a;
+        petal.rotation.x = -0.5;
+        const blade = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.5, 4), base);
+        blade.position.y = 0.72;
+        blade.scale.z = 0.55;
+        blade.castShadow = true;
+        petal.add(blade);
+        for (let t = 0; t < 4; t++) {
+          const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.3, 4), accent);
+          tooth.position.set((t - 1.5) * 0.16, 0.24, 0.2);
+          tooth.rotation.x = 1.5;
+          petal.add(tooth);
+        }
+        maw.add(petal);
+        petals.push(petal);
+      }
+      // Root tendrils splayed round the base, so it reads as anchored.
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 7) * Math.PI * 2;
+        const root = cyl(0.06, 0.3, 2.2, 5, dark, Math.cos(a) * 1.1, 0.5, Math.sin(a) * 1.1);
+        root.rotation.z = -Math.cos(a) * 0.9;
+        root.rotation.x = Math.sin(a) * 0.9;
+        root.castShadow = true;
+        g.add(root);
+      }
+      parts.torso = stalk;
+      parts.stalkSegments = rings;
+      parts.maw = maw;
+      parts.petals = petals;
+      break;
+    }
+
+    case 'fulgurant': {
+      /* No body — a suspended core inside two counter-turning rings, with coil
+         arms hanging beneath it. Nothing about it should read as anatomy; it is
+         a machine for putting lightning somewhere. */
+      const core = new THREE.Group();
+      core.position.y = 2.6;
+      g.add(core);
+
+      const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(0.86, 1), base);
+      shell.castShadow = true;
+      core.add(shell);
+      const heart = new THREE.Mesh(new THREE.IcosahedronGeometry(0.56, 1), accent);
+      core.add(heart);
+
+      const ringA = new THREE.Group();
+      const ringB = new THREE.Group();
+      core.add(ringA, ringB);
+      const bigRing = new THREE.Mesh(new THREE.TorusGeometry(1.7, 0.1, 5, 22), dark);
+      bigRing.rotation.x = Math.PI / 2;
+      ringA.add(bigRing);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const node = new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0), accent);
+        node.position.set(Math.cos(a) * 1.7, 0, Math.sin(a) * 1.7);
+        ringA.add(node);
+      }
+      const midRing = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.075, 5, 18), dark);
+      midRing.rotation.set(Math.PI / 2, 0, 0.9);
+      ringB.add(midRing);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
+        const shard = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.7, 4), accent);
+        shard.position.set(Math.cos(a) * 1.2, Math.sin(a) * 0.9, Math.sin(a) * 1.2);
+        shard.rotation.z = a;
+        ringB.add(shard);
+      }
+
+      // Coil arms: three tapering rods hanging under the core, tipped with emitters.
+      const arms = [];
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2;
+        const arm = new THREE.Group();
+        arm.position.set(Math.cos(a) * 0.7, -0.5, Math.sin(a) * 0.7);
+        const rod = cyl(0.11, 0.05, 1.7, 6, dark, 0, -0.85, 0);
+        rod.castShadow = true;
+        arm.add(rod);
+        for (let c = 0; c < 3; c++) {
+          const coil = new THREE.Mesh(new THREE.TorusGeometry(0.15 - c * 0.02, 0.03, 4, 10), accent);
+          coil.rotation.x = Math.PI / 2;
+          coil.position.y = -0.45 - c * 0.42;
+          arm.add(coil);
+        }
+        const tip = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0), accent);
+        tip.position.y = -1.78;
+        arm.add(tip);
+        core.add(arm);
+        arms.push(arm);
+      }
+
+      parts.torso = core;
+      parts.ringA = ringA;
+      parts.ringB = ringB;
+      parts.arms = arms;
+      parts.heart = heart;
+      break;
+    }
+
+    case 'choir': {
+      /* A bell of bone with nothing under it, ringed by lanterns.
+         The lanterns are the health bar you are supposed to be reading: one per
+         chorister still standing, and the AI lights them. */
+      const bell = new THREE.Group();
+      bell.position.y = 2.3;
+      g.add(bell);
+
+      const robe = cyl(1.32, 0.42, 3.0, 9, base, 0, -0.4, 0);
+      robe.castShadow = true;
+      bell.add(robe);
+      for (let i = 0; i < 5; i++) {
+        const fold = cyl(1.34 - i * 0.06, 1.2 - i * 0.06, 0.16, 9, dark, 0, -1.5 + i * 0.36, 0);
+        bell.add(fold);
+      }
+      // Hood and the dark under it.
+      const hood = new THREE.Mesh(
+        new THREE.SphereGeometry(0.72, 9, 7, 0, Math.PI * 2, 0, Math.PI * 0.62), base);
+      hood.position.y = 0.95;
+      hood.castShadow = true;
+      bell.add(hood);
+      bell.add(sphere(0.5, dark, 0, 0.8, 0.06, 8));
+      for (const sx of [-1, 1]) {
+        bell.add(sphere(0.11, accent, sx * 0.2, 0.86, 0.42, 6));
+      }
+      // A rib cage worn over the front.
+      addPlates(bell, 5, dark, { radius: 0.95, from: -0.9, to: 0.5, width: 0.9, thick: 0.09 });
+
+      // Conductor's arms — long, thin, and always raised.
+      const arms = [];
+      for (const sx of [-1, 1]) {
+        const arm = pivotLimb(bell, sx * 1.15, 0.5, 0, [0.26, 1.9, 0.26], base, accent);
+        arm.rotation.z = sx * 0.9;
+        arm.rotation.x = -0.5;
+        arms.push(arm);
+      }
+
+      // Lantern ring: six skull lamps orbiting the hem.
+      const lanterns = [];
+      const lanternRing = new THREE.Group();
+      lanternRing.position.y = 1.4;
+      g.add(lanternRing);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const lantern = new THREE.Group();
+        lantern.position.set(Math.cos(a) * 2.2, 0, Math.sin(a) * 2.2);
+        const cage = new THREE.Mesh(new THREE.OctahedronGeometry(0.28, 0), dark);
+        lantern.add(cage);
+        const flame = new THREE.Mesh(new THREE.SphereGeometry(0.17, 7, 6), glowMat(def.accent, 0.9));
+        lantern.add(flame);
+        lantern.userData.flame = flame;
+        lanternRing.add(lantern);
+        lanterns.push(lantern);
+      }
+
+      parts.torso = bell;
+      parts.armL = arms[0];
+      parts.armR = arms[1];
+      parts.lanternRing = lanternRing;
+      parts.lanterns = lanterns;
+      break;
+    }
+
+    case 'sovereign': {
+      /* The Null Sovereign. Nothing else in the game floats a mask over a
+         hollow frame, so the silhouette is unmistakable the moment the rift
+         closes behind you: a crown of shards, a mask with no face, and a
+         tattered column of nothing where a body should be. */
+      const core = new THREE.Group();
+      core.position.y = 3.4;
+      g.add(core);
+
+      // Hollow frame: two shells with a gap you can see the glow through.
+      const outer = new THREE.Mesh(new THREE.IcosahedronGeometry(1.35, 1), base);
+      outer.scale.set(1, 1.5, 1);
+      outer.castShadow = true;
+      core.add(outer);
+      const heart = new THREE.Mesh(new THREE.IcosahedronGeometry(0.72, 0), accent);
+      core.add(heart);
+      parts.core = heart;
+
+      // Mask: a smooth plate with a slit, hanging in front of the frame.
+      const mask = new THREE.Mesh(new THREE.CylinderGeometry(0.86, 0.62, 0.18, 6), dark);
+      mask.rotation.x = Math.PI / 2;
+      mask.position.set(0, 0.35, 1.15);
+      mask.castShadow = true;
+      core.add(mask);
+      const slit = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.14, 0.1), accent);
+      slit.position.set(0, 0.4, 1.26);
+      core.add(slit);
+      for (const sx of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.11, 7, 6), accent);
+        eye.position.set(sx * 0.34, 0.42, 1.3);
+        core.add(eye);
+      }
+
+      // Crown of shards, and a second counter-rotating ring below it.
+      const crown = new THREE.Group();
+      crown.position.y = 1.5;
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI * 2;
+        const shard = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.9 + (i % 3) * 0.34, 4), accent);
+        shard.position.set(Math.cos(a) * 1.15, 0.2 + (i % 2) * 0.2, Math.sin(a) * 1.15);
+        shard.rotation.set(Math.cos(a) * 0.3, -a, -Math.sin(a) * 0.3);
+        crown.add(shard);
+      }
+      core.add(crown);
+      parts.rings = crown;
+
+      const halo = new THREE.Group();
+      halo.position.y = -0.4;
+      for (let i = 0; i < 3; i++) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.9 + i * 0.5, 0.07, 4, 20), dark);
+        ring.rotation.set(Math.PI / 2 + i * 0.22, i * 0.5, 0);
+        halo.add(ring);
+      }
+      core.add(halo);
+      parts.halo = halo;
+
+      // Shoulders, so the crown has something to sit on.
+      for (const sx of [-1, 1]) {
+        const pauldron = new THREE.Mesh(
+          new THREE.SphereGeometry(0.7, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), base);
+        pauldron.position.set(sx * 1.3, 0.7, 0);
+        pauldron.rotation.z = sx * 0.4;
+        pauldron.castShadow = true;
+        core.add(pauldron);
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.2, 1.5, 5), dark);
+        spike.position.set(sx * 1.5, 1.5, -0.2);
+        spike.rotation.z = sx * 0.5;
+        core.add(spike);
+      }
+
+      // A tattered column instead of legs, tapering away underneath.
+      const tatters = new THREE.Group();
+      const rngS = mulberryLite(21);
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        const len = 1.6 + rngS() * 1.8;
+        const rag = new THREE.Mesh(new THREE.ConeGeometry(0.22, len, 4), base);
+        rag.position.set(Math.cos(a) * 0.68, -1.5 - len * 0.4, Math.sin(a) * 0.68);
+        rag.rotation.set(Math.cos(a) * 0.22, a, Math.PI + Math.sin(a) * 0.22);
+        tatters.add(rag);
+      }
+      core.add(tatters);
+      parts.tail = tatters;
+      parts.torso = core;
+      parts.hover = true;
+      break;
+    }
     case 'harbinger': {
       const core = new THREE.Group();
       core.position.y = 2.4;
@@ -1774,6 +2195,339 @@ export function buildChestModel(kind) {
     }
     g.userData = { orb, cage, spin: pillar, glowColor: P.glow };
     g.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+    return mergeStaticMeshes(g);
+  }
+
+  /* ==========================================================================
+     THE LEGENDARY RELIQUARY
+     ==========================================================================
+     A Legendary chest used to be an ordinary chest painted orange and scaled up
+     half again. At forty metres through fog, in an arena that also contains
+     Large chests painted blue and scaled up a third, that is not a silhouette —
+     it is a colour you have to be close enough to read. Given what one costs,
+     you should be able to tell what it is from across the stage and decide to
+     walk over before you can make out the price.
+
+     So this one is not a chest at all. It is a hexagonal reliquary held off the
+     ground by four claws, crowned by two counter-rotating rings and lit by a
+     shaft of light that goes up past the fog ceiling. Nothing else in the game
+     has that outline, which is the whole requirement.
+  */
+  if (kind === 'legendary') {
+    const obsidian = mat(0x231018, { roughness: 0.32, metalness: 0.55, flat: true });
+    const goldDark = mat(0x8a5a1e, { roughness: 0.36, metalness: 0.95 });
+    const gold = mat(0xffb44a, { roughness: 0.22, metalness: 1.0, emissive: 0xff8a3d, emissiveIntensity: 0.35 });
+    const ember = glowMat(0xff8a3d, 0.92);
+    const emberSoft = glowMat(0xffc27a, 0.5);
+
+    /* ---- plinth: three hexagonal steps ---- */
+    for (let i = 0; i < 3; i++) {
+      const r = 1.55 - i * 0.26;
+      g.add(cyl(r, r + 0.05, 0.24, 6, i === 1 ? goldDark : obsidian, 0, 0.12 + i * 0.24, 0));
+      const lip = new THREE.Mesh(new THREE.TorusGeometry(r, 0.036, 4, 6), gold);
+      lip.rotation.x = Math.PI / 2;
+      lip.rotation.z = Math.PI / 6;
+      lip.position.y = 0.24 + i * 0.24;
+      g.add(lip);
+    }
+
+    /* ---- four claws holding the vault clear of the plinth ---- */
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const cx = Math.cos(a) * 0.72;
+      const cz = Math.sin(a) * 0.72;
+      const claw = new THREE.Group();
+      claw.position.set(cx, 0.84, cz);
+      claw.rotation.y = -a;
+      claw.add(box(0.17, 0.62, 0.2, goldDark, 0, 0, 0));
+      const knee = box(0.14, 0.44, 0.17, goldDark, 0, 0.42, -0.12);
+      knee.rotation.x = 0.5;
+      claw.add(knee);
+      claw.add(box(0.2, 0.12, 0.28, gold, 0, -0.3, 0.05));
+      const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.075, 0), ember);
+      gem.position.set(0, 0.12, 0.11);
+      claw.add(gem);
+      g.add(claw);
+    }
+
+    /* ---- the vault: a hexagonal drum with rune faces ---- */
+    const vault = new THREE.Group();
+    vault.position.y = 1.42;
+    g.add(vault);
+    vault.add(cyl(0.98, 1.02, 0.86, 6, obsidian, 0, 0, 0));
+    for (const y of [-0.4, 0.4]) {
+      const band = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.055, 4, 6), gold);
+      band.rotation.x = Math.PI / 2;
+      band.rotation.z = Math.PI / 6;
+      band.position.y = y;
+      vault.add(band);
+    }
+    // Rune plates recessed into each of the six faces, lit from behind.
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+      const px = Math.cos(a) * 0.9;
+      const pz = Math.sin(a) * 0.9;
+      const plate = box(0.44, 0.5, 0.06, goldDark, px, 0, pz);
+      plate.rotation.y = -a + Math.PI / 2;
+      vault.add(plate);
+      const litRune = box(0.2, 0.32, 0.05, ember, Math.cos(a) * 0.94, 0, Math.sin(a) * 0.94);
+      litRune.rotation.y = -a + Math.PI / 2;
+      vault.add(litRune);
+      // Studs framing the plate.
+      for (const sy of [-0.3, 0.3]) {
+        vault.add(sphere(0.045, gold, Math.cos(a) * 0.95, sy, Math.sin(a) * 0.95, 6));
+      }
+    }
+    // Hollow interior, visible once the crown lifts.
+    vault.add(cyl(0.8, 0.8, 0.7, 6, inner, 0, 0.12, 0));
+
+    /* ---- the crown: a hexagonal pyramid that hinges up and back ---- */
+    const lid = new THREE.Group();
+    lid.position.set(0, 1.88, -0.95);
+    g.add(lid);
+    const capBase = cyl(0.88, 1.04, 0.2, 6, obsidian, 0, 0.1, 0.95);
+    lid.add(capBase);
+    const spire = cyl(0.06, 0.86, 0.78, 6, obsidian, 0, 0.58, 0.95);
+    lid.add(spire);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+      const rib = box(0.06, 0.8, 0.06, gold, Math.cos(a) * 0.4, 0.56, 0.95 + Math.sin(a) * 0.4);
+      rib.rotation.set(Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5);
+      lid.add(rib);
+    }
+    const finial = new THREE.Mesh(new THREE.OctahedronGeometry(0.17, 0), gold);
+    finial.position.set(0, 1.02, 0.95);
+    lid.add(finial);
+    const finialCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.1, 0), ember);
+    finialCore.position.set(0, 1.02, 0.95);
+    lid.add(finialCore);
+    const lidRing = new THREE.Mesh(new THREE.TorusGeometry(0.98, 0.05, 4, 6), gold);
+    lidRing.rotation.x = Math.PI / 2;
+    lidRing.rotation.z = Math.PI / 6;
+    lidRing.position.set(0, 0.2, 0.95);
+    lid.add(lidRing);
+
+    /* ---- crown of orbiting rings ---- */
+    const rings = new THREE.Group();
+    rings.position.y = 2.5;
+    g.add(rings);
+    const ringA = new THREE.Group();
+    const ringB = new THREE.Group();
+    rings.add(ringA, ringB);
+    const buildRing = (parent, radius, tube, tilt) => {
+      const torus = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 5, 22), gold);
+      torus.rotation.x = Math.PI / 2 + tilt;
+      parent.add(torus);
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const node = new THREE.Mesh(new THREE.OctahedronGeometry(tube * 2.4, 0), ember);
+        node.position.set(Math.cos(a) * radius, Math.sin(tilt) * Math.sin(a) * radius, Math.sin(a) * radius * Math.cos(tilt));
+        parent.add(node);
+      }
+    };
+    buildRing(ringA, 1.15, 0.045, 0);
+    buildRing(ringB, 0.82, 0.035, 0.62);
+    rings.userData.a = ringA;
+    rings.userData.b = ringB;
+
+    /* ---- the light shaft: what you actually see from across the arena ---- */
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.34, 0.9, 22, 10, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xff9a4a, transparent: true, opacity: 0.16,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      }),
+    );
+    beam.position.y = 12.4;
+    g.add(beam);
+
+    const halo = new THREE.Mesh(new THREE.RingGeometry(1.5, 2.7, 24), emberSoft);
+    halo.rotation.x = -Math.PI / 2;
+    halo.position.y = 0.05;
+    g.add(halo);
+
+    // The "lamp" the update loop dims when the chest is spent.
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3, 1), ember);
+    core.position.y = 1.42;
+    g.add(core);
+
+    g.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+    beam.castShadow = false;
+    halo.castShadow = false;
+    g.userData = { lid, light: core, rings, beam, halo, glowColor: P.glow, legendary: true };
+    return mergeStaticMeshes(g);
+  }
+
+  /* ==========================================================================
+     THE OTHER FOUR
+     ==========================================================================
+     Each of these has to be identifiable at fifty metres by silhouette alone,
+     because the whole reason to put four more devices on a stage is that you
+     decide which one to walk towards before you can read the prompt. So: an
+     altar is low and wide and horizontal, a cache is a squat sealed drum, a
+     duplicator is tall and framed, and a forge is a hopper with a chimney.
+  */
+  if (kind === 'altar') {
+    const stone = mat(0x4a4048, { roughness: 0.86, metalness: 0.06, flat: true });
+    const dark = mat(0x2a2028, { roughness: 0.9, metalness: 0.05 });
+    const iron = mat(0x5a4a4a, { roughness: 0.5, metalness: 0.7 });
+    const bloodM = glowMat(0xff2f5e, 0.9);
+
+    // Slab on two plinths, low and horizontal.
+    for (const sx of [-1, 1]) {
+      g.add(box(0.5, 0.8, 1.5, stone, sx * 0.95, 0.4, 0));
+      g.add(box(0.62, 0.14, 1.62, dark, sx * 0.95, 0.86, 0));
+    }
+    const slab = box(2.9, 0.34, 1.9, stone, 0, 1.05, 0);
+    g.add(slab);
+    g.add(box(3.0, 0.1, 2.0, dark, 0, 1.24, 0));
+    // A channel cut down the middle, running to a drain at one end.
+    g.add(box(0.42, 0.08, 1.7, bloodM, 0, 1.28, 0));
+    g.add(box(0.9, 0.06, 0.42, bloodM, 0, 1.28, 0.85));
+    for (let i = 0; i < 4; i++) {
+      g.add(box(0.13, 0.05, 0.5, bloodM, -1.0 + i * 0.66, 1.28, -0.6));
+    }
+    // Chains and rings at the corners.
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.035, 4, 10), iron);
+        ring.position.set(sx * 1.3, 1.16, sz * 0.78);
+        ring.rotation.x = Math.PI / 2;
+        g.add(ring);
+        cableRun(g, iron, [sx * 1.3, 1.14, sz * 0.78], [sx * 1.5, 0.2, sz * 0.95], 0.16, 5, 0.03);
+      }
+    }
+    // The offering: a shard held above the slab.
+    const shard = new THREE.Mesh(new THREE.OctahedronGeometry(0.36, 0), bloodM);
+    shard.position.y = 2.15;
+    g.add(shard);
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.045, 4, 18), iron);
+    halo.rotation.x = Math.PI / 2;
+    halo.position.y = 2.15;
+    g.add(halo);
+    g.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+    g.userData = { light: shard, orb: shard, halo, glowColor: 0xff2f5e };
+    return mergeStaticMeshes(g);
+  }
+
+  if (kind === 'cache') {
+    const drum = mat(0x3c4230, { roughness: 0.72, metalness: 0.34, flat: true });
+    const band = mat(0x2a2e22, { roughness: 0.6, metalness: 0.6 });
+    const rust = mat(0x6a4a2a, { roughness: 0.94, metalness: 0.1 });
+    const leak = glowMat(0xff4d5e, 0.85);
+
+    g.add(cyl(1.05, 1.15, 1.9, 10, drum, 0, 0.95, 0));
+    for (const y of [0.34, 0.95, 1.56]) {
+      const hoop = new THREE.Mesh(new THREE.TorusGeometry(1.12, 0.075, 4, 14), band);
+      hoop.rotation.x = Math.PI / 2;
+      hoop.position.y = y;
+      g.add(hoop);
+    }
+    // Cross-strapping over the lid, bolted down. Sealed by someone worried.
+    const lid = new THREE.Group();
+    lid.position.set(0, 1.9, -1.0);
+    g.add(lid);
+    lid.add(cyl(1.0, 1.06, 0.16, 10, band, 0, 0.08, 1.0));
+    for (let i = 0; i < 2; i++) {
+      const strap = box(i ? 2.2 : 0.34, 0.1, i ? 0.34 : 2.2, rust, 0, 0.2, 1.0);
+      lid.add(strap);
+    }
+    const seal = new THREE.Mesh(new THREE.OctahedronGeometry(0.2, 0), leak);
+    seal.position.set(0, 0.34, 1.0);
+    lid.add(seal);
+    // Leaking seams: it is not holding.
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      g.add(box(0.1, 0.5, 0.1, leak, Math.cos(a) * 1.08, 0.95, Math.sin(a) * 1.08));
+    }
+    const warn = new THREE.Mesh(new THREE.RingGeometry(1.5, 2.3, 20), glowMat(0xff4d5e, 0.3));
+    warn.rotation.x = -Math.PI / 2;
+    warn.position.y = 0.06;
+    g.add(warn);
+    g.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+    warn.castShadow = false;
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.26, 0), leak);
+    core.position.y = 1.9;
+    g.add(core);
+    g.userData = { lid, light: core, halo: warn, glowColor: 0xff4d5e };
+    return mergeStaticMeshes(g);
+  }
+
+  if (kind === 'duplicator') {
+    const frame = mat(0x4a5260, { roughness: 0.44, metalness: 0.78 });
+    const dark = mat(0x232a34, { roughness: 0.7, metalness: 0.5 });
+    const glow = glowMat(0x6fd0ff, 0.85);
+
+    g.add(box(2.4, 0.3, 1.5, dark, 0, 0.15, 0));
+    for (const sx of [-1, 1]) {
+      g.add(box(0.26, 3.0, 0.4, frame, sx * 1.0, 1.6, 0));
+      ventStack(g, dark, { pos: [sx * 1.0, 1.2, 0.22], count: 4, size: [0.3, 0.05, 0.06], spacing: 0.3, axis: 'z' });
+    }
+    g.add(box(2.4, 0.34, 0.5, frame, 0, 3.1, 0));
+    g.add(box(2.0, 0.12, 0.3, glow, 0, 2.9, 0.06));
+    // The scanning bar: what a duplicator is, in one part.
+    const bar = new THREE.Group();
+    bar.position.y = 1.5;
+    g.add(bar);
+    bar.add(box(2.1, 0.16, 0.34, frame, 0, 0, 0));
+    bar.add(box(1.9, 0.07, 0.12, glow, 0, 0, 0.2));
+    // Plate, and the ghost of a thing standing on it.
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.8, 0.14, 12), frame);
+    plate.position.y = 0.36;
+    g.add(plate);
+    const ghost = new THREE.Mesh(new THREE.IcosahedronGeometry(0.4, 0), glow);
+    ghost.position.y = 1.1;
+    g.add(ghost);
+    for (let i = 0; i < 3; i++) {
+      const halo = new THREE.Mesh(new THREE.TorusGeometry(0.55 + i * 0.12, 0.025, 4, 16), glow);
+      halo.rotation.x = Math.PI / 2;
+      halo.position.y = 0.62 + i * 0.42;
+      g.add(halo);
+    }
+    cableRun(g, dark, [-1.0, 2.9, -0.2], [1.0, 2.9, -0.2], 0.22, 6, 0.035);
+    g.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+    g.userData = { light: ghost, orb: ghost, scanBar: bar, glowColor: 0x6fd0ff };
+    return mergeStaticMeshes(g);
+  }
+
+  if (kind === 'forge') {
+    const iron = mat(0x40342c, { roughness: 0.68, metalness: 0.5, flat: true });
+    const hot = mat(0xff8a3d, { emissive: 0xff6a2a, emissiveIntensity: 1.5, roughness: 0.4 });
+    const dark = mat(0x231c18, { roughness: 0.9, metalness: 0.2 });
+    const fire = glowMat(0xffb347, 0.9);
+
+    // Squat body on splayed legs.
+    g.add(box(2.2, 1.5, 1.8, iron, 0, 0.95, 0));
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const leg = box(0.24, 0.9, 0.24, dark, sx * 0.85, 0.42, sz * 0.68);
+      leg.rotation.z = sx * 0.14;
+      g.add(leg);
+    }
+    // Hopper: a funnel you visibly drop things into.
+    const hopper = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 0.45, 0.9, 8, 1, true), iron);
+    hopper.position.y = 2.1;
+    g.add(hopper);
+    const hopperRim = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.08, 4, 14), dark);
+    hopperRim.rotation.x = Math.PI / 2;
+    hopperRim.position.y = 2.55;
+    g.add(hopperRim);
+    // Chimney, offset, with a heat glow at the throat.
+    g.add(cyl(0.3, 0.36, 2.0, 7, iron, 0.72, 2.6, -0.5));
+    g.add(cyl(0.38, 0.3, 0.22, 7, dark, 0.72, 3.7, -0.5));
+    g.add(cyl(0.24, 0.24, 0.12, 7, fire, 0.72, 3.6, -0.5));
+    // The fire door, and the light coming out of it.
+    g.add(box(0.9, 0.7, 0.12, dark, 0, 0.85, 0.92));
+    const mouth = box(0.66, 0.46, 0.08, fire, 0, 0.85, 0.98);
+    g.add(mouth);
+    for (let i = 0; i < 3; i++) {
+      g.add(box(1.9, 0.09, 0.1, hot, 0, 0.35 + i * 0.5, 0.9));
+    }
+    boltRow(g, dark, { from: [-0.9, 1.66, 0.92], to: [0.9, 1.66, 0.92], count: 5, r: 0.05 });
+    const ember = new THREE.Mesh(new THREE.IcosahedronGeometry(0.22, 0), fire);
+    ember.position.set(0, 2.5, 0);
+    g.add(ember);
+    g.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+    g.userData = { light: ember, orb: ember, mouth, glowColor: 0xffb347 };
     return mergeStaticMeshes(g);
   }
 
@@ -1925,13 +2679,37 @@ export function buildTeleporterModel() {
   g.add(ring);
   g.userData.ring = ring;
 
-  const beam = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.9, 1.9, 30, 18, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0x46e0c0, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
-  );
-  beam.position.y = 15;
-  g.add(beam);
-  g.userData.beam = beam;
+  /* The Beacon's plume.
+   *
+   * This used to be a thirty-metre cylinder of flat additive colour — a light
+   * beam, which found the Beacon for you from anywhere on the stage and looked
+   * like a rendering artefact while doing it. A column of motes reads as the
+   * same landmark from the same distance, but it is *made of* something: it
+   * drifts, it accelerates when the Beacon is charging, and it goes still when
+   * the fight is over. Same navigational job, and it belongs to the world.
+   *
+   * One Points object, one buffer, updated on the CPU. At 260 particles that is
+   * a few thousand floats a frame, against a draw call either way.
+   */
+  const COUNT = 260;
+  const positions = new Float32Array(COUNT * 3);
+  const seeds = new Float32Array(COUNT * 4);   // radius, phase, height0, speed
+  for (let i = 0; i < COUNT; i++) {
+    seeds[i * 4] = 0.6 + Math.random() * 2.6;
+    seeds[i * 4 + 1] = Math.random() * Math.PI * 2;
+    seeds[i * 4 + 2] = Math.random();
+    seeds[i * 4 + 3] = 0.35 + Math.random() * 0.9;
+  }
+  const moteGeo = new THREE.BufferGeometry();
+  moteGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const motes = new THREE.Points(moteGeo, new THREE.PointsMaterial({
+    color: 0x8ff0e0, size: 0.9, transparent: true, opacity: 0.85,
+    depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+  }));
+  motes.frustumCulled = false;
+  g.add(motes);
+  g.userData.motes = motes;
+  g.userData.moteSeeds = seeds;
 
   return g;
 }
@@ -2035,7 +2813,7 @@ export function buildItemDropModel(item, rarityHex, beamOpacity = 0.13) {
    ========================================================================== */
 
 /**
- * A minion lizard, sized to sit at about knee height beside its owner.
+ * A pet lizard, sized to sit at about knee height beside its owner.
  *
  * The silhouette has to survive a firefight: it is read at a glance, at
  * distance, against a floor full of hazard rings. So the shape is deliberately
@@ -2044,9 +2822,9 @@ export function buildItemDropModel(item, rarityHex, beamOpacity = 0.13) {
  * a glance in co-op.
  *
  * `trophies` is the owner's item count: every two items grow another crystal on
- * its back, which is the visible half of "minions inherit your items".
+ * its back, which is the visible half of "pets inherit your items".
  */
-export function buildMinionModel({ color = 0x5f7a4a, accent = 0xff8a3d, trophies = 0 } = {}) {
+export function buildLizardModel({ color = 0x5f7a4a, accent = 0xff8a3d, trophies = 0 } = {}) {
   const g = new THREE.Group();
   const hide = mat(color, { roughness: 0.82, metalness: 0.08, flat: true });
   const belly = mat(new THREE.Color(color).offsetHSL(0, -0.08, 0.16).getHex(), { roughness: 0.75, flat: true });
@@ -2232,10 +3010,12 @@ export function buildMinionModel({ color = 0x5f7a4a, accent = 0xff8a3d, trophies
 }
 
 /** Speckled egg the lizards are recruited from. */
-export function buildEggModel(accent = 0xff8a3d) {
+export function buildEggModel(accent = 0xff8a3d, tint = 0x8a7a5c) {
   const g = new THREE.Group();
-  const shellMat = mat(0xe6dfc8, { roughness: 0.72, metalness: 0.05, flat: true });
-  const speckMat = mat(0x8a7a5c, { roughness: 0.9 });
+  // Pale shell, speckled in the colour of whatever is inside it.
+  const shellMat = mat(new THREE.Color(0xe6dfc8).lerp(new THREE.Color(tint), 0.22).getHex(),
+    { roughness: 0.72, metalness: 0.05, flat: true });
+  const speckMat = mat(tint, { roughness: 0.9 });
   const nestMat = mat(0x4a3b2c, { roughness: 0.95 });
 
   // A nest of debris, so the egg is not just floating on the grass.
@@ -2294,6 +3074,354 @@ export function buildEggModel(accent = 0xff8a3d) {
   // Nest sticks, shell and speckles are all static; only the three groups above
   // move. Merging takes the egg from 31 draw calls to a handful.
   return mergeStaticMeshes(g);
+}
+
+
+/**
+ * Cinder Beetle — a low, wide bruiser that closes and gores.
+ *
+ * Deliberately the opposite silhouette to the lizard: no neck, no tail, all
+ * carapace. At a glance across an arena the two should never be confused, which
+ * matters more than either of them looking good up close.
+ */
+export function buildBeetleModel({ color = 0x6b4630, accent = 0xff8a3d, trophies = 0 } = {}) {
+  const g = new THREE.Group();
+  const shellMat = mat(color, { roughness: 0.55, metalness: 0.3, flat: true });
+  const under = mat(new THREE.Color(color).offsetHSL(0, -0.1, -0.08).getHex(), { roughness: 0.8, flat: true });
+  const dark = mat(0x1d1a1c, { roughness: 0.85, metalness: 0.15 });
+  const glow = mat(accent, { emissive: accent, emissiveIntensity: 1.8, roughness: 0.35 });
+
+  const body = new THREE.Group();
+  body.position.y = 0.34;
+  g.add(body);
+
+  // Abdomen under a pair of elytra that part slightly when it charges.
+  const abdomen = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 8), under);
+  abdomen.scale.set(1, 0.62, 1.25);
+  abdomen.castShadow = true;
+  body.add(abdomen);
+
+  const elytra = {};
+  for (const sx of [-1, 1]) {
+    const wing = new THREE.Group();
+    wing.position.set(sx * 0.06, 0.06, -0.06);
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(0.4, 10, 8, 0, Math.PI, 0, Math.PI * 0.62), shellMat);
+    shell.scale.set(0.98, 0.66, 1.3);
+    shell.rotation.y = sx > 0 ? 0 : Math.PI;
+    shell.castShadow = true;
+    wing.add(shell);
+    for (let i = 0; i < 3; i++) {
+      const seam = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.62 - i * 0.12), glow);
+      seam.position.set(sx * (0.12 + i * 0.09), 0.2 - i * 0.05, -0.06);
+      wing.add(seam);
+    }
+    body.add(wing);
+    elytra[sx > 0 ? 'wingR' : 'wingL'] = wing;
+  }
+
+  // Item trophies ride on the back as embedded cinders.
+  for (let i = 0; i < Math.min(6, Math.floor(trophies / 2)); i++) {
+    const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.05, 0), glow);
+    c.position.set((i % 2 ? 1 : -1) * 0.2, 0.24 - (i % 3) * 0.03, 0.18 - i * 0.1);
+    body.add(c);
+  }
+
+  // Head: a plated wedge with mandibles and a horn.
+  const head = new THREE.Group();
+  head.position.set(0, -0.02, 0.42);
+  body.add(head);
+  const skull = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.2, 0.26), shellMat);
+  skull.castShadow = true;
+  head.add(skull);
+  const horn = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.36, 5), dark);
+  horn.position.set(0, 0.14, 0.16);
+  horn.rotation.x = -0.9;
+  head.add(horn);
+  const mandibles = {};
+  for (const sx of [-1, 1]) {
+    const jaw = new THREE.Group();
+    jaw.position.set(sx * 0.12, -0.05, 0.12);
+    const blade = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.28, 4), dark);
+    blade.position.set(sx * 0.03, 0, 0.13);
+    blade.rotation.set(Math.PI / 2, 0, sx * 0.5);
+    jaw.add(blade);
+    head.add(jaw);
+    mandibles[sx > 0 ? 'jawR' : 'jawL'] = jaw;
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 5), glow);
+    eye.position.set(sx * 0.13, 0.06, 0.08);
+    head.add(eye);
+  }
+
+  // Six legs, three a side, splayed wide and low.
+  const legs = {};
+  for (const sx of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      const hip = new THREE.Group();
+      hip.position.set(sx * 0.28, 0.3, 0.22 - i * 0.24);
+      g.add(hip);
+      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.033, 0.26, 5), dark);
+      thigh.position.set(sx * 0.1, -0.08, 0);
+      thigh.rotation.z = sx * 1.0;
+      hip.add(thigh);
+      const knee = new THREE.Group();
+      knee.position.set(sx * 0.2, -0.14, 0);
+      const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.022, 0.24, 5), dark);
+      shin.position.y = -0.11;
+      knee.add(shin);
+      const claw = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.08, 4), under);
+      claw.position.y = -0.24;
+      claw.rotation.x = Math.PI;
+      knee.add(claw);
+      hip.add(knee);
+      hip.userData.lower = knee;
+      legs[`leg${sx > 0 ? 'R' : 'L'}${i}`] = hip;
+    }
+  }
+
+  g.userData = { kind: 'beetle', body, head, ...elytra, ...mandibles, ...legs, accent };
+  return mergeStaticMeshes(g);
+}
+
+/**
+ * Spark Wisp — a floating mote that never touches the ground.
+ *
+ * All glow and no mass. It reads as fragile because it is: it has a fraction of
+ * anything else's health and dies to a stiff breeze, and the payoff is a rate of
+ * fire nothing else comes close to.
+ */
+export function buildWispModel({ color = 0x8fd8ff, accent = 0x8fd8ff, trophies = 0 } = {}) {
+  const g = new THREE.Group();
+  const shellMat = mat(color, { emissive: color, emissiveIntensity: 0.9, roughness: 0.3, metalness: 0.4 });
+  const glow = mat(accent, { emissive: accent, emissiveIntensity: 2.4, roughness: 0.2 });
+
+  const body = new THREE.Group();
+  body.position.y = 1.05;
+  g.add(body);
+
+  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.2, 1), glow);
+  body.add(core);
+  const husk = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3, 0), shellMat);
+  husk.material = new THREE.MeshStandardMaterial({
+    color, emissive: color, emissiveIntensity: 0.5, roughness: 0.3,
+    transparent: true, opacity: 0.45, flatShading: true,
+  });
+  body.add(husk);
+
+  // Two rings on different axes, so it never looks static.
+  const rings = new THREE.Group();
+  // Both rings glow. A dark one reads as a tyre hanging in mid-air.
+  const ringA = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.028, 4, 16), shellMat);
+  ringA.rotation.x = Math.PI / 2;
+  rings.add(ringA);
+  const ringB = new THREE.Mesh(new THREE.TorusGeometry(0.33, 0.024, 4, 14), glow);
+  ringB.rotation.set(0.9, 0.4, 0);
+  rings.add(ringB);
+  body.add(rings);
+
+  // Shards orbiting the core, one per pair of items carried.
+  const shards = new THREE.Group();
+  const shardCount = 3 + Math.min(5, Math.floor(trophies / 2));
+  for (let i = 0; i < shardCount; i++) {
+    const a = (i / shardCount) * Math.PI * 2;
+    const s = new THREE.Mesh(new THREE.OctahedronGeometry(0.055, 0), shellMat);
+    s.position.set(Math.cos(a) * 0.42, Math.sin(a * 2) * 0.1, Math.sin(a) * 0.42);
+    s.rotation.set(a, a * 1.7, 0);
+    shards.add(s);
+  }
+  body.add(shards);
+
+  // A ragged tail of motes trailing underneath.
+  const tail = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const m = new THREE.Mesh(new THREE.TetrahedronGeometry(0.07 - i * 0.012), glow);
+    m.position.set(0, -0.28 - i * 0.16, 0);
+    tail.add(m);
+  }
+  body.add(tail);
+
+  g.userData = { kind: 'wisp', body, core, husk, rings, shards, tail, flying: true, accent };
+  return g;
+}
+
+/**
+ * Aegis Shell — a slow walking bunker.
+ *
+ * Almost no damage of its own. What it is for is standing between you and the
+ * arena: it has more health than anything else you can own and it hands that
+ * durability to the party as barrier, so it is a purchase you make to change
+ * how much punishment the *group* can absorb.
+ */
+export function buildShellModel({ color = 0x4a5a6a, accent = 0x6fd0ff, trophies = 0 } = {}) {
+  const g = new THREE.Group();
+  const plate = mat(color, { roughness: 0.6, metalness: 0.4, flat: true });
+  const rim = mat(new THREE.Color(color).offsetHSL(0, -0.05, 0.14).getHex(), { roughness: 0.45, metalness: 0.6 });
+  const hide = mat(0x6a6252, { roughness: 0.85, flat: true });
+  const glow = mat(accent, { emissive: accent, emissiveIntensity: 1.9, roughness: 0.3 });
+
+  const body = new THREE.Group();
+  body.position.y = 0.46;
+  g.add(body);
+
+  // Hexagonal carapace: one broad dome ringed by a skirt of plates.
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.62, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.5), plate);
+  dome.scale.set(1, 0.68, 1.12);
+  dome.castShadow = true;
+  body.add(dome);
+  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.6, 0.14, 8), rim);
+  skirt.scale.z = 1.12;
+  skirt.position.y = -0.02;
+  body.add(skirt);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const stud = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.16, 4), rim);
+    stud.position.set(Math.cos(a) * 0.5, 0.24, Math.sin(a) * 0.56);
+    stud.rotation.set(Math.cos(a) * 0.5, 0, -Math.sin(a) * 0.5);
+    body.add(stud);
+  }
+
+  // The rune ring is the tell: it brightens as the guard pulse charges.
+  const runes = new THREE.Group();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const r = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.03, 0.2), glow);
+    r.position.set(Math.cos(a) * 0.3, 0.38, Math.sin(a) * 0.34);
+    r.rotation.y = -a;
+    runes.add(r);
+  }
+  body.add(runes);
+  for (let i = 0; i < Math.min(6, Math.floor(trophies / 2)); i++) {
+    const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.055, 0), glow);
+    c.position.set((i % 2 ? 1 : -1) * 0.22, 0.42 - (i % 3) * 0.04, 0.2 - i * 0.11);
+    body.add(c);
+  }
+
+  // Head on a stubby neck that pulls in when it guards.
+  const neck = new THREE.Group();
+  neck.position.set(0, 0.02, 0.5);
+  body.add(neck);
+  const head = new THREE.Group();
+  head.position.z = 0.2;
+  neck.add(head);
+  const skull = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.22, 0.3), hide);
+  skull.castShadow = true;
+  head.add(skull);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.2, 5), rim);
+  beak.rotation.x = Math.PI / 2;
+  beak.position.z = 0.22;
+  head.add(beak);
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 5), glow);
+    eye.position.set(sx * 0.1, 0.07, 0.1);
+    head.add(eye);
+  }
+
+  // Four column legs.
+  const legs = {};
+  const legAt = (key, x, z) => {
+    const hip = new THREE.Group();
+    hip.position.set(x, 0.4, z);
+    g.add(hip);
+    const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.14, 0.24, 6), hide);
+    upper.position.y = -0.12;
+    upper.castShadow = true;
+    hip.add(upper);
+    const knee = new THREE.Group();
+    knee.position.y = -0.24;
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.14, 6), rim);
+    foot.position.y = -0.07;
+    knee.add(foot);
+    hip.add(knee);
+    hip.userData.lower = knee;
+    legs[key] = hip;
+  };
+  legAt('legFL', -0.34, 0.3);
+  legAt('legFR', 0.34, 0.3);
+  legAt('legBL', -0.36, -0.3);
+  legAt('legBR', 0.36, -0.3);
+
+  g.userData = { kind: 'shell', body, neck, head, runes, ...legs, accent };
+  return mergeStaticMeshes(g);
+}
+
+/** Dispatch: every pet species builds from one entry point. */
+export function buildPetSpeciesModel(kind, opts) {
+  if (kind === 'beetle') return buildBeetleModel(opts);
+  if (kind === 'wisp') return buildWispModel(opts);
+  if (kind === 'shell') return buildShellModel(opts);
+  return buildLizardModel(opts);
+}
+
+
+/**
+ * The rift to the Null Sanctum.
+ *
+ * A torn oval standing on the ground, black inside, ringed with light. It has
+ * to read as "somewhere else" rather than "another teleporter", because the one
+ * thing a player must not do is walk into the final fight thinking it is the
+ * next stage.
+ */
+export function buildPortalModel(accent = 0xff2f8f) {
+  const g = new THREE.Group();
+  const frameMat = mat(0x1a1024, { roughness: 0.5, metalness: 0.6, flat: true });
+  const runeMat = mat(accent, { emissive: accent, emissiveIntensity: 2.2, roughness: 0.3 });
+
+  // Broken plinth.
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.1, 0.4, 8), frameMat);
+  base.position.y = 0.2;
+  base.receiveShadow = true;
+  g.add(base);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.1 + (i % 3) * 0.5, 4), frameMat);
+    tooth.position.set(Math.cos(a) * 2.5, 0.75, Math.sin(a) * 2.5);
+    tooth.rotation.set(Math.cos(a) * 0.24, -a, -Math.sin(a) * 0.24);
+    tooth.castShadow = true;
+    g.add(tooth);
+  }
+
+  // The tear itself: a black sheet behind a ring of light.
+  const mouth = new THREE.Group();
+  mouth.position.y = 3.1;
+  g.add(mouth);
+  const voidPane = new THREE.Mesh(
+    new THREE.CircleGeometry(2.05, 22),
+    new THREE.MeshBasicMaterial({ color: 0x05020a, side: THREE.DoubleSide }),
+  );
+  voidPane.scale.set(0.78, 1, 1);
+  mouth.add(voidPane);
+
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(2.05, 0.15, 6, 26), runeMat);
+  rim.scale.set(0.78, 1, 1);
+  mouth.add(rim);
+
+  const swirl = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.5 - i * 0.42, 0.05, 4, 20), runeMat);
+    ring.scale.set(0.78, 1, 1);
+    ring.position.z = 0.06 + i * 0.05;
+    swirl.add(ring);
+  }
+  mouth.add(swirl);
+
+  const glowPane = new THREE.Mesh(new THREE.CircleGeometry(2.6, 20), glowMat(accent, 0.16));
+  glowPane.scale.set(0.78, 1, 1);
+  glowPane.position.z = -0.08;
+  mouth.add(glowPane);
+
+  // Shards hanging in the air around the tear.
+  const motes = new THREE.Group();
+  const rng = mulberryLite(53);
+  for (let i = 0; i < 14; i++) {
+    const a = rng() * Math.PI * 2;
+    const r = 2.4 + rng() * 1.6;
+    const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.1 + rng() * 0.14, 0), runeMat);
+    m.position.set(Math.cos(a) * r * 0.8, 3.1 + (rng() - 0.5) * 4, Math.sin(a) * 0.6);
+    motes.add(m);
+  }
+  g.add(motes);
+
+  g.userData = { mouth, swirl, rim, motes, glowPane };
+  return g;
 }
 
 export { mat as material, glowMat, box, cyl, sphere };

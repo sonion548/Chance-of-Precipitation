@@ -34,14 +34,23 @@ your version supports it. Nothing else depends on the location.
 
 ## Two things to know before trusting it
 
-**The graph describes a working tree this repository does not contain.** It was
-built on a machine whose copy of the project was a step ahead: it carries nodes
-for `src/core/audio.js`, `src/core/settings.js`, `src/ui/chat.js`,
+**The source has caught up with the graph, and then moved past it.** The graph
+was built on a machine a step ahead of what this repository held: it carried
+nodes for `src/core/audio.js`, `src/core/settings.js`, `src/ui/chat.js`,
 `src/data/pets.js` and `src/entities/pet.js`, plus `Arena._initLandform`,
 `Arena.terrainHeightAt`, `Arena._terrainGeometry`, `Input.captureBinding`,
-`Director.partyScale` and a `Portal` interactable — none of which exist in the
-source here. Where the two disagree, the source is the truth about this repo and
-the graph is a description of somewhere else. One `graphify update .` resolves it.
+`Director.partyScale`, `Game.partySize`, `Coop.onPortalState` and a `Portal`
+interactable, none of which the source here had. All of them exist now — that
+tree is the base game this repository was rebuilt onto, so the graph is no
+longer describing somewhere else.
+
+What it has not seen is the work that landed *after* it was built: the
+ultimates, Halcyon and Javelin, the Siege Gauntlets, `rigAttack` and the
+attack-animation rig, `ctx.slashWave` / `ctx.shockwave` / `ctx.jetBoost` /
+`ctx.meteorSlam`, and the merge itself — which removed `Profile.setSetting`,
+`Profile.unlockAll` and `Game.applySettings` when the two settings systems were
+collapsed into one. Query it for structure, not for a complete symbol list, and
+run `graphify update .` to close the gap.
 
 **Some nodes were written in by hand.** The co-op terrain / lobby-code / Void
 Reaper / boss-loot / Shrine of Ruin change set was folded in manually, because

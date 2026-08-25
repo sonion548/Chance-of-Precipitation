@@ -9,3 +9,8 @@ graph/** -text
 # collapses them in diffs, so a pull request shows the source that actually moved.
 graph/**   linguist-generated=true
 vendor/**  linguist-vendored=true
+
+# play.cmd is run by cmd.exe, which wants CRLF — a batch file checked out with
+# LF endings mis-parses its own labels. play.sh is the opposite and stays LF.
+play.cmd text eol=crlf
+play.sh  text eol=lf

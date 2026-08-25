@@ -449,15 +449,154 @@ export const PROP_BUILDERS = {
 };
 
 /** Props that should block movement, with an approximate collision footprint. */
-export const PROP_COLLISION = {
-  tree: { radius: 0.42, height: 3.2 },
-  conifer: { radius: 0.4, height: 3.6 },
-  deadTree: { radius: 0.32, height: 2.6 },
-  rockCluster: { radius: 1.15, height: 1.0 },
-  ruinColumn: { radius: 0.55, height: 3.0 },
-  monolith: { radius: 0.75, height: 4.0 },
-  brokenWall: { radius: 2.0, height: 1.5, box: [5, 1.5, 0.7] },
+/**
+ * Colliders, plus what the camera should treat as solid.
+ *
+ * A tree's trunk is 0.8m across; its canopy is five times that and has no
+ * collider at all, because you are meant to walk under it. The camera is not —
+ * so foliage gets a `camera` volume that blocks the boom without blocking
+ * anybody's feet.
+ */
+/**
+ * How each prop type is meant to be collided with — the *policy*, not the
+ * numbers.
+ *
+ * The numbers used to live here too: a hand-written radius and height per type.
+ * That could only ever be approximately right, because every builder makes
+ * several randomised variants and the scatterer then scales each instance
+ * again, so a fat-trunked oak and a spindly one shared one radius. The result
+ * was rocks you walked through, columns that stopped you a metre early, and
+ * boulders with no collider at all because nobody had added a row.
+ *
+ * Now the shape is measured off the geometry that actually got built (see
+ * `propColliders`), and this table only says what *kind* of thing it is:
+ *
+ *   null      no collider — you walk through grass
+ *   trunk     a narrow solid trunk with a canopy above it that only the camera
+ *             collides with, so you can stand under a tree and still see out
+ *   box       the whole silhouette is solid
+ *   arch      solid legs, open middle: you can walk through the arch
+ */
+export const PROP_PHYSICS = {
+  grass: null, fern: null, reeds: null, bush: null, mushrooms: null,
+
+  tree: { kind: 'trunk', trunkTo: 0.40, canopyFrom: 0.38 },
+  conifer: { kind: 'trunk', trunkTo: 0.26, canopyFrom: 0.18 },
+  // A dead tree has no canopy worth hiding behind, so it is trunk all the way up.
+  deadTree: { kind: 'trunk', trunkTo: 0.55, canopyFrom: 1.0 },
+
+  rock: { kind: 'box', shrink: 0.86 },
+  rockCluster: { kind: 'box', shrink: 0.88 },
+  crystal: { kind: 'box', shrink: 0.78 },
+  monolith: { kind: 'box', shrink: 0.92 },
+  ruinColumn: { kind: 'box', shrink: 0.88 },
+  brokenWall: { kind: 'box', shrink: 0.94 },
+  ruinArch: { kind: 'arch' },
 };
+
+/** Half-extents of every vertex in a Y band, or null if the band is empty. */
+function bandExtent(pos, y0, y1, xMin = -Infinity, xMax = Infinity) {
+  let maxX = 0;
+  let maxZ = 0;
+  let found = false;
+  let loX = Infinity;
+  let hiX = -Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    if (y < y0 || y > y1) continue;
+    const x = pos.getX(i);
+    if (x < xMin || x > xMax) continue;
+    found = true;
+    if (Math.abs(x) > maxX) maxX = Math.abs(x);
+    if (Math.abs(pos.getZ(i)) > maxZ) maxZ = Math.abs(pos.getZ(i));
+    if (x < loX) loX = x;
+    if (x > hiX) hiX = x;
+  }
+  return found ? { hx: maxX, hz: maxZ, loX, hiX } : null;
+}
+
+/**
+ * Measures collision volumes off a built prop geometry, in its own unit space.
+ *
+ * Returns `{ solid: [{cx, cz, hx, hz, y0, y1}], camera: {hx, hz, y0, y1} | null }`.
+ * The scatterer scales, rotates and positions these per instance — this is the
+ * shape, not the placement.
+ *
+ * Measuring rather than declaring is the whole point. A builder can change what
+ * it makes, or gain a variant twice the width, and the thing you bump into
+ * changes with it instead of drifting out of step.
+ */
+export function propColliders(type, geo) {
+  const spec = PROP_PHYSICS[type];
+  if (!spec) return null;
+  const pos = geo.attributes.position;
+  if (!pos) return null;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const height = Math.max(0.05, bb.max.y);
+  const out = { solid: [], camera: null };
+
+  if (spec.kind === 'trunk') {
+    /* The band starts fractionally below zero on purpose.
+     *
+     * A trunk is a cylinder, and a cylinder has vertices at its two caps and
+     * nowhere in between. The bottom cap sits at y = 0 — or at -1e-8, once it
+     * has been through a transform — and an exact `y >= 0` test drops it, which
+     * left the whole band empty and every tree in the game with no collider at
+     * all. Nothing else in the band moves, so the tolerance is free. */
+    const trunk = bandExtent(pos, -0.01, height * spec.trunkTo)
+      // If the shape genuinely has nothing down there, fall back to a share of
+      // the silhouette rather than emitting no collider.
+      || { hx: (bb.max.x - bb.min.x) * 0.12, hz: (bb.max.z - bb.min.z) * 0.12 };
+    if (trunk) {
+      // A trunk measured at its widest is the flare at the root, which is not
+      // what you walk into. Two thirds of it is the shaft.
+      out.solid.push({
+        cx: 0, cz: 0,
+        hx: Math.max(0.12, trunk.hx * 0.68), hz: Math.max(0.12, trunk.hz * 0.68),
+        y0: 0, y1: height * Math.min(1, spec.canopyFrom + 0.1),
+      });
+    }
+    if (spec.canopyFrom < 1) {
+      const canopy = bandExtent(pos, height * spec.canopyFrom, height);
+      if (canopy) {
+        out.camera = { hx: canopy.hx * 0.9, hz: canopy.hz * 0.9, y0: height * spec.canopyFrom, y1: height };
+      }
+    }
+    return out;
+  }
+
+  if (spec.kind === 'arch') {
+    // Legs only: sample near the base and split by which side of the centre
+    // each vertex is on, so the opening stays walkable.
+    const legTop = height * 0.62;
+    for (const [xMin, xMax] of [[-Infinity, -0.05], [0.05, Infinity]]) {
+      const leg = bandExtent(pos, -0.01, height * 0.25, xMin, xMax);
+      if (!leg) continue;
+      const cx = (leg.loX + leg.hiX) / 2;
+      out.solid.push({
+        cx, cz: 0,
+        hx: Math.max(0.15, (leg.hiX - leg.loX) / 2), hz: Math.max(0.15, leg.hz * 0.9),
+        y0: 0, y1: legTop,
+      });
+    }
+    if (!out.solid.length) {
+      out.solid.push({ cx: 0, cz: 0, hx: bb.max.x * 0.9, hz: bb.max.z * 0.9, y0: 0, y1: legTop });
+    }
+    return out;
+  }
+
+  // Plain box: the silhouette, pulled in a little so you are not stopped by air.
+  const k = spec.shrink ?? 0.9;
+  out.solid.push({
+    cx: (bb.min.x + bb.max.x) / 2 * k,
+    cz: (bb.min.z + bb.max.z) / 2 * k,
+    hx: Math.max(0.1, (bb.max.x - bb.min.x) / 2 * k),
+    hz: Math.max(0.1, (bb.max.z - bb.min.z) / 2 * k),
+    y0: 0, y1: height,
+  });
+  return out;
+}
 
 /**
  * Wind sway, injected into the standard material.

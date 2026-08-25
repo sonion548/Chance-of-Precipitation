@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { fx as rng } from '../core/rng.js';
+import { audio } from '../core/audio.js';
 
 const MAX_PARTICLES = 2600;
 const MAX_BEAMS = 90;
@@ -345,6 +346,10 @@ export class FX {
 
   // ---------------------------------------------------------------- composites
   explosion(pos, radius, color = 0xff8a3d, intensity = 1) {
+    // Every explosion in the game comes through here, so this is the one place
+    // the bang has to be hooked up — a new weapon that detonates something gets
+    // its sound for nothing.
+    audio.explosion(pos, radius * intensity);
     this.ring(pos, radius * 0.25, radius, color, 0.42 + intensity * 0.12, 0.95);
     this.glow(pos, { color, size: radius * 0.9, life: 0.26, grow: radius * 1.4 });
     this.burst(pos, Math.min(46, Math.round(12 + radius * 2.2 * intensity)), {
@@ -354,6 +359,7 @@ export class FX {
   }
 
   impact(pos, normal, color = 0xffe0a0, scale = 1) {
+    audio.impact(pos, scale > 1.2);
     for (let i = 0; i < 6; i++) {
       const dir = _v.copy(normal).add(
         new THREE.Vector3(rng.range(-0.7, 0.7), rng.range(-0.4, 0.9), rng.range(-0.7, 0.7)),
@@ -398,6 +404,7 @@ export class FX {
     this.burst(pos, 16, { color: 0xb8c8ff, speed: 5, size: 0.16, life: 0.55, gravity: -3 });
   }
   levelUp(pos) {
+    audio.levelUp();
     this.ring(pos, 0.5, 6.5, 0x57b7ff, 0.75, 0.9);
     for (let i = 0; i < 26; i++) {
       const a = (i / 26) * Math.PI * 2;
@@ -410,6 +417,7 @@ export class FX {
     this.flash(pos, 0x57b7ff, 22, 0.5, 30);
   }
   pickup(pos, color) {
+    audio.gold(pos);
     this.ring(pos, 0.2, 2.2, color, 0.35, 0.8);
     this.burst(pos, 10, { color, speed: 4, size: 0.13, life: 0.45, gravity: -6 });
   }

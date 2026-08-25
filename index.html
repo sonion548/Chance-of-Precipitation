@@ -61,6 +61,13 @@
     </div>
 
     <div id="party" class="hidden"></div>
+    <div id="chat">
+      <div id="chat-log"></div>
+      <div id="chat-form" class="hidden">
+        <span class="cf-label">Say</span>
+        <input id="chat-input" type="text" maxlength="140" autocomplete="off" spellcheck="false" />
+      </div>
+    </div>
     <div id="hud-right">
       <div id="gold-wrap"><span class="coin">◈</span><span id="gold-num">0</span></div>
       <div id="brood" class="hidden"></div>
@@ -105,6 +112,7 @@
           <button class="nav-btn" data-goto="unlocks"><span class="nb-key">◈</span> Sanctum <em id="menu-echoes">0 Echoes</em></button>
           <button class="nav-btn" data-goto="codex"><span class="nb-key">✦</span> Codex</button>
           <button class="nav-btn" data-goto="stats"><span class="nb-key">⌁</span> Records</button>
+          <button class="nav-btn" data-goto="settings"><span class="nb-key">⚙</span> Settings</button>
           <button class="nav-btn" data-goto="help"><span class="nb-key">?</span> How to Play</button>
           <button class="nav-btn" data-goto="settings"><span class="nb-key">⚙</span> Settings</button>
         </nav>
@@ -176,11 +184,16 @@
     </div>
 
     <div id="screen-settings" class="screen panel-screen">
-      <div class="panel">
-        <div class="panel-head"><h2>Settings</h2><button class="x-btn" data-goto="menu">✕</button></div>
+      <div class="panel wide">
+        <div class="panel-head"><h2>Settings</h2><button class="x-btn" id="settings-close">✕</button></div>
+        <div class="tabs" id="settings-tabs">
+          <button class="tab active" data-stab="audio">Audio</button>
+          <button class="tab" data-stab="controls">Controls</button>
+          <button class="tab" data-stab="game">Game</button>
+        </div>
         <div class="panel-body" id="settings-body"></div>
         <div class="panel-foot spread">
-          <button class="ghost-btn" id="unlock-all-btn">Unlock Everything</button>
+          <button class="ghost-btn" id="settings-reset">Restore Defaults</button>
           <button class="danger-btn" id="reset-btn">Reset Account</button>
         </div>
       </div>
@@ -199,6 +212,7 @@
         <div class="panel-body" id="pause-body"></div>
         <div class="panel-foot stack">
           <button class="big-btn" id="resume-btn">Resume</button>
+          <button class="ghost-btn" id="pause-settings-btn">Settings</button>
           <button class="ghost-btn" id="abandon-btn">Abandon Run</button>
         </div>
       </div>

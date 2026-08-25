@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { PLAYER, CAMERA } from '../core/config.js';
-import { clamp, damp, armorMultiplier } from '../core/mathx.js';
-import { moveWithCollision, raycastWorld } from '../systems/physics.js';
+import { clamp, clamp01, damp, armorMultiplier, angleLerp, wrapAngle } from '../core/mathx.js';
+import { audio } from '../core/audio.js';
+import { settings } from '../core/settings.js';
+import { moveWithCollision, raycastWorld, raycastBoxes } from '../systems/physics.js';
 import { buildPlayerModel } from './models.js';
 import { createRig, updateRig, rigRecoil, rigFlinch } from './characterRig.js';
 import { characterById } from '../data/characters.js';
@@ -11,6 +13,19 @@ const _v2 = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
+const _camWant = new THREE.Vector3();
+const _camBack = new THREE.Vector3();
+const _camPos = new THREE.Vector3();
+const _camRight = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
+const _camProbe = new THREE.Vector3();
+const _camChest = new THREE.Vector3();
+const _camSight = new THREE.Vector3();
+// Centre, then four corners of the camera's cross-section. Cheaper than a
+// sphere cast and enough that nothing trunk-width threads between them.
+const BOOM_PROBES = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]];
+
+const settingsTurnSnap = () => settings.data.turnSnap ?? 1;
 
 /** Fresh stat accumulator; items fold their passive modifiers into this. */
 export function freshAccumulator() {
@@ -32,7 +47,9 @@ export function freshAccumulator() {
     lifesteal: 0,
     luck: 0,
     barrierCap: 0, overhealToBarrier: false,
-    addMinionCap: 0, multMinionDamage: 1, multMinionHealth: 1, addMinionVolley: 0,
+    addEggs: 0, multPetDamage: 1, multPetHealth: 1, addPetVolley: 0,
+    // Fraction knocked off the price of everything on the stage.
+    priceMult: 0,
   };
 }
 
@@ -45,9 +62,20 @@ export class Player {
     this.radius = PLAYER.radius;
     this.height = PLAYER.height;
 
+    /* The camera and the body are two different things.
+     *
+     * `camYaw`/`camPitch` are where you are LOOKING — the mouse drives them and
+     * nothing else does. `yaw` is where the character is FACING, which follows
+     * your travel direction while you are just running around and snaps to the
+     * camera the moment you do something that needs the body pointed at what
+     * you are aiming at. That separation is the whole reason you can run one
+     * way and watch another. */
+    this.camYaw = 0;
+    this.camPitch = -0.12;
     this.yaw = 0;
     this.pitch = -0.12;
     this.modelYaw = 0;
+    this.camLift = 0;
 
     this.level = 1;
     this.xp = 0;
@@ -78,6 +106,12 @@ export class Player {
     this.aiming = false;
     this.aimBlend = 0;
     this.rig = createRig(this.yaw);
+    // Footfalls come from the rig rather than from a timer: the gait blend
+    // changes cadence as you turn from a run into a shuffle, and a timer would
+    // drift off the feet the moment it did.
+    this.rig.onStep = (stride) => {
+      if (!this.dead) audio.footstep(this.position, stride > 0.7);
+    };
 
     this.statsDirty = true;
     this.stats = {};
@@ -117,7 +151,26 @@ export class Player {
     // Buffs layer on top of item stats.
     let atkSpeed = acc.multAttackSpeed;
     let moveMult = acc.multMoveSpeed;
+    let damageMult = 1;
     let damageTakenMult = acc.multDamageTaken;
+
+    /* Generic item buffs.
+     *
+     * The named buffs below are character abilities, and each of them does
+     * something bespoke enough to be worth writing out. Items only ever want a
+     * temporary multiplier on one of four numbers, and making this function
+     * learn the name of every item that grants one does not scale — so a buff
+     * carrying `extra.stat` folds itself in and nothing here needs updating
+     * when the next one is written. */
+    for (const b of this.buffs.values()) {
+      const stat = b.extra?.stat;
+      if (!stat) continue;
+      const f = 1 + b.power * b.stacks;
+      if (stat === 'attackSpeed') atkSpeed *= f;
+      else if (stat === 'moveSpeed') moveMult *= f;
+      else if (stat === 'damage') damageMult *= f;
+      else if (stat === 'damageTaken') damageTakenMult *= f;
+    }
     const frenzy = this.buffs.get('frenzy');
     if (frenzy) atkSpeed *= 1 + frenzy.power * frenzy.stacks;
     const warcry = this.buffs.get('warcry');
@@ -137,7 +190,7 @@ export class Player {
 
     this.stats = {
       maxHealth,
-      damage,
+      damage: damage * damageMult,
       regen,
       attackSpeed: atkSpeed,
       moveSpeed: base.moveSpeed * moveMult,
@@ -157,10 +210,11 @@ export class Player {
       barrierCap: acc.barrierCap,
       overhealToBarrier: acc.overhealToBarrier,
       damageTakenMult,
-      minionCap: acc.addMinionCap,
-      minionDamageMult: acc.multMinionDamage,
-      minionHealthMult: acc.multMinionHealth,
-      minionVolley: acc.addMinionVolley,
+      priceMult: acc.priceMult,
+      extraEggs: acc.addEggs,
+      petDamageMult: acc.multPetDamage,
+      petHealthMult: acc.multPetHealth,
+      petVolley: acc.addPetVolley,
     };
 
     // Gaining max health from items grants the difference, matching genre convention.
@@ -246,6 +300,7 @@ export class Player {
     this.combatTimer = 5;
     rigFlinch(this.rig, Math.min(1, 0.4 + dmg / Math.max(1, this.stats.maxHealth) * 2.2));
     this.game.ui.playerDamageNumber(dmg);
+    audio.playerHurt(Math.min(1, dmg / (this.stats.maxHealth * 0.3)));
     this.game.ui.flashHurt(Math.min(1, dmg / (this.stats.maxHealth * 0.22)));
     this.game.engine.addShake(Math.min(0.34, 0.06 + dmg / this.stats.maxHealth * 0.9));
     this.game.inventory.trigger('onDamaged', { amount: dmg, source: opts.source });
@@ -320,25 +375,29 @@ export class Player {
     this.dashIFrames = Math.max(0, (this.dashIFrames || 0) - dt);
     if (this.shieldCharge) this.dashIFrames = Math.max(this.dashIFrames, 0.05);
 
-    this.aiming = !!input.mouse.right;
+    this.aiming = input.actionDown('aim');
 
     // --- Look ---
     // Looking around keeps working while you are down: in co-op that is the
     // difference between waiting to be revived and staring at the dirt.
     if (input.locked) {
-      const sens = CAMERA.sensitivity * input.sensitivityScale;
-      this.yaw -= input.mouse.dx * sens;
-      this.pitch -= input.mouse.dy * sens;
-      this.pitch = clamp(this.pitch, CAMERA.minPitch, CAMERA.maxPitch);
+      const look = input.lookDelta(this.aiming);
+      const sens = CAMERA.sensitivity;
+      this.camYaw -= look.x * sens;
+      this.camPitch -= look.y * sens;
+      this.camPitch = clamp(this.camPitch, CAMERA.minPitch, CAMERA.maxPitch);
     }
-    if (this.dead) { this._updateModel(dt); return; }
+    if (this.dead) { this._updateBodyFacing(dt, 0); this._updateModel(dt); return; }
 
     const axis = input.moveAxis();
-    _fwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    // Movement is camera-relative — W is always "away from the camera",
+    // whichever way the character happens to be facing at the time.
+    _fwd.set(Math.sin(this.camYaw), 0, Math.cos(this.camYaw));
     // Screen-right is forward × up. For forward = (sin y, 0, cos y) that is
     // (-cos y, 0, sin y) — the negation of this is left, which is what D used to do.
     _right.set(-_fwd.z, 0, _fwd.x);
     this.moveBasis = { fwd: _fwd, right: _right, axis };
+    this._updateBodyFacing(dt, Math.hypot(axis.x, axis.y));
 
     // --- Character movement states take over from normal locomotion ---
     if (this.dashTime > 0) { this._tickDash(dt, world); return; }
@@ -370,19 +429,22 @@ export class Player {
     }
 
     if (this.flight) {
-      // Hold Space to climb, hold nothing to sink gently. Gravity is off.
-      const rise = input.down('Space')
+      // Hold the jump binding to climb, hold nothing to sink gently. Gravity is off.
+      const rise = input.actionDown('jump')
         ? (this.flight.riseSpeed ?? 11)
         : (this.flight.hoverSpeed ?? -1.4);
       this.velocity.y = damp(this.velocity.y, rise, 7, dt);
     } else {
       // --- Jump ---
-      if (input.justPressed('Space')) {
-        if (this.grounded) { this.velocity.y = PLAYER.jumpVelocity; this.jumpsUsed = 1; this.grounded = false; }
-        else if (this.jumpsUsed < this.stats.maxJumps) {
+      if (input.actionPressed('jump')) {
+        if (this.grounded) {
+          this.velocity.y = PLAYER.jumpVelocity; this.jumpsUsed = 1; this.grounded = false;
+          audio.jump(this.position);
+        } else if (this.jumpsUsed < this.stats.maxJumps) {
           this.velocity.y = PLAYER.jumpVelocity * 0.94;
           this.jumpsUsed++;
           this.game.fx.ring(this.position, 0.3, 2.4, 0xb8c8ff, 0.35, 0.55);
+          audio.jump(this.position);
         }
       }
 
@@ -394,7 +456,9 @@ export class Player {
     const res = moveWithCollision(this, _v, world);
     if (res.grounded && !this.grounded) {
       // Landing puff
-      if (this.velocity.y < -14) this.game.fx.ring(this.position, 0.3, 2.2, 0xffffff, 0.28, 0.3);
+      const hard = this.velocity.y < -14;
+      if (hard) this.game.fx.ring(this.position, 0.3, 2.2, 0xffffff, 0.28, 0.3);
+      audio.land(this.position, hard);
       this.jumpsUsed = 0;
     }
     // Touching down puts the thrusters out, and hands back half of whatever
@@ -412,6 +476,46 @@ export class Player {
     this._updateModel(dt);
   }
 
+  /* ---------------------------------------------------------------- facing */
+  /**
+   * Where the body points, which is not where the camera points.
+   *
+   * Free running turns the character into its own travel direction, the way a
+   * person actually runs. Anything that involves the weapon — aiming, firing,
+   * a charged shot, a recent hit, an ability — pulls the body round to the
+   * camera, because the gun is locked to the crosshair and a torso facing
+   * ninety degrees off it looks like two models sharing a position.
+   *
+   * `pitch` is always the camera's: the spine leans towards whatever you are
+   * looking at whether or not the hips agree.
+   */
+  _updateBodyFacing(dt, moveAmount) {
+    this.pitch = this.camPitch;
+    if (this.dead) return;
+
+    const combat = this.aiming
+      || this.game.combat?.firing || this.game.combat?.beamActive || this.game.combat?.charging
+      || this.combatTimer > 0 || this.grapple || this.shieldCharge || this.dashTime > 0;
+
+    let target = this.camYaw;
+    let rate = CAMERA.bodyTurnCombat * (settingsTurnSnap());
+    if (!combat) {
+      const speed = this.speedXZ;
+      if (moveAmount > 0.05 && speed > 1.2) {
+        target = Math.atan2(this.velocity.x, this.velocity.z);
+        rate = CAMERA.bodyTurnFree;
+      } else {
+        // Standing still: drift back towards the camera slowly, and only once
+        // the camera has swung far enough that the pose reads as wrong.
+        const off = Math.abs(wrapAngle(this.camYaw - this.yaw));
+        if (off < 1.15) return;
+        target = this.camYaw;
+        rate = 4.5;
+      }
+    }
+    this.yaw = angleLerp(this.yaw, target, 1 - Math.exp(-rate * dt));
+  }
+
   /* ---------------------------------------------------------------- ability movement */
 
   /**
@@ -419,7 +523,9 @@ export class Player {
    *
    * Called bare, this is the baseline roll and its numbers come from `PLAYER` —
    * so a designer changing the dash in config.js changes the dash. A character
-   * whose movement is its identity passes its own.
+   * whose movement is its identity passes its own. A dash that damages what it
+   * passes through is optional, because most dashes are an escape and only some
+   * of them are an attack.
    */
   startDash({
     speed = PLAYER.dashSpeed,
@@ -428,6 +534,8 @@ export class Player {
     dir = null,
     damage = 0,
     radius = 0,
+    proc = 1,
+    knockback = 8,
     onHit = null,
     source = 'Dash',
     color = 0x8fd8ff,
@@ -439,7 +547,7 @@ export class Player {
       if (basis && (Math.abs(axis.x) > 0.01 || Math.abs(axis.y) > 0.01)) {
         d.addScaledVector(fwd, axis.y).addScaledVector(right, axis.x).normalize();
       } else {
-        d.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+        d.set(Math.sin(this.camYaw), 0, Math.cos(this.camYaw));
       }
     }
     this.dashDir.copy(d.setY(0).normalize());
@@ -449,10 +557,11 @@ export class Player {
     // A dash that hurts carries its own hit set: it goes *through* people, so
     // each one has to be remembered rather than the dash ending on the first.
     this.dashSpec = damage > 0 || onHit
-      ? { damage, radius: radius || 2.2, onHit, source, color, hit: new Set() }
+      ? { damage, radius: radius || 2.2, proc, knockback, onHit, source, color, hit: new Set() }
       : null;
     this.velocity.y = Math.max(this.velocity.y, 0);
     this.game.fx.ring(this.position, 0.4, 3.2, color, 0.32, 0.6);
+    audio.dash(this.position);
     for (let i = 0; i < 8; i++) {
       this.game.fx.spawnParticle(
         this.chestPosition,
@@ -491,8 +600,8 @@ export class Player {
       spec.onHit?.(e);
       if (spec.damage > 0) {
         this.game.combat.damageEnemy(e, spec.damage, {
-          proc: 1, source: spec.source,
-          knockback: 8, knockbackDir: this.dashDir.clone().setY(0.3).normalize(),
+          proc: spec.proc ?? 1, source: spec.source,
+          knockback: spec.knockback ?? 8, knockbackDir: this.dashDir.clone().setY(0.3).normalize(),
         });
       }
       this.game.fx.slash(this.chestPosition, this.dashDir, {
@@ -597,7 +706,7 @@ export class Player {
 
   /** Bulwark's shove: a short forward charge that damages what it hits. */
   startShieldCharge({ speed = 30, duration = 0.42, damage = 0, radius = 3.2, color = 0x6fd0ff }) {
-    const dir = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    const dir = new THREE.Vector3(Math.sin(this.camYaw), 0, Math.cos(this.camYaw));
     this.shieldCharge = { dir, time: duration, speed, damage, radius, color, hit: new Set() };
     this.game.fx.ring(this.position, 0.4, 3.4, color, 0.35, 0.8);
   }
@@ -715,7 +824,7 @@ export class Player {
   _weaponUp(input) {
     if (this.game.combat?.firing || this.game.combat?.beamActive) return true;
     if (this.aiming || this.combatTimer > 0 || this.grapple || this.shieldCharge) return true;
-    if (input && (input.mouse.left || input.mouse.leftPressed || input.down('KeyQ'))) return true;
+    if (input && (input.actionDown('primary') || input.actionDown('secondary'))) return true;
     // Scanning for company is cheap but not free — a few times a second is plenty.
     if (this.game.frame % 12 === 0) {
       this._enemyNear = !!this.game.enemies?.nearest(this.position, 34, 1).length;
@@ -729,6 +838,7 @@ export class Player {
       position: this.position,
       yaw: this.yaw,
       pitch: this.pitch,
+      lookYaw: this.camYaw,
       velocity: this.velocity,
       speed: this.speedXZ,
       moveSpeed: this.stats.moveSpeed,
@@ -745,7 +855,22 @@ export class Player {
     this._readMuzzle();
   }
 
-  /** Third-person camera with obstruction pull-in. */
+  /**
+   * Third-person camera with obstruction pull-in.
+   *
+   * The old version cast one thin ray from the pivot and trusted it. The pivot
+   * is offset a metre over the right shoulder, so that ray ran *beside* every
+   * tree trunk in the game rather than into it — measured: standing directly
+   * behind a trunk, the boom stayed at its full 7m and put the camera inside
+   * the tree, because the ray passed 0.66m clear of a 0.77m-wide box. Foliage
+   * was worse: a canopy is five times the width of its trunk and has no
+   * collider at all, since you are meant to be able to walk under it.
+   *
+   * So: probe with a bundle of rays across the camera's own width, test the
+   * canopy volumes the arena keeps for exactly this, and keep the camera
+   * *on* the boom at all times — smoothing the pivot rather than the camera
+   * position, so it can never lerp through the geometry we just avoided.
+   */
   updateCamera(dt, world, aiming) {
     const cam = this.game.engine.camera;
     this.aimBlend = damp(this.aimBlend, aiming ? 1 : 0, 12, dt);
@@ -754,45 +879,188 @@ export class Player {
     const fov = THREE.MathUtils.lerp(CAMERA.fov, CAMERA.aimFov, this.aimBlend);
     if (Math.abs(cam.fov - fov) > 0.01) { cam.fov = fov; cam.updateProjectionMatrix(); }
 
-    const pivot = this._camTarget.set(
-      this.position.x, this.position.y + CAMERA.height + PLAYER.eyeHeight * 0.35, this.position.z,
-    );
-    // Offset over the player's right shoulder (same basis as movement).
+    /* Pitch moves the pivot as well as the boom.
+     *
+     * A boom is a rigid arm: swing it up and the camera goes *down*, and on a
+     * character standing on the ground that means straight into the floor. The
+     * old code clamped the camera height afterwards, which took it off the boom
+     * entirely — the arm was still pointing one way and the camera was lying on
+     * the ground pointing another, so looking up simply stopped working.
+     * Raising the pivot as the pitch climbs buys the arm the room it needs, and
+     * the shortening below covers whatever is left.
+     */
+    const up = clamp01(this.camPitch / CAMERA.maxPitch);
+    const down = clamp01(this.camPitch / CAMERA.minPitch);
+    this.camLift = damp(this.camLift, up * CAMERA.pitchLift - down * CAMERA.pitchDrop, 10, dt);
+
+    // Ideal pivot: head height, offset over the player's right shoulder.
     const shoulder = THREE.MathUtils.lerp(CAMERA.shoulder, CAMERA.shoulder * 1.25, this.aimBlend);
-    pivot.x -= Math.cos(this.yaw) * shoulder;
-    pivot.z += Math.sin(this.yaw) * shoulder;
+    _camWant.set(
+      this.position.x - Math.cos(this.camYaw) * shoulder,
+      this.position.y + CAMERA.height + PLAYER.eyeHeight * 0.35 + this.camLift,
+      this.position.z + Math.sin(this.camYaw) * shoulder,
+    );
+
+    // Smoothing lives on the pivot, not on the camera. Lerping the camera
+    // position toward a validated spot lets it cut the corner through whatever
+    // we just moved it out of; lerping the pivot keeps it on the boom.
+    const pivot = this._camTarget;
+    if (this._snapCamera) pivot.copy(_camWant);
+    else pivot.lerp(_camWant, 1 - Math.exp(-CAMERA.smoothing * dt));
 
     // Forward matches the movement basis (yaw 0 faces +Z), so the camera sits
-    // behind the player and the crosshair agrees with where the character looks.
-    const forward = _v.set(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
-      Math.sin(this.pitch),
-      Math.cos(this.yaw) * Math.cos(this.pitch),
+    // behind the player and the crosshair agrees with where the camera looks.
+    _camBack.set(
+      -Math.sin(this.camYaw) * Math.cos(this.camPitch),
+      -Math.sin(this.camPitch),
+      -Math.cos(this.camYaw) * Math.cos(this.camPitch),
     ).normalize();
 
-    // Pull in if geometry is between the pivot and the ideal camera spot.
-    let want = dist;
-    const back = forward.clone().negate();
-    const hit = raycastWorld(pivot, back, dist + 0.6, world);
-    if (hit) want = Math.max(1.5, hit.distance - 0.45);
-    this.camDistance = damp(this.camDistance, want, want < this.camDistance ? 40 : 9, dt);
+    // The boom hangs off a pivot a metre to the side of the character, so a
+    // clear boom is not the same thing as a clear view. Find the longest boom
+    // that both keeps the camera out of geometry and leaves the character
+    // visible — the second condition is the one the player actually notices.
+    _camChest.set(this.position.x, this.position.y + 1.1, this.position.z);
+    // Everything feeding the target distance is a pure function of the world
+    // and the pose — never of the current distance. Feeding the previous frame
+    // distance back in is what made the camera pump in and out on the spot.
+    const groundLimit = this._groundLimit(pivot, _camBack, dist, world);
+    const probed = Math.min(groundLimit, this._probeBoom(pivot, _camBack, dist, world));
+    const want = this._resolveBoom(pivot, probed, world);
 
-    // The sweep above can still leave the camera embedded when the pivot jumps
-    // (stage change, blink). Walk it in until it is clear of solid geometry —
-    // into a LOCAL value. Writing the shrink back into this.camDistance made the
-    // damp push it out again next frame only to be shrunk again, so the camera
-    // pumped in and out whenever the player stood near a tree or some debris.
-    let usedDistance = this.camDistance;
-    for (let i = 0; i < 6 && usedDistance > 1.3; i++) {
-      const test = _v.copy(pivot).addScaledVector(back, usedDistance);
-      if (!world.isInsideSolid(test.x, test.y, test.z, 0.4)) break;
-      usedDistance *= 0.68;
-    }
+    // Pull in the instant something is in the way; ease back out afterwards, or
+    // stepping out from behind a pillar snaps the whole world backwards.
+    this.camDistance = want < this.camDistance
+      ? want
+      : damp(this.camDistance, want, 6, dt);
+    // The floor here is deliberately below CAMERA.minDistance: on a steep look
+    // up, or with a rise directly behind you, the only legal boom really is a
+    // very short one, and clamping back up to the nominal minimum would put the
+    // camera underground again — which is the bug this whole path exists for.
+    this.camDistance = clamp(this.camDistance, 0.45, dist);
+    this._placeBoom(pivot, this.camDistance, world);
 
-    const desired = pivot.clone().addScaledVector(back, usedDistance);
-    desired.y = Math.max(desired.y, world.groundHeightAt(desired.x, desired.z) + 0.6);
-    if (this._snapCamera) { cam.position.copy(desired); this._snapCamera = false; }
-    else cam.position.lerp(desired, 1 - Math.exp(-CAMERA.smoothing * dt));
+    cam.position.copy(_camPos);
+    this._snapCamera = false;
     cam.lookAt(pivot.x, pivot.y + 0.12, pivot.z);
+  }
+
+  /**
+   * Longest boom that keeps the camera above the terrain under it.
+   *
+   * This is the whole of the "cannot aim up" bug. The arm swings down as the
+   * pitch swings up, so past about forty degrees the far end of it is below the
+   * ground — and on a level with hills, "the ground" is not a plane you can
+   * solve for in closed form. Marching the arm and stopping where it would go
+   * under is exact enough, and costs eight height lookups.
+   */
+  _groundLimit(pivot, back, maxDist, world) {
+    if (back.y > -0.02) return maxDist;      // level or rising: nothing to hit
+    const steps = 8;
+    for (let i = 1; i <= steps; i++) {
+      const d = (i / steps) * maxDist;
+      const x = pivot.x + back.x * d;
+      const y = pivot.y + back.y * d;
+      const z = pivot.z + back.z * d;
+      // Terrain only. Asking for the highest *solid* surface would count the
+      // roof of the building the camera is trying to see past, and the boom
+      // would hop up onto it — which is the exact bug the old flat-plane lift
+      // was written to avoid. Structures shorten the boom via the probe; the
+      // ground is what limits how far it can swing.
+      const floor = world.terrainHeightAt ? world.terrainHeightAt(x, z) : 0;
+      if (y >= floor + CAMERA.groundClearance) continue;
+      // Solve the crossing on this segment rather than snapping back to the
+      // last clean sample, or the camera visibly steps as you sweep the mouse.
+      const prev = ((i - 1) / steps) * maxDist;
+      const py = pivot.y + back.y * prev;
+      const denom = py - y;
+      const t = denom > 1e-5 ? (py - (floor + CAMERA.groundClearance)) / denom : 0;
+      return Math.max(0.4, prev + clamp01(t) * (d - prev));
+    }
+    return maxDist;
+  }
+
+  /**
+   * Puts `_camPos` on the boom at `distance`, kept above whatever is beneath it.
+   *
+   * The lift here is a backstop, not the mechanism: `_groundLimit` has already
+   * shortened the arm so that it almost never fires. It exists for the one case
+   * the march cannot fix — a boom so short that even at the minimum length the
+   * camera is inside a rise.
+   */
+  _placeBoom(pivot, distance, world) {
+    _camPos.copy(pivot).addScaledVector(_camBack, distance);
+    const floor = world && world.terrainHeightAt
+      ? world.terrainHeightAt(_camPos.x, _camPos.z)
+      : 0;
+    const min = floor + CAMERA.groundClearance * 0.6;
+    if (_camPos.y < min) _camPos.y = min;
+  }
+
+  /**
+   * Longest boom no greater than `distance` that keeps the camera out of
+   * geometry and the character in view. Leaves `_camPos` at the answer.
+   */
+  _resolveBoom(pivot, distance, world) {
+    let d = distance;
+    for (let i = 0; i < 6; i++) {
+      this._placeBoom(pivot, d, world);
+      if (!world.isInsideSolid(_camPos.x, _camPos.y, _camPos.z, 0.3)
+        && this._sightClear(_camPos, _camChest, world)) break;
+      if (d <= CAMERA.minDistance) break;
+      d = Math.max(CAMERA.minDistance, d * 0.72);
+    }
+    return d;
+  }
+
+  /**
+   * Nearest obstruction along the boom, probed across the camera own width.
+   *
+   * Five parallel rays — centre plus four at the collision radius — is enough
+   * that nothing as narrow as a trunk or a column can thread between them.
+   */
+  _probeBoom(pivot, back, maxDist, world) {
+    const reach = maxDist + CAMERA.collisionPad;
+    // A basis across the boom. Near-vertical booms need a different seed axis
+    // or the cross product collapses.
+    _camRight.set(-back.z, 0, back.x);
+    if (_camRight.lengthSq() < 1e-6) _camRight.set(1, 0, 0);
+    _camRight.normalize();
+    _camUp.crossVectors(_camRight, back).normalize();
+
+    let best = reach;
+    const r = CAMERA.collisionRadius;
+    const cast = (origin) => {
+      const hit = raycastWorld(origin, back, best, world);
+      // Terrain is handled by the boom march instead. Shortening for it here as
+      // well would double-count the same constraint and make the camera jitter
+      // wherever the ground is close.
+      if (hit && !hit.ground && hit.distance < best) best = hit.distance;
+      const soft = raycastBoxes(origin, back, best, world.cameraBlockers);
+      if (soft !== null && soft < best) best = soft;
+    };
+    for (const [ox, oy] of BOOM_PROBES) {
+      cast(_camProbe.copy(pivot).addScaledVector(_camRight, ox * r).addScaledVector(_camUp, oy * r));
+    }
+    // Also probe from the body itself. The pivot sits a metre to the side, so a
+    // boom that is clear from the pivot can still have a trunk squarely between
+    // the camera and the character — which is the case you actually notice.
+    for (const ox of [0, 1, -1]) {
+      cast(_camProbe.copy(_camChest).addScaledVector(_camRight, ox * r));
+    }
+    return clamp(best - CAMERA.collisionPad, CAMERA.minDistance, maxDist);
+  }
+
+  /** Is there anything between the camera and the character's chest? */
+  _sightClear(from, chest, world) {
+    _camSight.copy(chest).sub(from);
+    const len = _camSight.length();
+    if (len < 0.5) return true;
+    _camSight.divideScalar(len);
+    const reach = len - 0.4;
+    const hit = raycastWorld(from, _camSight, reach, world);
+    // The ground plane and the arena wall are never between you and yourself.
+    if (hit && !hit.ground && !hit.wall) return false;
+    return raycastBoxes(from, _camSight, reach, world.cameraBlockers) === null;
   }
 }

@@ -29,8 +29,11 @@ export function computeEchoes(result, profileData) {
   // Surviving deep into the difficulty ramp is worth a bonus of its own.
   const depthBonus = Math.max(0, result.difficulty - 2) * 12;
 
+  // Finishing it is worth more than any amount of farming, because farming is
+  // the thing the ending is competing against.
+  const victoryBonus = result.victory ? ECHOES.victoryBonus : 0;
   const subtotal = fromTime + fromStages + fromKills + fromBosses + depthBonus;
-  const total = Math.max(1, Math.round(subtotal * mode.echoMult + firstClear));
+  const total = Math.max(1, Math.round(subtotal * mode.echoMult + firstClear + victoryBonus));
 
   return {
     total,
@@ -42,6 +45,7 @@ export function computeEchoes(result, profileData) {
       ...(depthBonus > 0 ? [{ label: 'Difficulty depth', value: Math.round(depthBonus) }] : []),
       ...(mode.echoMult !== 1 ? [{ label: `${mode.name} modifier ×${mode.echoMult}`, value: null }] : []),
       ...(firstClear > 0 ? [{ label: 'First-clear bonus', value: firstClear }] : []),
+      ...(victoryBonus > 0 ? [{ label: 'The Sovereign felled', value: victoryBonus }] : []),
     ],
   };
 }
