@@ -716,6 +716,23 @@ and a throwing hook is caught and logged rather than killing the frame.
 
 ### Adding a character
 
+**How round anything is lives in one table.** `SEG` in `entities/models.js` names segment
+counts by what the part *is* — `SEG.torso`, `SEG.limb`, `SEG.tiny` — rather than by number,
+so "make the arms rounder" is one edit instead of forty at the call sites. It is deliberately
+uneven: the torso and the helmet are the two surfaces a player actually looks at and they get
+28 and 26 segments; a knuckle stud gets 8. Boxes go through `roundedBox`, which extrudes a
+rounded rectangle with a single-segment chamfer — a chamfer kills the razor specular line
+down an edge exactly as well as a fillet does at any distance this game is played from, for a
+third of the triangles, which is why low-poly hardware is chamfered rather than filleted.
+Hairline glow strips stay as raw boxes on purpose: a two-centimetre strip has no visible
+chamfer and rounding it spends forty triangles to change nothing.
+
+A character costs 15–23k triangles, up from 3–5k when every curve was built from six flats.
+Only the player models pay it — there are at most eight of those in a co-op run — and the
+bestiary is untouched at 100–1500 each, so a fifty-strong crowd is exactly as cheap as it was.
+`mergeStaticMeshes` still collapses each model to about 50 draw calls either way, which is the
+number that actually decides the frame.
+
 Append to `src/data/characters.js` with base stats, a `build` key for the model, and a
 `utility`, `special` and (optionally) `ultimate`. The `build` key selects a branch in
 `buildPlayerModel` (`entities/models.js`) that hangs the character's own hardware onto a

@@ -28,6 +28,88 @@ const glowMat = (color, opacity = 1) => new THREE.MeshBasicMaterial({
   color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false,
 });
 
+/**
+ * How round everything is, in one place.
+ *
+ * The models read as blocky for three specific reasons, and none of them is the
+ * shapes being wrong: a six-segment cylinder is a hexagonal prism, an
+ * `IcosahedronGeometry(r, 1)` is a golf ball with eighty flat faces, and a
+ * `BoxGeometry` has an infinitely sharp edge that catches a hard specular line
+ * along its whole length. Curved surfaces were being built out of a handful of
+ * flats and then lit as though they were curved.
+ *
+ * These are the segment counts everything now goes through. They are named by
+ * what the part *is* rather than by number, so "make the arms rounder" is one
+ * edit here instead of forty at the call sites. The budget is deliberately
+ * uneven: the torso and the head are the two surfaces a player actually looks
+ * at, so they get the segments, and a knuckle stud does not.
+ */
+const SEG = {
+  torso: 28,      // the chest: the largest single curved surface on the body
+  head: 26,       // helmet — read at conversational distance in the menus
+  headRing: 18,
+  limb: 16,       // arms and legs
+  joint: 16,      // shoulder and knee caps
+  pauldron: 20,   // the shoulder domes carry the silhouette
+  medium: 14,     // packs, drums, launchers
+  small: 10,      // pipes, vents, nozzles
+  tiny: 8,        // studs, bolts, rivets, knuckles
+  ring: 20,       // torus rings
+};
+
+/**
+ * A box with its edges taken off.
+ *
+ * The single biggest contributor to the blocky read, because there are getting
+ * on for ninety boxes across the character models and every one of them was
+ * catching a razor-sharp specular line down each edge. Real hardware has a
+ * break on every edge — a chamfer, a radius, a fillet — and the eye reads its
+ * absence as "untextured primitive" long before it reads the proportions.
+ *
+ * Built by extruding a rounded rectangle with a bevel, so the corners round in
+ * all three axes rather than only around the extrusion. `r` is the corner
+ * radius and is clamped to just under half the smallest dimension, because a
+ * radius larger than that inverts the shape.
+ */
+/* Not everything wants this. A lit edge strip two centimetres thick has no
+   visible chamfer at any distance the player will ever see it from, and giving
+   it one spends about forty triangles to change nothing — so the hairline glow
+   strips down Dasher's ribs and Wraith's shins stay as boxes on purpose. */
+function roundedBox(w, h, d, material, r = 0.02, curveSegments = 1) {
+  const rad = Math.max(0.001, Math.min(r, Math.min(w, h, d) * 0.49));
+  const shape = new THREE.Shape();
+  const x = w / 2 - rad;
+  const y = h / 2 - rad;
+  shape.moveTo(-x, -h / 2);
+  shape.lineTo(x, -h / 2);
+  shape.quadraticCurveTo(w / 2, -h / 2, w / 2, -y);
+  shape.lineTo(w / 2, y);
+  shape.quadraticCurveTo(w / 2, h / 2, x, h / 2);
+  shape.lineTo(-x, h / 2);
+  shape.quadraticCurveTo(-w / 2, h / 2, -w / 2, y);
+  shape.lineTo(-w / 2, -y);
+  shape.quadraticCurveTo(-w / 2, -h / 2, -x, -h / 2);
+
+  const depth = Math.max(0.001, d - rad * 2);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    /* One bevel segment, not a rounded fillet. A single chamfer breaks the
+       specular line down an edge just as completely as a radius does at any
+       distance a player sees these from, and costs about a third as much —
+       which is the whole reason low-poly hardware is chamfered rather than
+       filleted. */
+    depth, bevelEnabled: true, bevelThickness: rad, bevelSize: rad,
+    bevelOffset: 0, bevelSegments: 1, curveSegments,
+  });
+  // Extrude runs along +Z from z=0; centre it so it drops into the same place
+  // the BoxGeometry it replaces did.
+  geo.translate(0, 0, -depth / 2);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
 function box(w, h, d, material, x = 0, y = 0, z = 0) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
   m.position.set(x, y, z);
@@ -259,20 +341,25 @@ function treadSole(parent, material, { pos, w, d, blocks = 4 }) {
 /** Four-finger hand with a thumb — reads as a glove rather than a lump. */
 function glove(parent, materials, scale, side) {
   const hand = new THREE.Group();
-  const palm = new THREE.Mesh(new THREE.BoxGeometry(scale * 1.6, scale * 1.9, scale * 0.95), materials.trim);
-  palm.castShadow = true;
+  // Fingers are capsules and the palm is a rounded slab: a finger is the one
+  // part of a body nobody will accept as a rectangular prism.
+  const palm = roundedBox(scale * 1.6, scale * 1.9, scale * 0.95, materials.trim, scale * 0.34);
   hand.add(palm);
   for (let i = 0; i < 4; i++) {
-    const f = new THREE.Mesh(new THREE.BoxGeometry(scale * 0.33, scale * 0.85, scale * 0.42), materials.suit);
+    const f = new THREE.Mesh(
+      new THREE.CapsuleGeometry(scale * 0.19, scale * 0.6, 3, SEG.small), materials.suit);
     f.position.set((i - 1.5) * scale * 0.38, -scale * 1.25, scale * 0.12);
     f.rotation.x = -0.5;
+    f.castShadow = true;
     hand.add(f);
   }
-  const thumb = new THREE.Mesh(new THREE.BoxGeometry(scale * 0.36, scale * 0.72, scale * 0.44), materials.suit);
+  const thumb = new THREE.Mesh(
+    new THREE.CapsuleGeometry(scale * 0.21, scale * 0.46, 3, SEG.small), materials.suit);
   thumb.position.set(side * scale * 0.85, -scale * 0.75, scale * 0.28);
   thumb.rotation.set(-0.6, 0, side * 0.7);
+  thumb.castShadow = true;
   hand.add(thumb);
-  const knuckle = new THREE.Mesh(new THREE.BoxGeometry(scale * 1.7, scale * 0.34, scale * 0.3), materials.accent);
+  const knuckle = roundedBox(scale * 1.7, scale * 0.34, scale * 0.3, materials.accent, scale * 0.12);
   knuckle.position.set(0, -scale * 0.9, scale * 0.4);
   hand.add(knuckle);
   parent.add(hand);
@@ -293,15 +380,32 @@ function glove(parent, materials, scale, side) {
  * so the existing animation code drives them unchanged.
  */
 
-/** Tapered limb segment with a rounded joint cap at the top. */
+/**
+ * Tapered limb segment, capped at both ends.
+ *
+ * An eight-sided shaft is an octagonal prism, and at arm's length that is
+ * exactly what it looked like. Sixteen reads as round. Both ends get a sphere
+ * rather than only the top, because the open rim of a cylinder is a hard disc
+ * edge — that rim is what made every elbow and knee look like a cut pipe, and
+ * capping it costs less than the taper does.
+ */
 function limbSegment(len, rTop, rBot, material, joint = null) {
   const g = new THREE.Group();
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, len, 8), material);
+  const shaft = new THREE.Mesh(
+    new THREE.CylinderGeometry(rTop, rBot, len, SEG.limb, 1, true), material);
   shaft.position.y = -len / 2;
   shaft.castShadow = true;
   g.add(shaft);
+
+  // The far end, closing the shaft into the next joint.
+  const foot = new THREE.Mesh(new THREE.SphereGeometry(rBot * 0.99, SEG.joint, SEG.joint * 0.6), material);
+  foot.scale.set(1, 0.9, 1);
+  foot.position.y = -len;
+  foot.castShadow = true;
+  g.add(foot);
+
   if (joint) {
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(rTop * 0.98, 8, 6), joint);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(rTop * 0.99, SEG.joint, SEG.joint * 0.6), joint);
     cap.scale.set(1, 0.85, 1);
     cap.castShadow = true;
     g.add(cap);
@@ -329,22 +433,28 @@ function articulatedLimb(parent, x, y, z, spec, materials) {
     // Ankle group so the foot can roll through the step instead of staying rigid.
     const ankle = new THREE.Group();
     ankle.position.y = -lower;
-    const foot = new THREE.Mesh(new THREE.BoxGeometry(rBot * 2.3, rBot * 1.0, rBot * 3.0), materials.trim);
+    const foot = roundedBox(rBot * 2.3, rBot * 1.0, rBot * 3.0, materials.trim, rBot * 0.34);
     foot.position.set(0, -rBot * 0.4, rBot * 0.75);
-    foot.castShadow = true;
     ankle.add(foot);
-    const toe = new THREE.Mesh(new THREE.BoxGeometry(rBot * 2.0, rBot * 0.8, rBot * 1.0), materials.suit);
+    const toe = roundedBox(rBot * 2.0, rBot * 0.8, rBot * 1.0, materials.suit, rBot * 0.3);
     toe.position.set(0, -rBot * 0.45, rBot * 2.0);
     ankle.add(toe);
-    const toeCap = new THREE.Mesh(new THREE.BoxGeometry(rBot * 2.05, rBot * 0.5, rBot * 0.45), materials.accent);
-    toeCap.position.set(0, -rBot * 0.3, rBot * 2.4);
+    // The toe rounds off into a proper cap rather than ending on a flat wall.
+    const toeCap = new THREE.Mesh(
+      new THREE.SphereGeometry(rBot * 0.62, SEG.small, SEG.small * 0.7, 0, Math.PI * 2, 0, Math.PI * 0.6),
+      materials.accent);
+    toeCap.scale.set(1.6, 0.7, 1);
+    toeCap.rotation.x = Math.PI / 2;
+    toeCap.position.set(0, -rBot * 0.36, rBot * 2.35);
+    toeCap.castShadow = true;
     ankle.add(toeCap);
-    const heel = new THREE.Mesh(new THREE.BoxGeometry(rBot * 1.9, rBot * 1.2, rBot * 0.8), materials.joint);
+    const heel = roundedBox(rBot * 1.9, rBot * 1.2, rBot * 0.8, materials.joint, rBot * 0.3);
     heel.position.set(0, -rBot * 0.3, -rBot * 0.6);
     ankle.add(heel);
     treadSole(ankle, materials.joint, { pos: [0, -rBot * 0.92, rBot * 0.9], w: rBot * 2.2, d: rBot * 3.6, blocks: 5 });
     // Ankle actuator.
-    const strut = new THREE.Mesh(new THREE.CylinderGeometry(rBot * 0.22, rBot * 0.22, rBot * 1.4, 6), materials.accent);
+    const strut = new THREE.Mesh(
+      new THREE.CapsuleGeometry(rBot * 0.22, rBot * 1.2, 3, SEG.small), materials.accent);
     strut.position.set(0, rBot * 0.35, -rBot * 0.5);
     strut.rotation.x = 0.4;
     ankle.add(strut);
@@ -361,13 +471,14 @@ function articulatedLimb(parent, x, y, z, spec, materials) {
   const jointSide = spec.foot ? 1 : -1;
   if (spec.pad) {
     const pad = new THREE.Mesh(
-      new THREE.SphereGeometry(rMid * 1.08, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.5), materials.trim);
+      new THREE.SphereGeometry(rMid * 1.08, SEG.pauldron, SEG.joint * 0.6, 0, Math.PI * 2, 0, Math.PI * 0.5),
+      materials.trim);
     pad.scale.set(1, 0.5, 1);
     pad.position.set(0, -rMid * 0.15, jointSide * rMid * 0.5);
     pad.rotation.x = jointSide * Math.PI / 2.1;
     pad.castShadow = true;
     low.add(pad);
-    const ridge = new THREE.Mesh(new THREE.BoxGeometry(rMid * 0.32, rMid * 0.9, rMid * 0.22), materials.accent);
+    const ridge = roundedBox(rMid * 0.32, rMid * 0.9, rMid * 0.22, materials.accent, rMid * 0.08);
     ridge.position.set(0, -rMid * 0.35, jointSide * rMid * 0.92);
     low.add(ridge);
   }
@@ -399,25 +510,25 @@ function buildTorso(group, materials, spec) {
   const { width, depth, height, accentColor } = spec;
   const kit = spec.kit || 'armoured';
 
-  const core = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.52, width * 0.46, height, 8), materials.suit);
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.52, width * 0.46, height, SEG.torso), materials.suit);
   core.scale.z = depth / width;
   core.position.y = height * 0.5;
   core.castShadow = true;
   group.add(core);
 
-  const plate = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.55, width * 0.5, height * 0.42, 8), materials.trim);
+  const plate = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.55, width * 0.5, height * 0.42, SEG.torso), materials.trim);
   plate.scale.z = (depth / width) * 1.04;
   plate.position.y = height * 0.72;
   plate.castShadow = true;
   group.add(plate);
 
   // Collar ring reads as a neck seal and breaks the shoulder line.
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(width * 0.3, width * 0.075, 6, 12), materials.trim);
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(width * 0.3, width * 0.075, 10, SEG.ring), materials.trim);
   collar.rotation.x = Math.PI / 2;
   collar.position.y = height * 0.98;
   group.add(collar);
 
-  const belt = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.5, width * 0.5, height * 0.14, 8), materials.trim);
+  const belt = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.5, width * 0.5, height * 0.14, SEG.torso), materials.trim);
   belt.scale.z = depth / width;
   belt.position.y = height * 0.12;
   group.add(belt);
@@ -425,14 +536,14 @@ function buildTorso(group, materials, spec) {
   // Whatever is going over the top of this owns the read from here on.
   if (kit === 'cloth') return core;
 
-  const chestLight = new THREE.Mesh(new THREE.CircleGeometry(width * 0.13, 8), materials.glow);
+  const chestLight = new THREE.Mesh(new THREE.CircleGeometry(width * 0.13, SEG.ring), materials.glow);
   chestLight.position.set(0, height * 0.74, depth * 0.53);
   group.add(chestLight);
 
   // Segmented abdominal plates. Every frame gets these — they are the waist.
   for (let i = 0; i < 3; i++) {
     const ab = new THREE.Mesh(
-      new THREE.CylinderGeometry(width * (0.5 - i * 0.02), width * (0.48 - i * 0.02), height * 0.1, 8),
+      new THREE.CylinderGeometry(width * (0.5 - i * 0.02), width * (0.48 - i * 0.02), height * 0.1, SEG.torso),
       materials.trim);
     ab.scale.z = depth / width;
     ab.position.y = height * (0.28 - i * 0.09);
@@ -443,20 +554,19 @@ function buildTorso(group, materials, spec) {
   // one of these is the character's own hardware, and it goes on next.
   if (kit === 'light') return core;
 
-  const pack = new THREE.Mesh(new THREE.BoxGeometry(width * 0.72, height * 0.5, depth * 0.42), materials.trim);
+  const pack = roundedBox(width * 0.72, height * 0.5, depth * 0.42, materials.trim, width * 0.08);
   pack.position.set(0, height * 0.6, -depth * 0.6);
-  pack.castShadow = true;
   group.add(pack);
   boltRow(group, materials.joint, {
     from: [-width * 0.3, height * 0.78, -depth * 0.79],
     to: [width * 0.3, height * 0.78, -depth * 0.79], count: 5, r: 0.018,
   });
   for (const sx of [-1, 1]) {
-    const vent = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.09, width * 0.09, height * 0.2, 6), materials.accent);
+    const vent = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.09, width * 0.09, height * 0.2, SEG.small), materials.accent);
     vent.position.set(sx * width * 0.26, height * 0.72, -depth * 0.72);
     group.add(vent);
     // Exhaust stack behind the shoulder.
-    const stack = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.055, width * 0.07, height * 0.42, 6), materials.joint);
+    const stack = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.055, width * 0.07, height * 0.42, SEG.small), materials.joint);
     stack.position.set(sx * width * 0.4, height * 0.82, -depth * 0.66);
     stack.rotation.x = -0.14;
     stack.castShadow = true;
@@ -465,22 +575,21 @@ function buildTorso(group, materials, spec) {
 
   // Harness: two straps over the chest plate meeting at a buckle.
   for (const sx of [-1, 1]) {
-    const strap = new THREE.Mesh(new THREE.BoxGeometry(width * 0.13, height * 0.7, depth * 0.1), materials.joint);
+    const strap = roundedBox(width * 0.13, height * 0.7, depth * 0.1, materials.joint, width * 0.035);
     strap.position.set(sx * width * 0.19, height * 0.55, depth * 0.5);
     strap.rotation.z = sx * 0.18;
     group.add(strap);
   }
-  const buckle = new THREE.Mesh(new THREE.BoxGeometry(width * 0.22, height * 0.16, depth * 0.14), materials.accent);
+  const buckle = roundedBox(width * 0.22, height * 0.16, depth * 0.14, materials.accent, width * 0.05);
   buckle.position.set(0, height * 0.32, depth * 0.53);
   group.add(buckle);
 
   // Belt pouches and a shoulder pauldron rivet line.
   for (const sx of [-1, 1]) {
-    const pouch = new THREE.Mesh(new THREE.BoxGeometry(width * 0.24, height * 0.24, depth * 0.24), materials.joint);
+    const pouch = roundedBox(width * 0.24, height * 0.24, depth * 0.24, materials.joint, width * 0.06);
     pouch.position.set(sx * width * 0.44, height * 0.1, depth * 0.28);
-    pouch.castShadow = true;
     group.add(pouch);
-    const flap = new THREE.Mesh(new THREE.BoxGeometry(width * 0.26, height * 0.07, depth * 0.26), materials.trim);
+    const flap = roundedBox(width * 0.26, height * 0.07, depth * 0.26, materials.trim, width * 0.025);
     flap.position.set(sx * width * 0.44, height * 0.22, depth * 0.28);
     group.add(flap);
   }
@@ -508,7 +617,10 @@ function buildHead(parent, materials, spec) {
   head.position.y = spec.y;
   const kit = spec.kit || 'trooper';
 
-  const skull = new THREE.Mesh(new THREE.IcosahedronGeometry(spec.r, 1), materials.suit);
+  /* Was `IcosahedronGeometry(r, 1)` — eighty flat faces, and the single most
+     obviously faceted surface on the whole character, sitting at eye level. */
+  const skull = new THREE.Mesh(
+    new THREE.SphereGeometry(spec.r, SEG.head, SEG.head * 0.7), materials.suit);
   skull.scale.set(1, 1.06, 0.96);
   skull.castShadow = true;
   head.add(skull);
@@ -522,17 +634,18 @@ function buildHead(parent, materials, spec) {
     /* One unbroken shell over the skull and a visor let into it. Slightly
        larger than the skull so the face is a surface rather than a facet — at
        range this is the whole difference between a helmet and a lump. */
-    const shell = new THREE.Mesh(new THREE.SphereGeometry(spec.r * 1.04, 12, 10), materials.trim);
+    const shell = new THREE.Mesh(
+      new THREE.SphereGeometry(spec.r * 1.04, SEG.head, SEG.head * 0.7), materials.trim);
     shell.scale.set(1, 1.1, 1.02);
     shell.castShadow = true;
     head.add(shell);
     const band = new THREE.Mesh(
-      new THREE.TorusGeometry(spec.r * 0.86, spec.r * 0.15, 6, 16, Math.PI * 0.8), materials.visor);
+      new THREE.TorusGeometry(spec.r * 0.86, spec.r * 0.15, 10, SEG.ring, Math.PI * 0.8), materials.visor);
     band.rotation.set(Math.PI / 2, 0, Math.PI * 0.6);
     band.position.set(0, spec.r * 0.06, spec.r * 0.12);
     head.add(band);
     // A raised keel down the crown: the shape that says "fast" from behind.
-    const keel = new THREE.Mesh(new THREE.BoxGeometry(spec.r * 0.14, spec.r * 0.3, spec.r * 1.7), materials.trim);
+    const keel = roundedBox(spec.r * 0.14, spec.r * 0.3, spec.r * 1.7, materials.trim, spec.r * 0.06);
     keel.position.set(0, spec.r * 0.9, -spec.r * 0.12);
     keel.rotation.x = 0.12;
     head.add(keel);
@@ -540,23 +653,26 @@ function buildHead(parent, materials, spec) {
     return head;
   }
 
-  const crest = new THREE.Mesh(new THREE.CylinderGeometry(spec.r * 0.92, spec.r * 0.86, spec.r * 0.5, 8), materials.trim);
+  const crest = new THREE.Mesh(
+    new THREE.CylinderGeometry(spec.r * 0.92, spec.r * 0.86, spec.r * 0.5, SEG.headRing), materials.trim);
   crest.position.y = spec.r * 0.62;
   crest.castShadow = true;
   head.add(crest);
 
   // Comms boom and mic.
-  const boom = new THREE.Mesh(new THREE.CylinderGeometry(spec.r * 0.05, spec.r * 0.05, spec.r * 0.9, 5), materials.joint);
+  const boom = new THREE.Mesh(
+    new THREE.CapsuleGeometry(spec.r * 0.05, spec.r * 0.8, 2, SEG.tiny), materials.joint);
   boom.position.set(spec.r * 0.55, -spec.r * 0.08, spec.r * 0.32);
   boom.rotation.set(0.5, 0, 0.9);
   head.add(boom);
-  const mic = new THREE.Mesh(new THREE.SphereGeometry(spec.r * 0.11, 6, 5), materials.accent);
+  const mic = new THREE.Mesh(new THREE.SphereGeometry(spec.r * 0.11, SEG.small, SEG.tiny), materials.accent);
   mic.position.set(spec.r * 0.2, -spec.r * 0.3, spec.r * 0.6);
   head.add(mic);
 
   // Filter canisters at the jaw.
   for (const sx of [-1, 1]) {
-    const filter = new THREE.Mesh(new THREE.CylinderGeometry(spec.r * 0.19, spec.r * 0.19, spec.r * 0.3, 7), materials.joint);
+    const filter = new THREE.Mesh(
+      new THREE.CylinderGeometry(spec.r * 0.19, spec.r * 0.19, spec.r * 0.3, SEG.small), materials.joint);
     filter.position.set(sx * spec.r * 0.62, -spec.r * 0.2, spec.r * 0.3);
     filter.rotation.z = Math.PI / 2;
     head.add(filter);
@@ -566,7 +682,8 @@ function buildHead(parent, materials, spec) {
   ventStack(head, materials.joint, {
     pos: [0, spec.r * 0.86, 0], count: 3, size: [spec.r * 1.0, spec.r * 0.07, spec.r * 0.16], spacing: spec.r * 0.24,
   });
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(spec.r * 0.035, spec.r * 0.05, spec.r * 1.1, 5), materials.joint);
+  const antenna = new THREE.Mesh(
+    new THREE.CylinderGeometry(spec.r * 0.035, spec.r * 0.05, spec.r * 1.1, SEG.tiny), materials.joint);
   antenna.position.set(-spec.r * 0.6, spec.r * 0.75, -spec.r * 0.25);
   antenna.rotation.z = 0.24;
   head.add(antenna);
@@ -575,17 +692,18 @@ function buildHead(parent, materials, spec) {
   // This was written as `head.add(mesh).position.set(...)`. Object3D.add returns
   // the PARENT, so that line moved the entire head down to the antenna tip's
   // coordinates — inside the torso — and the character rendered headless.
-  const antennaTip = new THREE.Mesh(new THREE.SphereGeometry(spec.r * 0.06, 6, 5), materials.glow);
+  const antennaTip = new THREE.Mesh(new THREE.SphereGeometry(spec.r * 0.06, SEG.tiny, SEG.tiny), materials.glow);
   antennaTip.position.set(-spec.r * 0.73, spec.r * 1.28, -spec.r * 0.25);
   head.add(antennaTip);
 
   // Brow ridge above the visor.
-  const brow = new THREE.Mesh(new THREE.BoxGeometry(spec.r * 1.5, spec.r * 0.16, spec.r * 0.4), materials.trim);
+  const brow = roundedBox(spec.r * 1.5, spec.r * 0.16, spec.r * 0.4, materials.trim, spec.r * 0.06);
   brow.position.set(0, spec.r * 0.34, spec.r * 0.5);
   head.add(brow);
 
   // Visor is a torus arc, so it wraps the face instead of sitting on it flat.
-  const visor = new THREE.Mesh(new THREE.TorusGeometry(spec.r * 0.72, spec.r * 0.2, 6, 14, Math.PI * 0.95), materials.visor);
+  const visor = new THREE.Mesh(
+    new THREE.TorusGeometry(spec.r * 0.72, spec.r * 0.2, 12, SEG.ring, Math.PI * 0.95), materials.visor);
   visor.rotation.set(Math.PI / 2, 0, Math.PI * 0.52);
   visor.position.set(0, spec.r * 0.05, spec.r * 0.2);
   head.add(visor);
@@ -635,7 +753,8 @@ export function buildPlayerModel(char) {
   const pelvis = new THREE.Group();
   pelvis.position.y = P.hipY;
   g.add(pelvis);
-  const hipPlate = new THREE.Mesh(new THREE.CylinderGeometry(P.w * 0.42, P.w * 0.36, 0.24, 8), m.trim);
+  const hipPlate = new THREE.Mesh(
+    new THREE.CylinderGeometry(P.w * 0.42, P.w * 0.36, 0.24, SEG.torso), m.trim);
   hipPlate.scale.z = 0.8;
   hipPlate.castShadow = true;
   pelvis.add(hipPlate);
@@ -692,7 +811,7 @@ export function buildPlayerModel(char) {
   if (build !== 'chain') {
     for (const [side, arm] of [[-1, armL], [1, armR]]) {
       const pauldron = new THREE.Mesh(
-        new THREE.SphereGeometry(P.armR[0] * 1.32, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55),
+        new THREE.SphereGeometry(P.armR[0] * 1.32, SEG.pauldron, SEG.joint * 0.7, 0, Math.PI * 2, 0, Math.PI * 0.55),
         m.trim,
       );
       pauldron.position.set(side * P.shoulder * 1.04, P.torso * 0.8, 0);
@@ -724,7 +843,7 @@ export function buildPlayerModel(char) {
       // --- shoulders: the biggest slabs on the model ---
       for (const sx of [-1, 1]) {
         const cap = new THREE.Mesh(
-          new THREE.SphereGeometry(P.armR[0] * 1.9, 10, 7, 0, Math.PI * 2, 0, Math.PI * 0.52), panel);
+          new THREE.SphereGeometry(P.armR[0] * 1.9, SEG.pauldron, SEG.pauldron * 0.7, 0, Math.PI * 2, 0, Math.PI * 0.52), panel);
         cap.scale.set(1.05, 0.9, 1.05);
         cap.position.set(sx * P.shoulder * 1.04, P.torso * 0.79, 0);
         cap.rotation.z = sx * 0.3;
@@ -732,7 +851,7 @@ export function buildPlayerModel(char) {
         torso.add(cap);
         // Lip around the bottom of the cap, so it reads as a plate with an
         // edge rather than a painted-on hemisphere.
-        const lip = new THREE.Mesh(new THREE.TorusGeometry(P.armR[0] * 1.86, 0.026, 4, 14), m.joint);
+        const lip = new THREE.Mesh(new THREE.TorusGeometry(P.armR[0] * 1.86, 0.026, 10, SEG.ring), m.joint);
         lip.rotation.x = Math.PI / 2;
         lip.position.set(sx * P.shoulder * 1.04, P.torso * 0.73, 0);
         torso.add(lip);
@@ -743,11 +862,10 @@ export function buildPlayerModel(char) {
       }
 
       // --- chest and belly plates ---
-      const bib = new THREE.Mesh(new THREE.BoxGeometry(P.w * 0.62, P.torso * 0.34, 0.09), panel);
+      const bib = roundedBox(P.w * 0.62, P.torso * 0.34, 0.09, panel, 0.035);
       bib.position.set(0, P.torso * 0.72, P.d * 0.58);
-      bib.castShadow = true;
       torso.add(bib);
-      const bibLip = new THREE.Mesh(new THREE.BoxGeometry(P.w * 0.66, 0.045, 0.11), m.joint);
+      const bibLip = roundedBox(P.w * 0.66, 0.045, 0.11, m.joint, 0.018);
       bibLip.position.set(0, P.torso * 0.55, P.d * 0.58);
       torso.add(bibLip);
       // Hazard chevrons across the belly: the one piece of livery on the model.
@@ -760,7 +878,7 @@ export function buildPlayerModel(char) {
 
       // Exo-frame ribs across the chest, in bare metal under the plate.
       for (let i = 0; i < 3; i++) {
-        const rib = new THREE.Mesh(new THREE.TorusGeometry(P.w * 0.46, 0.03, 4, 10, Math.PI), m.joint);
+        const rib = new THREE.Mesh(new THREE.TorusGeometry(P.w * 0.46, 0.03, 10, SEG.ring, Math.PI), m.joint);
         rib.rotation.set(Math.PI / 2, 0, 0);
         rib.position.y = P.torso * (0.36 + i * 0.15);
         torso.add(rib);
@@ -769,18 +887,18 @@ export function buildPlayerModel(char) {
       // --- legs: knee caps and shin plates ---
       for (const leg of [legL, legR]) {
         const knee = new THREE.Mesh(
-          new THREE.SphereGeometry(P.legR[1] * 1.5, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), panel);
+          new THREE.SphereGeometry(P.legR[1] * 1.5, SEG.small, SEG.small * 0.7, 0, Math.PI * 2, 0, Math.PI * 0.55), panel);
         knee.rotation.x = 1.4;
         knee.position.set(0, 0.01, P.legR[1] * 0.5);
         knee.castShadow = true;
         leg.userData.lower.add(knee);
-        const shin = new THREE.Mesh(new THREE.BoxGeometry(P.legR[2] * 2.1, 0.3, 0.07), panel);
+        const shin = roundedBox(P.legR[2] * 2.1, 0.3, 0.07, panel, 0.028);
         shin.position.set(0, -0.2, P.legR[2] * 1.5);
         leg.userData.lower.add(shin);
       }
 
       // --- the fist: the arm the character is named for ---
-      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 2.0, P.armR[2] * 2.5, 0.28, 8), panel);
+      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 2.0, P.armR[2] * 2.5, 0.28, SEG.medium), panel);
       sleeve.position.y = -0.2;
       sleeve.castShadow = true;
       armR.userData.lower.add(sleeve);
@@ -792,13 +910,13 @@ export function buildPlayerModel(char) {
       armR.userData.lower.add(fist);
 
       for (let k = 0; k < 3; k++) {
-        const knuckle = new THREE.Mesh(new THREE.SphereGeometry(P.armR[2] * 0.78, 6, 5), m.glow);
+        const knuckle = new THREE.Mesh(new THREE.SphereGeometry(P.armR[2] * 0.78, SEG.small, SEG.small * 0.7), m.glow);
         knuckle.position.set((k - 1) * P.armR[2] * 1.3, -0.52, P.armR[2] * 2.2);
         armR.userData.lower.add(knuckle);
       }
       // Two hydraulic rams down the back of the forearm, feeding the fist.
       for (const sx of [-1, 1]) {
-        const ram = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 0.42, P.armR[2] * 0.42, 0.32, 6), m.glow);
+        const ram = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 0.42, P.armR[2] * 0.42, 0.32, SEG.small), m.glow);
         ram.position.set(sx * P.armR[2] * 0.9, -0.24, -P.armR[2] * 1.8);
         armR.userData.lower.add(ram);
       }
@@ -810,16 +928,15 @@ export function buildPlayerModel(char) {
        * hook swinging at the bottom, because a hook stowed flush against the
        * launcher is a detail nobody sees and a hook on a metre of chain is a
        * silhouette you recognise across the arena. */
-      const launcher = new THREE.Mesh(new THREE.BoxGeometry(P.armR[2] * 2.7, P.armR[2] * 2.4, 0.46), m.trim);
+      const launcher = roundedBox(P.armR[2] * 2.7, P.armR[2] * 2.4, 0.46, m.trim, 0.035);
       launcher.position.set(0, -0.28, 0.14);
-      launcher.castShadow = true;
       armL.userData.lower.add(launcher);
-      const drum = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 1.15, P.armR[2] * 1.15, P.armR[2] * 2.4, 10), panel);
+      const drum = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 1.15, P.armR[2] * 1.15, P.armR[2] * 2.4, SEG.medium), panel);
       drum.rotation.z = Math.PI / 2;
       drum.position.set(0, -0.28, -0.06);
       drum.castShadow = true;
       armL.userData.lower.add(drum);
-      const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 0.8, P.armR[2] * 0.95, 0.2, 8), m.joint);
+      const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 0.8, P.armR[2] * 0.95, 0.2, SEG.medium), m.joint);
       muzzle.rotation.x = Math.PI / 2;
       muzzle.position.set(0, -0.28, 0.42);
       armL.userData.lower.add(muzzle);
@@ -828,23 +945,23 @@ export function buildPlayerModel(char) {
       chain.position.set(0, -0.34, 0.44);
       armL.userData.lower.add(chain);
       for (let i = 0; i < 7; i++) {
-        const link = new THREE.Mesh(new THREE.TorusGeometry(0.042, 0.014, 4, 8), m.joint);
+        const link = new THREE.Mesh(new THREE.TorusGeometry(0.042, 0.014, 10, SEG.ring), m.joint);
         // Alternating link planes, which is what makes a run of toruses read
         // as chain rather than as a stack of washers.
         link.rotation.y = (i % 2) * Math.PI / 2;
         link.position.set(0, -i * 0.068, Math.sin(i * 0.5) * 0.02);
         chain.add(link);
       }
-      const hookShank = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, 6), panel);
+      const hookShank = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, SEG.small), panel);
       hookShank.position.y = -0.53;
       chain.add(hookShank);
       const hookCurve = new THREE.Mesh(
-        new THREE.TorusGeometry(0.075, 0.024, 5, 10, Math.PI * 1.35), panel);
+        new THREE.TorusGeometry(0.075, 0.024, 10, SEG.ring, Math.PI * 1.35), panel);
       hookCurve.rotation.set(0, Math.PI / 2, 0.5);
       hookCurve.position.y = -0.64;
       hookCurve.castShadow = true;
       chain.add(hookCurve);
-      const hookTip = new THREE.Mesh(new THREE.ConeGeometry(0.026, 0.09, 5), m.glow);
+      const hookTip = new THREE.Mesh(new THREE.ConeGeometry(0.026, 0.09, SEG.small), m.glow);
       hookTip.position.set(0, -0.6, 0.075);
       hookTip.rotation.x = -0.9;
       chain.add(hookTip);
@@ -862,7 +979,7 @@ export function buildPlayerModel(char) {
 
       // --- the hood: a deep cowl that swallows the head ---
       const cowl = new THREE.Mesh(
-        new THREE.SphereGeometry(P.headR * 1.62, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.62), shroud);
+        new THREE.SphereGeometry(P.headR * 1.62, SEG.pauldron, SEG.pauldron * 0.7, 0, Math.PI * 2, 0, Math.PI * 0.62), shroud);
       cowl.scale.set(1.06, 1.18, 1.12);
       cowl.position.y = P.headR * 0.26;
       cowl.rotation.x = -0.2;
@@ -870,17 +987,17 @@ export function buildPlayerModel(char) {
       head.add(cowl);
       // Peak at the front of the hood, which is what makes it read as drawn up
       // rather than as a bowl resting on top.
-      const peak = new THREE.Mesh(new THREE.ConeGeometry(P.headR * 0.9, P.headR * 1.5, 7), shroud);
+      const peak = new THREE.Mesh(new THREE.ConeGeometry(P.headR * 0.9, P.headR * 1.5, SEG.medium), shroud);
       peak.position.set(0, P.headR * 0.9, -P.headR * 0.45);
       peak.rotation.x = -0.5;
       head.add(peak);
       // The single eye under it. Everything else on the head is unlit.
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(P.headR * 0.26, 8, 7), m.visor);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(P.headR * 0.26, SEG.small, SEG.small * 0.7), m.visor);
       eye.scale.set(1.5, 0.7, 0.6);
       eye.position.set(0, 0, P.headR * 0.86);
       head.add(eye);
       const eyeGlow = new THREE.Mesh(
-        new THREE.SphereGeometry(P.headR * 0.5, 8, 7),
+        new THREE.SphereGeometry(P.headR * 0.5, SEG.small, SEG.small * 0.7),
         new THREE.MeshBasicMaterial({
           color: char.visor, transparent: true, opacity: 0.28,
           blending: THREE.AdditiveBlending, depthWrite: false,
@@ -893,7 +1010,7 @@ export function buildPlayerModel(char) {
       for (let i = 0; i < 7; i++) {
         const t = (i / 6) - 0.5;                       // −0.5 … +0.5 across the back
         const len = 0.95 - Math.abs(t) * 0.42;         // longest down the middle
-        const strip = new THREE.Mesh(new THREE.BoxGeometry(0.13, len, 0.02), shroud);
+        const strip = roundedBox(0.13, len, 0.02, shroud, 0.008);
         strip.position.set(t * P.w * 1.25, P.torso * 0.5 - len * 0.42, -P.d * (0.62 + Math.abs(t) * 0.18));
         strip.rotation.set(0.16 + Math.abs(t) * 0.1, t * 0.5, t * 0.22);
         strip.castShadow = true;
@@ -901,14 +1018,14 @@ export function buildPlayerModel(char) {
       }
       // Shoulder shrouds over the top of them.
       for (const sx of [-1, 1]) {
-        const drape = new THREE.Mesh(new THREE.ConeGeometry(P.armR[0] * 2.3, 0.42, 7, 1, true), shroud);
+        const drape = new THREE.Mesh(new THREE.ConeGeometry(P.armR[0] * 2.3, 0.42, SEG.medium, 1, true), shroud);
         drape.position.set(sx * P.shoulder * 1.02, P.torso * 0.72, -P.d * 0.1);
         drape.rotation.z = sx * 0.3;
         drape.castShadow = true;
         torso.add(drape);
       }
       // A high collar behind the hood, standing up.
-      const collar = new THREE.Mesh(new THREE.CylinderGeometry(P.w * 0.4, P.w * 0.3, 0.3, 8, 1, true), shroud);
+      const collar = new THREE.Mesh(new THREE.CylinderGeometry(P.w * 0.4, P.w * 0.3, 0.3, SEG.medium, 1, true), shroud);
       collar.position.set(0, P.torso * 1.02, -P.d * 0.2);
       collar.rotation.x = -0.24;
       torso.add(collar);
@@ -938,7 +1055,7 @@ export function buildPlayerModel(char) {
       orb.add(orbCore);
       for (const [r, o] of [[0.15, 0.3], [0.24, 0.11]]) {
         const halo = new THREE.Mesh(
-          new THREE.SphereGeometry(r, 10, 8),
+          new THREE.SphereGeometry(r, SEG.pauldron, SEG.pauldron * 0.7),
           new THREE.MeshBasicMaterial({
             color: char.accent, transparent: true, opacity: o,
             blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
@@ -949,7 +1066,7 @@ export function buildPlayerModel(char) {
       // Three shards circling it, because a sphere on its own reads as a ball.
       for (let i = 0; i < 3; i++) {
         const a = (i / 3) * Math.PI * 2;
-        const shard = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.14, 4), m.accent);
+        const shard = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.14, SEG.small), m.accent);
         shard.position.set(Math.cos(a) * 0.16, Math.sin(a) * 0.05, Math.sin(a) * 0.16);
         shard.rotation.set(1.2, a, 0.4);
         orb.add(shard);
@@ -968,9 +1085,7 @@ export function buildPlayerModel(char) {
       const SW = 0.72;                  // slab width
       const SH = 1.18;                  // slab height, before the cap
 
-      const face = new THREE.Mesh(new THREE.BoxGeometry(SW, SH, 0.1), m.trim);
-      face.castShadow = true;
-      face.receiveShadow = true;
+      const face = roundedBox(SW, SH, 0.1, m.trim, 0.04);
       shield.add(face);
       /* Rounded top: a whole cylinder laid across the head of the slab with its
          lower half buried inside it. A half-cylinder would be the tidier answer
@@ -985,16 +1100,16 @@ export function buildPlayerModel(char) {
 
       // Banded iron edging all the way round, in the trim's darker metal.
       for (const sx of [-1, 1]) {
-        const edge = new THREE.Mesh(new THREE.BoxGeometry(0.055, SH, 0.13), m.joint);
+        const edge = roundedBox(0.055, SH, 0.13, m.joint, 0.022);
         edge.position.set(sx * (SW / 2 - 0.02), 0, 0);
         shield.add(edge);
       }
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(SW + 0.03, 0.07, 0.14), m.accent);
+      const foot = roundedBox(SW + 0.03, 0.07, 0.14, m.accent, 0.028);
       foot.position.y = -SH / 2;
       shield.add(foot);
       // Two horizontal straps across the face, riveted.
       for (const y of [-0.3, 0.26]) {
-        const strap = new THREE.Mesh(new THREE.BoxGeometry(SW, 0.07, 0.12), m.joint);
+        const strap = roundedBox(SW, 0.07, 0.12, m.joint, 0.026);
         strap.position.set(0, y, 0.01);
         shield.add(strap);
         boltRow(shield, m.accent, {
@@ -1016,7 +1131,7 @@ export function buildPlayerModel(char) {
         emblem.add(ray);
       }
       for (let i = 0; i < 4; i++) {
-        const barb = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.12, 4), m.accent);
+        const barb = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.12, SEG.small), m.accent);
         const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
         barb.position.set(Math.cos(a) * 0.2, Math.sin(a) * 0.2, 0);
         barb.rotation.z = a - Math.PI / 2;
@@ -1033,36 +1148,34 @@ export function buildPlayerModel(char) {
       armL.userData.lower.add(shield);
 
       // --- the body behind it ---
-      const backplate = new THREE.Mesh(new THREE.CylinderGeometry(P.w * 0.52, P.w * 0.46, P.torso * 0.74, 6), m.trim);
+      const backplate = new THREE.Mesh(new THREE.CylinderGeometry(P.w * 0.52, P.w * 0.46, P.torso * 0.74, SEG.small), m.trim);
       backplate.scale.z = 0.4;
       backplate.position.set(0, P.torso * 0.6, -P.d * 0.78);
       backplate.castShadow = true;
       torso.add(backplate);
 
       // Gorget under the helmet, and a heavy brow over the lamps.
-      const gorget = new THREE.Mesh(new THREE.CylinderGeometry(P.w * 0.36, P.w * 0.44, 0.16, 8), m.joint);
+      const gorget = new THREE.Mesh(new THREE.CylinderGeometry(P.w * 0.36, P.w * 0.44, 0.16, SEG.medium), m.joint);
       gorget.position.y = P.torso * 1.02;
       torso.add(gorget);
-      const brow = new THREE.Mesh(new THREE.BoxGeometry(P.headR * 1.9, P.headR * 0.3, P.headR * 0.5), m.trim);
+      const brow = roundedBox(P.headR * 1.9, P.headR * 0.3, P.headR * 0.5, m.trim, P.headR * 0.1);
       brow.position.set(0, P.headR * 0.42, P.headR * 0.62);
-      brow.castShadow = true;
       head.add(brow);
 
       /* Tabard: three orange panels hanging off the belt, front and both hips.
          The one soft edge on an otherwise entirely rigid character, and the
          reason the waist does not read as a barrel. */
       for (const [sx, w, len, rot] of [[0, 0.3, 0.62, 0], [-1, 0.2, 0.46, -0.25], [1, 0.2, 0.46, 0.25]]) {
-        const panel = new THREE.Mesh(new THREE.BoxGeometry(w, len, 0.035), m.accent);
+        const panel = roundedBox(w, len, 0.035, m.accent, 0.014);
         panel.position.set(sx * P.w * 0.4, P.torso * 0.02 - len * 0.5, P.d * (sx === 0 ? 0.56 : 0.3));
         panel.rotation.z = rot;
-        panel.castShadow = true;
         torso.add(panel);
       }
 
       // Pauldron spikes: three studs across the top of each shoulder.
       for (const sx of [-1, 1]) {
         for (let i = 0; i < 3; i++) {
-          const stud = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.11, 5), m.joint);
+          const stud = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.11, SEG.small), m.joint);
           stud.position.set(sx * P.shoulder * 1.04 + (i - 1) * 0.11, P.torso * 0.96, -0.02);
           torso.add(stud);
         }
@@ -1071,12 +1184,12 @@ export function buildPlayerModel(char) {
       // Knee cops, so the legs read as armour rather than as posts.
       for (const leg of [legL, legR]) {
         const cop = new THREE.Mesh(
-          new THREE.SphereGeometry(P.legR[1] * 1.5, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), m.trim);
+          new THREE.SphereGeometry(P.legR[1] * 1.5, SEG.small, SEG.small * 0.7, 0, Math.PI * 2, 0, Math.PI * 0.55), m.trim);
         cop.rotation.x = 1.4;
         cop.position.set(0, 0.01, P.legR[1] * 0.55);
         cop.castShadow = true;
         leg.userData.lower.add(cop);
-        const spur = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.1, 5), m.accent);
+        const spur = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.1, SEG.small), m.accent);
         spur.position.set(0, 0.02, P.legR[1] * 1.5);
         spur.rotation.x = 1.5;
         leg.userData.lower.add(spur);
@@ -1107,7 +1220,7 @@ export function buildPlayerModel(char) {
         for (let i = 0; i < 4; i++) {
           const t = i / 3;                               // 0 innermost … 1 outermost
           const len = 1.32 - t * 0.3;
-          const vane = new THREE.Mesh(new THREE.ConeGeometry(0.058 - t * 0.011, len, 4), blade);
+          const vane = new THREE.Mesh(new THREE.ConeGeometry(0.058 - t * 0.011, len, SEG.small), blade);
           /* Cones point +Y, so each blade is laid onto its own spoke: mostly
              *out* to the side with a little lift and a little sweep back. The
              first pass had them nearly vertical, which fanned them behind the
@@ -1121,7 +1234,7 @@ export function buildPlayerModel(char) {
           vane.castShadow = true;
           wingRoot.add(vane);
           // Housing at the root of each blade, in white.
-          const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.062, 0.13, 7), m.trim);
+          const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.062, 0.13, SEG.medium), m.trim);
           housing.position.copy(vane.position);
           housing.rotation.copy(vane.rotation);
           housing.translateY(-len * 0.46);
@@ -1129,9 +1242,8 @@ export function buildPlayerModel(char) {
         }
       }
       // Spine box the wing bolts to.
-      const spine = new THREE.Mesh(new THREE.BoxGeometry(P.w * 0.5, P.torso * 0.52, 0.16), m.trim);
+      const spine = roundedBox(P.w * 0.5, P.torso * 0.52, 0.16, m.trim, 0.05);
       spine.position.set(0, P.torso * 0.66, -P.d * 0.7);
-      spine.castShadow = true;
       torso.add(spine);
       const spineLight = new THREE.Mesh(new THREE.BoxGeometry(0.04, P.torso * 0.4, 0.04), m.glow);
       spineLight.position.set(0, P.torso * 0.66, -P.d * 0.79);
@@ -1139,29 +1251,29 @@ export function buildPlayerModel(char) {
 
       // --- thrusters: two under the pack, one behind each calf ---
       for (const sx of [-1, 1]) {
-        const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.11, 0.24, 9, 1, true), m.trim);
+        const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.11, 0.24, SEG.medium, 1, true), m.trim);
         nozzle.position.set(sx * P.w * 0.32, P.torso * 0.3, -P.d * 0.72);
         nozzle.rotation.x = -0.26;
         nozzle.castShadow = true;
         torso.add(nozzle);
-        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.26, 8), m.glow);
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.26, SEG.medium), m.glow);
         flame.position.set(sx * P.w * 0.32, P.torso * 0.14, -P.d * 0.68);
         flame.rotation.x = Math.PI;
         torso.add(flame);
       }
       for (const leg of [legL, legR]) {
-        const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.062, 0.18, 8), m.trim);
+        const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.062, 0.18, SEG.medium), m.trim);
         pod.position.set(0, -0.16, -P.legR[2] * 2.0);
         pod.rotation.x = 0.2;
         leg.userData.lower.add(pod);
-        const jet = new THREE.Mesh(new THREE.ConeGeometry(0.042, 0.2, 7), m.glow);
+        const jet = new THREE.Mesh(new THREE.ConeGeometry(0.042, 0.2, SEG.medium), m.glow);
         jet.position.set(0, -0.3, -P.legR[2] * 2.1);
         jet.rotation.x = Math.PI - 0.2;
         leg.userData.lower.add(jet);
       }
 
       // --- ordnance: a cluster of three charges on the hip, and the rack ---
-      const rack = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.2), m.trim);
+      const rack = roundedBox(0.2, 0.1, 0.2, m.trim, 0.03);
       rack.position.set(P.w * 0.46, P.torso * 0.06, P.d * 0.24);
       torso.add(rack);
       for (let i = 0; i < 3; i++) {
@@ -1169,13 +1281,13 @@ export function buildPlayerModel(char) {
         bomb.position.set(P.w * 0.46 + (i - 1) * 0.062, P.torso * 0.06 - 0.09, P.d * 0.24);
         bomb.castShadow = true;
         torso.add(bomb);
-        const fuse = new THREE.Mesh(new THREE.SphereGeometry(0.022, 6, 5), m.glow);
+        const fuse = new THREE.Mesh(new THREE.SphereGeometry(0.022, SEG.small, SEG.small * 0.7), m.glow);
         fuse.position.set(P.w * 0.46 + (i - 1) * 0.062, P.torso * 0.06 - 0.14, P.d * 0.26);
         torso.add(fuse);
       }
 
       // --- white plating over the light frame ---
-      const breast = new THREE.Mesh(new THREE.SphereGeometry(P.w * 0.44, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), m.trim);
+      const breast = new THREE.Mesh(new THREE.SphereGeometry(P.w * 0.44, SEG.pauldron, SEG.pauldron * 0.7, 0, Math.PI * 2, 0, Math.PI * 0.5), m.trim);
       breast.scale.set(1, 0.8, 0.7);
       breast.position.set(0, P.torso * 0.62, P.d * 0.2);
       breast.castShadow = true;
@@ -1187,7 +1299,7 @@ export function buildPlayerModel(char) {
       }
       // Ankle fins — the last thing off the ground, and the concept has them lit.
       for (const leg of [legL, legR]) {
-        const fin = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.24, 4), blade);
+        const fin = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.24, SEG.small), blade);
         fin.position.set(leg.userData.outZ * P.legR[2] * 1.3, -0.36, -0.02);
         fin.rotation.set(-0.3, 0, leg.userData.outZ * 0.5);
         leg.userData.lower.add(fin);
@@ -1212,7 +1324,7 @@ export function buildPlayerModel(char) {
       const auraColor = new THREE.Color(char.accent);
       for (const [radius, opacity] of [[0.92, 0.15], [1.22, 0.055]]) {
         const shell = new THREE.Mesh(
-          new THREE.SphereGeometry(radius, 14, 12),
+          new THREE.SphereGeometry(radius, SEG.pauldron, SEG.pauldron * 0.7),
           new THREE.MeshBasicMaterial({
             color: auraColor, transparent: true, opacity,
             blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
@@ -1225,7 +1337,7 @@ export function buildPlayerModel(char) {
       // A hard ring around the chest: the aura wants an edge somewhere or it
       // is just a smudge the character is standing inside.
       const halo = new THREE.Mesh(
-        new THREE.TorusGeometry(P.w * 0.92, 0.022, 4, 20),
+        new THREE.TorusGeometry(P.w * 0.92, 0.022, 10, SEG.ring),
         new THREE.MeshBasicMaterial({
           color: auraColor, transparent: true, opacity: 0.5,
           blending: THREE.AdditiveBlending, depthWrite: false,
@@ -1242,7 +1354,7 @@ export function buildPlayerModel(char) {
       });
       // The wrap itself: a thick collar sitting on the shoulders, tipped
       // forward so it bunches under the chin rather than ringing the neck.
-      const wrap = new THREE.Mesh(new THREE.TorusGeometry(P.w * 0.31, 0.055, 6, 16), scarfMat);
+      const wrap = new THREE.Mesh(new THREE.TorusGeometry(P.w * 0.31, 0.055, 10, SEG.ring), scarfMat);
       wrap.rotation.set(Math.PI / 2 + 0.12, 0, 0);
       wrap.position.set(0, P.torso * 1.0, 0.01);
       wrap.scale.z = 0.88;
@@ -1252,7 +1364,7 @@ export function buildPlayerModel(char) {
       const knot = new THREE.Mesh(new THREE.IcosahedronGeometry(0.055, 0), scarfMat);
       knot.position.set(P.w * 0.13, P.torso * 0.96, P.d * 0.4);
       torso.add(knot);
-      const bib = new THREE.Mesh(new THREE.ConeGeometry(P.w * 0.17, 0.22, 5, 1, true), scarfMat);
+      const bib = new THREE.Mesh(new THREE.ConeGeometry(P.w * 0.17, 0.22, SEG.small, 1, true), scarfMat);
       bib.position.set(P.w * 0.1, P.torso * 0.84, P.d * 0.34);
       bib.rotation.set(-0.2, 0, 0.2);
       torso.add(bib);
@@ -1264,8 +1376,7 @@ export function buildPlayerModel(char) {
       for (const sx of [-1, 1]) {
         for (let k = 0; k < 3; k++) {
           const t = k / 2;
-          const tail = new THREE.Mesh(
-            new THREE.BoxGeometry(0.085 - t * 0.022, 0.32 - t * 0.05, 0.02), scarfMat);
+          const tail = roundedBox(0.085 - t * 0.022, 0.32 - t * 0.05, 0.02, scarfMat, 0.008);
           tail.position.set(
             sx * (P.w * 0.11 + t * 0.045),
             P.torso * 0.9 - t * 0.34,
@@ -1283,7 +1394,7 @@ export function buildPlayerModel(char) {
       for (const sx of [-1, 1]) {
         // Swept back along the body, not out from it — a fin that points
         // sideways is an antler, and the concept's shoulders are wedges.
-        const fin = new THREE.Mesh(new THREE.ConeGeometry(0.042, 0.3, 4), m.glow);
+        const fin = new THREE.Mesh(new THREE.ConeGeometry(0.042, 0.3, SEG.small), m.glow);
         fin.position.set(sx * P.shoulder * 1.02, P.torso * 0.88, -0.16);
         fin.rotation.set(-1.42, 0, sx * 0.18);
         fin.castShadow = true;
@@ -1311,7 +1422,7 @@ export function buildPlayerModel(char) {
         const greave = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.32, 0.028), m.glow);
         greave.position.set(0, -0.2, P.legR[2] * 1.5);
         leg.userData.lower.add(greave);
-        const heel = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.24, 4), m.accent);
+        const heel = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.24, SEG.small), m.accent);
         heel.position.set(0, -0.3, -P.legR[2] * 1.9);
         heel.rotation.x = -0.5;
         leg.userData.lower.add(heel);
@@ -1354,46 +1465,70 @@ export function buildPlayerModel(char) {
 
       /* --- the straw hat: a wide conical brim, a crown, a band, a flower --- */
       const hat = new THREE.Group();
-      const brim = new THREE.Mesh(new THREE.ConeGeometry(P.headR * 3.1, 0.16, 16, 1, true), straw);
-      brim.position.y = P.headR * 0.42;
-      brim.castShadow = true;
-      hat.add(brim);
-      // A second, shallower cone closes the top of the brim so it is not a
-      // hollow funnel when you look down on it.
-      const crown = new THREE.Mesh(new THREE.ConeGeometry(P.headR * 1.2, P.headR * 1.6, 16), straw);
-      crown.position.y = P.headR * 1.08;
-      crown.castShadow = true;
-      hat.add(crown);
-      const band = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 1.1, 0.028, 4, 16), strawDark);
+      /* Brim and crown are one surface, lathed.
+       *
+       * They were two cones, which is why the weave sticks used to poke out
+       * past the edge: the brim cone's radius at the height the sticks sat at
+       * was nothing like its radius at the base, so anything positioned by eye
+       * against the base overshot the silhouette. A lathe removes the guesswork
+       * — the profile *is* the hat, the widest point is where the profile says
+       * it is, and everything else is placed against `BRIM`. */
+      /* Wide enough to read as a farmer's hat, narrow enough to still be a hat.
+         Two headR was arrived at by rendering it: a cone's radius is quoted at
+         its *base* and it tapers away above that, so the old cone's silhouette
+         was far narrower than its number suggested — matching the number on a
+         lathe produced a garden parasol. */
+      const BRIM = P.headR * 2.0;
+      const profile = [
+        [0.0, P.headR * 2.5],               // tip of the crown
+        [P.headR * 0.34, P.headR * 2.24],
+        [P.headR * 0.62, P.headR * 1.72],
+        [P.headR * 0.86, P.headR * 1.12],   // shoulder where the crown meets the brim
+        [P.headR * 0.98, P.headR * 0.7],
+        [BRIM * 0.66, P.headR * 0.38],
+        [BRIM, P.headR * 0.12],             // the brim edge, thin
+        [BRIM * 0.985, P.headR * 0.05],     // and its underside, so it has thickness
+        [BRIM * 0.6, P.headR * 0.1],
+        [P.headR * 0.88, P.headR * 0.26],
+      ].map(([r, y]) => new THREE.Vector2(Math.max(0.001, r), y));
+      const hatShell = new THREE.Mesh(new THREE.LatheGeometry(profile, SEG.headRing), straw);
+      hatShell.castShadow = true;
+      hat.add(hatShell);
+
+      const band = new THREE.Mesh(
+        new THREE.TorusGeometry(P.headR * 1.02, 0.03, 10, SEG.ring), strawDark);
       band.rotation.x = Math.PI / 2;
-      band.position.y = P.headR * 0.52;
+      band.position.y = P.headR * 0.86;
       hat.add(band);
-      // Weave lines radiating out across the brim.
-      for (let i = 0; i < 10; i++) {
-        const a = (i / 10) * Math.PI * 2;
-        const rib = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.012, P.headR * 1.9), strawDark);
-        rib.position.set(Math.cos(a) * P.headR * 1.5, P.headR * 0.44, Math.sin(a) * P.headR * 1.5);
-        rib.rotation.y = -a;
-        hat.add(rib);
+      /* Weave: concentric rings, which is what a woven brim actually looks like
+         from above and, unlike radial sticks, cannot escape the silhouette
+         because every one of them is a circle smaller than the brim. */
+      for (let i = 0; i < 3; i++) {
+        const t = 0.5 + i * 0.16;
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(BRIM * t, 0.008, 6, SEG.ring), strawDark);
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = P.headR * (0.4 - i * 0.09);
+        hat.add(ring);
       }
       // The flower, pinned to the brim on his right.
       const flower = new THREE.Group();
-      flower.position.set(P.headR * 1.85, P.headR * 0.5, P.headR * 1.05);
+      flower.position.set(BRIM * 0.62, P.headR * 0.36, BRIM * 0.44);
       hat.add(flower);
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2;
-        const petal = new THREE.Mesh(new THREE.SphereGeometry(0.042, 6, 5), red);
+        const petal = new THREE.Mesh(new THREE.SphereGeometry(0.042, SEG.small, SEG.small * 0.7), red);
         petal.scale.set(1, 0.42, 1.25);
         petal.position.set(Math.cos(a) * 0.045, 0.012, Math.sin(a) * 0.045);
         petal.rotation.y = -a;
         flower.add(petal);
       }
-      const pistil = new THREE.Mesh(new THREE.SphereGeometry(0.026, 6, 5), strawDark);
+      const pistil = new THREE.Mesh(new THREE.SphereGeometry(0.026, SEG.small, SEG.small * 0.7), strawDark);
       pistil.position.y = 0.028;
       flower.add(pistil);
       // Two ribbons off the pin, hanging under the brim.
       for (const sx of [-1, 1]) {
-        const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.2, 0.014), red);
+        const ribbon = roundedBox(0.02, 0.2, 0.014, red, 0.006);
         ribbon.position.set(sx * 0.03, -0.11, 0.01);
         ribbon.rotation.z = sx * 0.18;
         flower.add(ribbon);
@@ -1404,11 +1539,11 @@ export function buildPlayerModel(char) {
       hatNode = hat;
 
       // --- the face: a red scarf over the lower half, and nothing else ---
-      const scarf = new THREE.Mesh(new THREE.SphereGeometry(P.headR * 1.06, 10, 8, 0, Math.PI * 2, Math.PI * 0.42, Math.PI * 0.4), red);
+      const scarf = new THREE.Mesh(new THREE.SphereGeometry(P.headR * 1.06, SEG.pauldron, SEG.pauldron * 0.7, 0, Math.PI * 2, Math.PI * 0.42, Math.PI * 0.4), red);
       scarf.scale.set(1, 1.15, 1.02);
       scarf.castShadow = true;
       head.add(scarf);
-      const scarfKnot = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.16, 0.05), red);
+      const scarfKnot = roundedBox(0.07, 0.16, 0.05, red, 0.02);
       scarfKnot.position.set(-P.headR * 0.72, -P.headR * 0.42, -P.headR * 0.3);
       scarfKnot.rotation.z = 0.4;
       head.add(scarfKnot);
@@ -1420,7 +1555,7 @@ export function buildPlayerModel(char) {
       /* --- the robe, in two layers --- */
       // Under-robe: dark red, shoulders to shins, the longer of the two.
       const underRobe = new THREE.Mesh(
-        new THREE.ConeGeometry(P.w * 1.1, P.torso + P.hipY * 0.92, 10, 1, true), under);
+        new THREE.ConeGeometry(P.w * 1.1, P.torso + P.hipY * 0.92, SEG.medium, 1, true), under);
       underRobe.position.y = P.torso * 0.46 - P.hipY * 0.44;
       underRobe.castShadow = true;
       torso.add(underRobe);
@@ -1429,7 +1564,7 @@ export function buildPlayerModel(char) {
       // is what makes it read as a coat somebody is wearing open.
       for (const sx of [-1, 1]) {
         const half = new THREE.Mesh(
-          new THREE.ConeGeometry(P.w * 1.16, P.torso + P.hipY * 0.5, 8, 1, true, sx > 0 ? 0.35 : Math.PI + 0.35, Math.PI - 0.7),
+          new THREE.ConeGeometry(P.w * 1.16, P.torso + P.hipY * 0.5, SEG.medium, 1, true, sx > 0 ? 0.35 : Math.PI + 0.35, Math.PI - 0.7),
           linen,
         );
         half.position.set(0, P.torso * 0.5 - P.hipY * 0.22, 0);
@@ -1438,20 +1573,20 @@ export function buildPlayerModel(char) {
       }
       // The shoulder yoke, which is what stops the two halves reading as wings.
       const yoke = new THREE.Mesh(
-        new THREE.SphereGeometry(P.w * 0.62, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.42), linen);
+        new THREE.SphereGeometry(P.w * 0.62, SEG.pauldron, SEG.pauldron * 0.7, 0, Math.PI * 2, 0, Math.PI * 0.42), linen);
       yoke.scale.set(1, 0.66, 0.86);
       yoke.position.y = P.torso * 0.78;
       yoke.castShadow = true;
       torso.add(yoke);
       // Wide sleeves over the upper arms — cloth, not plate.
       for (const arm of [armL, armR]) {
-        const sleeve = new THREE.Mesh(new THREE.ConeGeometry(P.armR[0] * 2.3, 0.38, 8, 1, true), linen);
+        const sleeve = new THREE.Mesh(new THREE.ConeGeometry(P.armR[0] * 2.3, 0.38, SEG.medium, 1, true), linen);
         sleeve.position.y = -0.13;
         sleeve.castShadow = true;
         arm.add(sleeve);
         // Wrapped forearm underneath it.
         const wrapArm = new THREE.Mesh(
-          new THREE.CylinderGeometry(P.armR[2] * 1.25, P.armR[2] * 1.1, 0.26, 8), under);
+          new THREE.CylinderGeometry(P.armR[2] * 1.25, P.armR[2] * 1.1, 0.26, SEG.medium), under);
         wrapArm.position.y = -0.18;
         arm.userData.lower.add(wrapArm);
       }
@@ -1459,7 +1594,7 @@ export function buildPlayerModel(char) {
       /* --- the rope belt, and the chain hanging off it --- */
       // Braided: two offset toruses reading as a twist, rather than one ring.
       for (const [tilt, r] of [[0.05, 0.042], [-0.05, 0.038]]) {
-        const coil = new THREE.Mesh(new THREE.TorusGeometry(P.w * 0.58, r, 5, 16), rope);
+        const coil = new THREE.Mesh(new THREE.TorusGeometry(P.w * 0.58, r, 10, SEG.ring), rope);
         coil.rotation.set(Math.PI / 2, 0, tilt);
         coil.position.y = P.torso * 0.06;
         coil.scale.z = 0.8;
@@ -1470,7 +1605,7 @@ export function buildPlayerModel(char) {
       torso.add(beltKnot);
       // Two cord ends hanging from the knot.
       for (const sx of [-1, 1]) {
-        const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.013, 0.4, 6), rope);
+        const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.013, 0.4, SEG.small), rope);
         cord.position.set(-P.w * 0.16 + sx * 0.05, P.torso * 0.04 - 0.22, P.d * 0.52);
         cord.rotation.z = sx * 0.14;
         torso.add(cord);
@@ -1484,7 +1619,7 @@ export function buildPlayerModel(char) {
       chain.rotation.z = 0.16;
       torso.add(chain);
       for (let i = 0; i < 9; i++) {
-        const link = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.012, 4, 8), iron);
+        const link = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.012, 10, SEG.ring), iron);
         // Alternating link planes: what makes a stack of toruses read as chain.
         link.rotation.y = (i % 2) * Math.PI / 2;
         link.position.set(Math.sin(i * 0.55) * 0.03, -i * 0.058, 0);
@@ -1494,23 +1629,23 @@ export function buildPlayerModel(char) {
       const weight = new THREE.Group();
       weight.position.y = -0.55;
       chain.add(weight);
-      const wBrim = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.045, 10, 1, true), straw);
+      const wBrim = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.045, SEG.medium, 1, true), straw);
       weight.add(wBrim);
-      const wCrown = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.055, 10), straw);
+      const wCrown = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.055, SEG.medium), straw);
       wCrown.position.y = 0.038;
       weight.add(wCrown);
-      const wFlower = new THREE.Mesh(new THREE.SphereGeometry(0.024, 6, 5), red);
+      const wFlower = new THREE.Mesh(new THREE.SphereGeometry(0.024, SEG.small, SEG.small * 0.7), red);
       wFlower.scale.y = 0.5;
       wFlower.position.set(0.062, 0.014, 0.03);
       weight.add(wFlower);
 
       // Sandals: a sole and two straps, so the feet are not boots.
       for (const leg of [legL, legR]) {
-        const strapA = new THREE.Mesh(new THREE.BoxGeometry(P.legR[2] * 2.1, 0.024, 0.05), rope);
+        const strapA = roundedBox(P.legR[2] * 2.1, 0.024, 0.05, rope, 0.01);
         strapA.position.set(0, -0.4, P.legR[2] * 0.5);
         leg.userData.lower.add(strapA);
         const shinWrap = new THREE.Mesh(
-          new THREE.CylinderGeometry(P.legR[2] * 1.2, P.legR[2] * 1.35, 0.24, 8), under);
+          new THREE.CylinderGeometry(P.legR[2] * 1.2, P.legR[2] * 1.35, 0.24, SEG.medium), under);
         shinWrap.position.y = -0.26;
         leg.userData.lower.add(shinWrap);
       }
@@ -1519,11 +1654,12 @@ export function buildPlayerModel(char) {
     default: {
       // Vanguard: utility pouches and a shoulder lamp.
       for (const sx of [-1, 1]) {
-        const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.18, 0.12), m.trim);
+        const pouch = roundedBox(0.16, 0.18, 0.12, m.trim, 0.035);
         pouch.position.set(sx * P.w * 0.42, P.torso * 0.2, P.d * 0.3);
         torso.add(pouch);
       }
-      const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.14, 6), m.glow);
+      // Seen end-on, so the cap is the shape — a decagon read as a decagon.
+      const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.14, SEG.ring), m.glow);
       lamp.rotation.x = Math.PI / 2;
       lamp.position.set(-P.shoulder * 0.95, P.torso * 1.0, P.d * 0.3);
       torso.add(lamp);
@@ -1644,7 +1780,7 @@ export function buildWeaponModel(weapon) {
       gr.add(box(0.085 * scale, 0.015 * scale, 0.11 * scale, dark, 0, -0.08 * scale - i * 0.055 * scale, 0));
     }
     g.add(gr);
-    const guard = new THREE.Mesh(new THREE.TorusGeometry(0.062 * scale, 0.014 * scale, 4, 10, Math.PI), dark);
+    const guard = new THREE.Mesh(new THREE.TorusGeometry(0.062 * scale, 0.014 * scale, 8, SEG.medium, Math.PI), dark);
     guard.rotation.set(Math.PI / 2, 0, 0);
     guard.position.set(0, -0.075 * scale, z + 0.055 * scale);
     g.add(guard);
@@ -1689,7 +1825,7 @@ export function buildWeaponModel(weapon) {
     for (const sx of [-1, 1]) {
       g.add(box(0.01 * scale, 0.055 * scale, 0.03 * scale, dark, sx * 0.028 * scale, y + 0.03 * scale, frontZ));
     }
-    const rear = new THREE.Mesh(new THREE.TorusGeometry(0.022 * scale, 0.008 * scale, 4, 10), dark);
+    const rear = new THREE.Mesh(new THREE.TorusGeometry(0.022 * scale, 0.008 * scale, 8, SEG.medium), dark);
     rear.position.set(0, y + 0.03 * scale, rearZ);
     g.add(rear);
     g.add(box(0.05 * scale, 0.014 * scale, 0.03 * scale, dark, 0, y + 0.005 * scale, rearZ));
@@ -1712,7 +1848,7 @@ export function buildWeaponModel(weapon) {
   /** Sling loops fore and aft. */
   const addSling = (frontZ, rearZ, scale = 1) => {
     for (const [z, sx] of [[frontZ, -1], [rearZ, 1]]) {
-      const loop = new THREE.Mesh(new THREE.TorusGeometry(0.026 * scale, 0.008 * scale, 4, 8), steel);
+      const loop = new THREE.Mesh(new THREE.TorusGeometry(0.026 * scale, 0.008 * scale, 8, SEG.medium), steel);
       loop.rotation.y = Math.PI / 2;
       loop.position.set(sx * 0.045 * scale, -0.035 * scale, z);
       g.add(loop);
@@ -1788,7 +1924,7 @@ export function buildWeaponModel(weapon) {
       addShroud(0.62, 0.44, 0.05, 6);
       // Coil emitter stack.
       for (let i = 0; i < 4; i++) {
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.062 - i * 0.006, 0.016, 4, 12), accent);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.062 - i * 0.006, 0.016, 8, SEG.medium), accent);
         ring.rotation.y = Math.PI / 2;
         ring.rotation.x = Math.PI / 2;
         ring.position.set(0, 0, 0.78 + i * 0.07);
@@ -1844,7 +1980,7 @@ export function buildWeaponModel(weapon) {
       tube.rotation.x = Math.PI / 2;
       g.add(tube);
       for (const z of [0.0, 0.22, 0.44]) {
-        const band = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.02, 4, 14), dark);
+        const band = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.02, 8, SEG.medium), dark);
         band.rotation.y = Math.PI / 2;
         band.rotation.x = Math.PI / 2;
         band.position.z = z;
@@ -1853,7 +1989,7 @@ export function buildWeaponModel(weapon) {
       const flare = cyl(0.19, 0.14, 0.16, 12, steel, 0, 0, 0.68);
       flare.rotation.x = Math.PI / 2;
       g.add(flare);
-      const muzzleRing = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.022, 4, 16), accent);
+      const muzzleRing = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.022, 8, SEG.medium), accent);
       muzzleRing.position.z = 0.7;
       g.add(muzzleRing);
       g.children[g.children.length - 1].rotation.y = Math.PI / 2;
@@ -1893,7 +2029,7 @@ export function buildWeaponModel(weapon) {
         const prism = cyl(r, r + 0.012, 0.1, 6, i % 2 ? steel : body, 0, 0, 0.46 + i * 0.11);
         prism.rotation.x = Math.PI / 2;
         g.add(prism);
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(r + 0.014, 0.012, 4, 12), accent);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(r + 0.014, 0.012, 8, SEG.medium), accent);
         ring.rotation.y = Math.PI / 2;
         ring.rotation.x = Math.PI / 2;
         ring.position.z = 0.51 + i * 0.11;
@@ -1951,7 +2087,7 @@ export function buildWeaponModel(weapon) {
       sleeve.rotation.x = Math.PI / 2;
       g.add(sleeve);
       for (let i = 0; i < 3; i++) {
-        const band = new THREE.Mesh(new THREE.TorusGeometry(0.125, 0.014, 4, 12), steel);
+        const band = new THREE.Mesh(new THREE.TorusGeometry(0.125, 0.014, 8, SEG.medium), steel);
         band.position.z = -0.32 + i * 0.1;
         g.add(band);
       }
@@ -1968,7 +2104,7 @@ export function buildWeaponModel(weapon) {
       const port = cyl(0.085, 0.105, 0.09, 10, plateMat, 0, 0, 0.16);
       port.rotation.x = Math.PI / 2;
       g.add(port);
-      const iris = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.018, 4, 14), hot);
+      const iris = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.018, 8, SEG.medium), hot);
       iris.position.z = 0.2;
       g.add(iris);
 
@@ -2012,7 +2148,7 @@ export function buildWeaponModel(weapon) {
 
       // Tube optic on two rings, with a lit objective at the far end.
       for (const z of [0.16, 0.46]) {
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.014, 4, 12), steel);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.014, 8, SEG.medium), steel);
         ring.rotation.x = Math.PI / 2;
         ring.position.set(0, 0.19, z);
         g.add(ring);
@@ -2087,7 +2223,7 @@ export function buildWeaponModel(weapon) {
       handle.rotation.x = Math.PI / 2;
       g.add(handle);
       for (let i = 0; i < 6; i++) {
-        const wrap = new THREE.Mesh(new THREE.TorusGeometry(0.043, 0.009, 4, 10), dark);
+        const wrap = new THREE.Mesh(new THREE.TorusGeometry(0.043, 0.009, 8, SEG.medium), dark);
         wrap.rotation.y = Math.PI / 2;
         wrap.rotation.x = Math.PI / 2;
         wrap.position.z = -0.49 + i * 0.075;
@@ -2152,7 +2288,7 @@ export function buildWeaponModel(weapon) {
 
   g.add(muzzle);
   g.userData.muzzle = muzzle;
-  const glow = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), glowMat(weapon.color, 0.7));
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(0.055, SEG.small, SEG.small * 0.7), glowMat(weapon.color, 0.7));
   glow.position.copy(muzzle.position);
   g.add(glow);
   g.userData.glow = glow;
