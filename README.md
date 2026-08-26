@@ -238,7 +238,7 @@ The host's machine owns the world, so if they leave, the session ends for everyo
 
 ## Content
 
-**6 characters.** A character sets your stats and all three signature abilities; weapons stay
+**7 characters.** A character sets your stats and all three signature abilities; weapons stay
 independent, so the character decides how you move and commit while the weapon decides how
 you shoot.
 
@@ -250,6 +250,7 @@ you shoot.
 | Bulwark | 200 HP and 16 armour, walks slowly at the problem | Shield Charge | Bastion | Last Stand |
 | Halcyon | 84 HP, −10 armour, slightly softer damage — and it **flies** | **Thruster Flight** | **Bomb Cluster** | Ordnance Override |
 | Dasher | 76 HP, −8 armour, the fastest and hardest-hitting frame in the descent | **Lance Dash** | **Marking Spear** (×2) | Skewer |
+| Chain | 104 HP wanderer in a straw hat. Owns one thing and throws it | **Wanderer's Mark** (×2) | **Hat Toss** | Unbroken Chain |
 
 **Ultimates** are the one ability the game gives you for having been in a fight rather than
 for having waited. There is no cooldown: the meter beside the ability bar fills from kills
@@ -269,8 +270,10 @@ first. Landing early cuts the thrusters and refunds half the time you did not us
 Its ultimate hands you no new button. **Ordnance Override** takes the limiter off the two
 things Halcyon already owns and rations: for fifteen seconds flight stops burning fuel and
 landing no longer ends it, and the bomb rack unlocks — Bomb Cluster becomes a single bunker
-charge dropped straight down for 700% damage in 16m, on nothing but a half-second arming
-delay. Fifteen seconds of unlimited flight over an unlimited rack is a bigger ability than
+charge thrown at whatever you are looking at for 700% damage in 16m, on nothing but a
+half-second arming delay. It goes to the aim *point*, not along the aim direction — a
+bombardier hanging thirty metres up is looking down a steep line, and a charge with any real
+gravity on it would land well short of the thing being aimed at. Fifteen seconds of unlimited flight over an unlimited rack is a bigger ability than
 any one enormous explosion, because it is the character finally being what the silhouette
 has been promising.
 
@@ -299,6 +302,24 @@ caught marked for fourteen seconds and dragged bodily onto the shaft. A crowd ra
 single point is a crowd one dash goes through end to end, and it comes with three banked
 dashes that cost nothing at all — spent before the charge is, so they survive a full cooldown
 and can be taken back to back.
+
+It is the only character you cannot actually see. The plate is matte black, near enough to
+the background colour that nothing reflects off it, so the whole silhouette is carried by
+light instead: two nested additive shells around the body, a hard ring at the chest, and lit
+edges down the pauldrons, thighs and sash. At range you read the aura and work out the shape
+from it.
+
+**Chain** owns one object and throws it at everything. **Hat Toss** puts it through the first
+body it crosses and then *ricochets* — off that one into the next, and the next, taking five
+percent more with every bounce, until it runs out of people within eighteen metres and comes
+home. Thrown at nobody it simply comes back, so a miss costs the cooldown and nothing else.
+**Wanderer's Mark** throws the same hat at what you are looking at and leaves it lying in the
+grass; press again and you are standing where it is. Only the throw spends a charge — the
+walk back is already paid for — so two charges are two whole round trips rather than one.
+**Unbroken Chain** throws it and does not catch it: nine seconds of ricochet that re-crosses
+bodies it has already cut, with the five percent compounding the entire time. Measured on
+three enemies held together it managed twenty-seven bounces and finished hitting for close to
+four times what it opened at.
 
 **Unloader** is the combo character. The grapple anchors to terrain *or* enemies and reels
 you in at 40 u/s, and — critically — it hands that momentum back on release instead of
@@ -372,7 +393,7 @@ deliberately steps outside that, because what it trades is not damage:
 | Arc Emitter | Chains through 3 extra targets | Overload Sphere — drifting orb that zaps an area |
 | Rivet Driver | 13/s, pierces 2 | Harpoon — **winches** a target all the way in over 0.9s |
 | Seeker Launcher | Homing explosive arcs | Cluster Barrage — 9 mortars on your aim point |
-| Photon Lance | Beam that ramps to 3× on a held target | Prism Burst — discharge stored heat |
+| Photon Lance | Beam that ramps to 3× on a held target — but only 1.6× on a boss | Prism Burst — discharge stored heat |
 | Void Reaper | Flat horizontal slash that **throws the cut** as a crescent wave | Blink Slash — phase 14m along your line of sight, cutting the path |
 | Siege Gauntlets | Punches a 9m compression wave out of the knuckles | Jet Boost — ride the blast straight up |
 | Meridian Longrifle | Scoped bolt gun. Never rolls a crit — earns them off a visible seam | Sidearm Revolver — free to holster if it finishes the job |
@@ -389,6 +410,14 @@ The **Void Reaper**'s primary is a flat horizontal cut that then leaves the blad
 does 245% in an arc and the crescent travels 26m at 34 u/s doing another 130%, sweeping
 through everything it passes rather than raycasting down its centre line. It is drawn as the
 cut itself — a tapered crescent lying flat — not as a glowing ball.
+
+The **Photon Lance** ramps, and a boss is the one target that lets it ramp for free. Everything
+else in the arena moves, dies, or has to be re-acquired, which is the cost the 3× was priced
+against; a boss is a stationary wall that pays that cost once and then stands there. So the
+*ramp* is cut against bosses rather than the damage: the beam still opens at exactly full
+strength — 7.66 against a husk and 7.66 against the Colossus, measured — and then climbs to
+3× on ordinary bodies against 1.6× on a boss. At full heat that is 53% of the damage. Prism
+Burst splits the same way, since half of it is stored heat.
 
 The **Rivet Driver**'s Harpoon is a winch rather than a shove. A single impulse barely moved
 anything heavy; the target is now dragged under power for 0.9s at 34 u/s, lifted just enough

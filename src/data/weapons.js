@@ -241,19 +241,29 @@ export const WEAPONS = [
     model: 'beam',
     unlocked: false,
     echoCost: 850,
-    desc: 'A continuous coherent beam that heats up the longer it stays on a target — up to triple damage. Rewards commitment and punishes flinching.',
-    displayStats: { Damage: '58%/tick →170%', 'Tick Rate': '11/s', Range: 'Long', Proc: '0.15' },
+    desc: 'A continuous coherent beam that heats up the longer it stays on a target — up to triple damage. Rewards commitment and punishes flinching. The ramp is what a boss is armoured against: against one it is worth barely a third as much.',
+    displayStats: { Damage: '58%/tick →170%', 'Tick Rate': '11/s', 'vs Boss': 'ramp ×0.3', Proc: '0.15' },
+    /* The ramp is the weapon, and a boss is the one target that lets it sit at
+       the top of its curve for free.
+       Everything else in the arena moves, dies, or has to be re-acquired, which
+       is the cost the 3× was priced against; a boss is a stationary wall that
+       pays that cost once. So the *ramp* is cut against bosses rather than the
+       damage — the beam still opens at full strength, it just does not get to
+       triple itself for standing still. One number, read by both abilities. */
+    bossRamp: 0.3,
     primary: {
       name: 'Coherent Beam', key: 'M1', icon: '━', hold: true, beam: true,
       anim: 'beam',
-      desc: 'Sustained beam dealing 58% damage per tick, ramping to 170% after 3s on target.',
+      desc: 'Sustained beam dealing 58% damage per tick, ramping to 170% after 3s on target — but only to 93% against a boss.',
       cooldown: 0.09, scalesWithAttackSpeed: true,
       fire(ctx) {
         const heat = ctx.getHeat();
-        const mult = 0.58 * (1 + 2.0 * heat);
+        const ramp = 1 + 2.0 * heat;
+        const bossRamp = 1 + 2.0 * heat * 0.3;
         const hit = ctx.hitscan({
-          damage: ctx.dmg * mult, proc: 0.15, range: 130, thick: 0.05 + heat * 0.11,
+          damage: ctx.dmg * 0.58 * ramp, proc: 0.15, range: 130, thick: 0.05 + heat * 0.11,
           color: heat > 0.6 ? 0xffd0f0 : 0xff7ad4, beam: 0.1, spread: 0,
+          bossScale: bossRamp / ramp,
         });
         ctx.setHeat(hit ? Math.min(1, heat + 0.055) : Math.max(0, heat - 0.02));
         ctx.recoil(0.06);
@@ -263,13 +273,18 @@ export const WEAPONS = [
     secondary: {
       name: 'Prism Burst', key: 'Q', icon: '✳️',
       anim: 'beam',
-      desc: 'Discharge stored light in a piercing lance for 620% damage, scaled by beam heat.',
+      desc: 'Discharge stored light in a piercing lance for 620% damage, scaled by beam heat. A boss takes far less of the stored half.',
       cooldown: 7.0,
       fire(ctx) {
         const heat = ctx.getHeat();
+        // Same split: half the burst is the base charge, half is stored heat,
+        // and only the stored half is cut down against a boss.
+        const stored = 0.5 + heat;
+        const bossStored = 0.5 + heat * 0.3;
         ctx.hitscan({
-          damage: ctx.dmg * (6.2 * (0.5 + heat)), proc: 1.0, range: 200, thick: 0.42,
+          damage: ctx.dmg * 6.2 * stored, proc: 1.0, range: 200, thick: 0.42,
           color: 0xffb0e8, pierce: 99, beam: 0.35,
+          bossScale: bossStored / stored,
         });
         ctx.setHeat(0);
         ctx.recoil(4); ctx.shake(0.45);

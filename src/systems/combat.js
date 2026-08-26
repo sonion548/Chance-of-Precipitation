@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { weaponById } from '../data/weapons.js';
 import { characterById } from '../data/characters.js';
-import { buildWeaponModel } from '../entities/models.js';
+import { buildWeaponModel, buildHatModel } from '../entities/models.js';
 import { rigAttack } from '../entities/characterRig.js';
 import { raycastWorld, distanceToBody } from '../systems/physics.js';
 import { clamp01, damp, TAU } from '../core/mathx.js';
@@ -61,6 +61,10 @@ export class Combat {
     // `primary.activeReload`; everything else leaves this null forever.
     this.reload = null;
     this._secondaryRefund = false;
+    // Chain's hat, in its two possible places: in the air ricocheting, and on
+    // the ground waiting to be teleported to. Never both at once.
+    this.hat = null;
+    this.hatMarker = null;
     this.bastionTimer = 0;
     this.lastStandTimer = 0;
     // The ultimate meter, 0..ULTIMATE.max. Never a cooldown — see config.
@@ -82,6 +86,8 @@ export class Combat {
     this.specialTimer = 0;
     this.specialCharges = this.character.special.charges ?? 1;
     this.dashResets = 0;
+    this._clearHat();
+    this._clearHatMarker();
     this.ultimateCharge = ULTIMATE.startCharge;
     this._ultimateAnnounced = false;
   }
@@ -210,8 +216,11 @@ export class Combat {
     this.firing = false;
 
     if (player.dead || !this.weapon) {
-      // Dying mid-reload must not leave the bar on screen for the next run.
+      // Dying mid-reload must not leave the bar on screen for the next run,
+      // and a hat in flight has nobody to come back to.
       this.reload = null;
+      this._clearHat();
+      this._clearHatMarker();
       return;
     }
 
@@ -300,6 +309,7 @@ export class Combat {
     this._tickBastion(dt, player);
     this._tickLastStand(dt, player);
     this._tickSlam(dt, player);
+    this._tickHat(dt, player);
 
     // ---- Primary ----
     // A weapon mid-reload owns the fire button: the click that lands on the
@@ -531,6 +541,131 @@ export class Combat {
     }
   }
 
+  /* ------------------------------------------------------------------ the hat */
+  /**
+   * Chain's hat, in flight.
+   *
+   * Resolved here rather than as a projectile because a projectile flies at
+   * whatever it was pointed at and this one chooses: on every body it crosses
+   * it picks the next one and turns, and the turn is the ability. Bounces are
+   * multiplicative — five percent each — so what makes a throw good is not
+   * where you aimed it but how many bodies were standing close enough together
+   * to be strung onto it.
+   *
+   * It ignores terrain on purpose. A boomerang that catches on a kerb halfway
+   * through a chain is a boomerang nobody throws twice.
+   */
+  _tickHat(dt, player) {
+    /* One hat, and it is either on his head or it is somewhere else.
+     *
+     * Derived rather than toggled: both abilities can have a hat out at the
+     * same time, so a call site that hid it on throw and showed it on catch
+     * would put it back on his head while the other one was still lying in a
+     * field. Asking the question every frame cannot get out of step. */
+    const worn = player.model.userData.hat;
+    if (worn) worn.visible = !this.hat && !this.hatMarker;
+
+    // The marker is not thrown at anything and does not move; it just runs out.
+    if (this.hatMarker) {
+      this.hatMarker.time -= dt;
+      this.hatMarker.mesh.rotation.y += dt * 0.7;
+      if (this.hatMarker.time <= 0) {
+        this.game.fxApi.glow(this.hatMarker.position, {
+          color: this.hatMarker.color, size: 1, life: 0.3, grow: 1.6,
+        });
+        this._clearHatMarker();
+      }
+    }
+
+    const h = this.hat;
+    if (!h) return;
+
+    if (h.endless > 0) {
+      h.endless -= dt;
+      if (h.endless <= 0) h.state = 'return';
+    }
+    h.age += dt;
+    // Nothing may orbit forever: a hat that somehow never finds its way home
+    // is still gone within a few seconds of giving up.
+    if (h.age > h.maxAge) { this._clearHat(); return; }
+
+    const step = h.speed * dt;
+    h.position.addScaledVector(h.velocity, dt);
+    h.travelled += step;
+    h.mesh.position.copy(h.position);
+    h.mesh.rotation.y += dt * 15;
+    h.mesh.rotation.z = Math.sin(h.age * 9) * 0.5;
+
+    if (h.state === 'out') {
+      const struck = this.game.enemies
+        .inRadius(h.position, h.radius)
+        .find((e) => !h.hit.has(e));
+      if (struck) {
+        h.hit.add(struck);
+        this.damageEnemy(struck, h.damage, {
+          proc: 0.7, source: h.source, hitPoint: struck.center.clone(),
+          knockback: 4, knockbackDir: _v.copy(h.velocity).normalize().setY(0.3).clone(),
+        });
+        h.bounces++;
+        h.damage *= 1 + h.growth;
+        this.game.fxApi.ring(struck.center, 0.3, h.radius * 1.6, h.color, 0.28, 0.85);
+        if (!this._aimHatAtNextTarget(h)) h.state = 'return';
+      } else if (h.travelled >= h.range) {
+        h.state = 'return';
+      }
+      return;
+    }
+
+    // Coming home. It does no damage on the way back — the trip is the cost of
+    // having missed, not a second chance at the same throw.
+    _v.copy(player.chestPosition).sub(h.position);
+    const dist = _v.length();
+    if (dist < 1.6) {
+      this.game.fxApi.glow(player.chestPosition, { color: h.color, size: 1.1, life: 0.22, grow: 1.6 });
+      this._clearHat();
+      return;
+    }
+    h.velocity.copy(_v).divideScalar(dist).multiplyScalar(h.speed);
+  }
+
+  /**
+   * Points the hat at the next body worth crossing. False when there is none.
+   *
+   * An endless hat re-crosses what it has already cut once it runs out of fresh
+   * targets, which is the whole of what makes the ultimate an ultimate: the
+   * ramp never resets, so a small crowd held together is worth as much as a
+   * large one strung out.
+   */
+  _aimHatAtNextTarget(h) {
+    let pool = this.game.enemies
+      .inRadius(h.position, h.searchRadius)
+      .filter((e) => !h.hit.has(e));
+    if (!pool.length && h.endless > 0) {
+      h.hit.clear();
+      pool = this.game.enemies.inRadius(h.position, h.searchRadius);
+    }
+    if (!pool.length) return false;
+    pool.sort((a, b) => a.position.distanceToSquared(h.position) - b.position.distanceToSquared(h.position));
+    const next = pool[0];
+    this.game.fxApi.lightning(h.position, next.center, h.color, 0.12, 4);
+    h.velocity.copy(next.center).sub(h.position).normalize().multiplyScalar(h.speed);
+    return true;
+  }
+
+  _clearHat() {
+    if (!this.hat) return;
+    this.hat.mesh.parent?.remove(this.hat.mesh);
+    disposeTree(this.hat.mesh);
+    this.hat = null;
+  }
+
+  _clearHatMarker() {
+    if (!this.hatMarker) return;
+    this.hatMarker.mesh.parent?.remove(this.hatMarker.mesh);
+    disposeTree(this.hatMarker.mesh);
+    this.hatMarker = null;
+  }
+
   /** Paints everything in a radius. Each enemy owns its own mark. */
   markEnemies(position, radius, duration, color = 0x9dff6a) {
     let count = 0;
@@ -564,6 +699,16 @@ export class Combat {
     let isCrit = opts.crit ?? false;
     if (opts.crit === undefined && proc > 0) isCrit = this.game.rng.next() < stats.crit;
     let damage = amount * (isCrit ? stats.critDamage : 1);
+
+    /* Per-target scaling for abilities that ramp.
+     *
+     * A weapon whose damage climbs the longer it stays on one target is
+     * balanced against a crowd that keeps moving; a boss is one enormous
+     * stationary target that lets it sit at the top of its curve for the whole
+     * fight. `bossScale` is how such a weapon gives that back — applied here,
+     * because this is the one place that knows both the number and the body it
+     * is about to land on. */
+    if (opts.bossScale !== undefined && enemy.boss) damage *= opts.bossScale;
 
     damage = this.game.inventory.modifyDamage({ enemy, damage, isCrit, proc });
 
@@ -716,6 +861,7 @@ export class Combat {
               proc: spec.proc ?? 1, source: self.weapon?.name, hitPoint: point,
               knockback: spec.knockback ?? 0, knockbackDir: dir.clone(),
               lifesteal: spec.lifesteal ?? 0,
+              bossScale: spec.bossScale,
               // `undefined` leaves the roll alone; only a seam hit forces it.
               crit: weak || undefined,
             });
@@ -1306,6 +1452,93 @@ export class Combat {
         });
       },
 
+      /* ---------------- the hat ---------------- */
+
+      /**
+       * Throws the hat, and lets it choose where it goes after that.
+       *
+       * The whole ability is resolved by `Combat._tickHat`; all this does is
+       * put the thing in the air pointed at whatever you were looking at.
+       * Throwing again while one is already out replaces it, because two hats
+       * is one hat too many for a character defined by owning exactly one.
+       */
+      throwHat(spec) {
+        const player = game.player;
+        const color = spec.color ?? 0xff5a4d;
+        self._clearHat();
+        const mesh = buildHatModel(color, spec.scale ?? 0.55);
+        const position = player.chestPosition.clone();
+        mesh.position.copy(position);
+        game.engine.scene.add(mesh);
+        self.hat = {
+          mesh, position,
+          velocity: player.aimDirection(new THREE.Vector3()).multiplyScalar(spec.speed ?? 34),
+          speed: spec.speed ?? 34,
+          damage: spec.damage ?? 0,
+          growth: spec.growth ?? 0.05,
+          radius: spec.radius ?? 1.5,
+          searchRadius: spec.searchRadius ?? 18,
+          range: spec.range ?? 34,
+          endless: spec.endless ?? 0,
+          maxAge: spec.maxAge ?? ((spec.endless ?? 0) + 12),
+          source: spec.source ?? 'Hat Toss',
+          color, travelled: 0, age: 0, bounces: 0, state: 'out', hit: new Set(),
+        };
+        player.addRecoil(1.2);
+      },
+
+      /**
+       * Two presses, one hat: throw it somewhere, then be there.
+       *
+       * The charge is spent on the throw and handed straight back on the
+       * teleport, so a charge buys a whole round trip rather than half of one
+       * — which is what makes two charges read as two blinks instead of one.
+       */
+      hatBlink(spec) {
+        const player = game.player;
+        const color = spec.color ?? 0xff5a4d;
+
+        if (self.hatMarker) {
+          const start = player.position.clone();
+          const end = self.hatMarker.position.clone();
+          const airborne = settleTeleport(player, game.arena, start, end);
+          game.fxApi.beam(start.clone().setY(start.y + 1), end.clone().setY(end.y + 1), color, 0.3, 0.2);
+          game.fxApi.glow(start.clone().setY(start.y + 1), { color, size: 1.8, life: 0.3, grow: 2 });
+          player.position.copy(end);
+          player.velocity.x *= 0.4;
+          player.velocity.z *= 0.4;
+          if (airborne) player.grounded = false;
+          player.dashIFrames = Math.max(player.dashIFrames || 0, 0.2);
+          player.snapCamera();
+          game.fxApi.ring(end, 0.4, 4, color, 0.45, 0.9);
+          self._clearHatMarker();
+          // The trip back is already paid for.
+          self.refundUtility();
+          return;
+        }
+
+        self._clearHatMarker();
+        game.projectiles.spawn({
+          position: player.muzzlePosition.clone(),
+          velocity: player.aimDirection(new THREE.Vector3()).multiplyScalar(spec.speed ?? 62),
+          damage: 0, proc: 0, radius: 0.3, life: 3, color,
+          gravity: spec.gravity ?? -12, trail: 1.1, glow: 1.8,
+          onLand: (position) => {
+            // Sat on the ground rather than floating in it, whatever it landed on.
+            const p = position.clone();
+            p.y = game.arena.groundHeightAt(p.x, p.z, p.y + 2) + 0.12;
+            const mesh = buildHatModel(color, 0.55);
+            mesh.position.copy(p);
+            game.engine.scene.add(mesh);
+            self.hatMarker = { mesh, position: p, color, time: spec.life ?? 30 };
+            game.fxApi.ring(p, 0.3, 2.4, color, 0.4, 0.8);
+            game.ui.toast('HAT SET — SHIFT TO RECALL', `#${color.toString(16).padStart(6, '0')}`);
+          },
+          source: "Wanderer's Mark",
+        });
+        player.addRecoil(1);
+      },
+
       /* ---------------- ultimates ---------------- */
 
       /** Vanguard: shells walked onto the aim point, one after another. */
@@ -1381,14 +1614,27 @@ export class Combat {
         game.engine.addShake(0.45);
       },
 
-      /** One charge, straight down, and a crater underneath wherever you are. */
+      /**
+       * One charge, thrown at whatever you are looking at.
+       *
+       * Aimed at the crosshair point rather than at the crosshair *direction*:
+       * a bombardier hanging thirty metres up is looking down a steep line, and
+       * a charge thrown along that line with any real gravity on it lands well
+       * short of the thing being aimed at. Almost no drop and a fast throw
+       * means where you look is where the crater goes, which is the whole
+       * reason to be up there.
+       */
       bunkerBomb(spec) {
         const player = game.player;
         const color = spec.color ?? 0x7fe0ff;
+        const origin = player.muzzlePosition.clone();
+        const dir = _v.copy(self.ctx.aimPoint).sub(origin);
+        if (dir.lengthSq() < 1e-6) dir.copy(self.ctx.dir);
+        dir.normalize();
         game.projectiles.spawn({
-          position: player.position.clone().setY(player.position.y + 0.7),
-          velocity: new THREE.Vector3(0, -(spec.speed ?? 26), 0),
-          damage: 0, radius: 0.42, life: 6, color, gravity: -34,
+          position: origin,
+          velocity: dir.clone().multiplyScalar(spec.speed ?? 62),
+          damage: 0, radius: 0.42, life: 5, color, gravity: spec.gravity ?? -5,
           trail: 1.8, glow: 2.6, detonateOnGround: true,
           splash: { radius: spec.radius ?? 16, damage: spec.damage, proc: 1, color, force: 22 },
           source: 'Bomb Cluster',
@@ -1440,6 +1686,14 @@ export class Combat {
 
     return api;
   }
+}
+
+/** Frees a small one-off model. Hats are built per throw, not pooled. */
+function disposeTree(root) {
+  root.traverse((c) => {
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach((m) => m.dispose());
+  });
 }
 
 function falloffScale(distance, f) {

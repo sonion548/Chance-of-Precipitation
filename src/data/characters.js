@@ -265,8 +265,8 @@ export const CHARACTERS = [
     build: 'dasher',
     unlocked: false,
     echoCost: 850,
-    color: 0x2d4a3e, accent: 0x3dffa5, visor: 0xc8ffe6,
-    desc: 'The fastest and hardest-hitting thing in the descent, wrapped in almost nothing. Paints a crowd with a spear, then travels through it — every dash that lands on paint is a dash you did not spend.',
+    color: 0x08090d, accent: 0x3dffa5, visor: 0x9dffd0,
+    desc: 'A silhouette with almost nothing in it — matte black plate that gives the light back to nobody, wrapped in the discharge it never quite contains. The fastest and hardest-hitting thing in the descent. Paints a crowd with a spear, then travels through it; every dash that lands on paint is a dash you did not spend.',
     lore: 'Armour is weight. Weight is time. Time is the only thing that kills you.',
     stats: {
       health: 76, healthPerLevel: 21, regen: 0.8, regenPerLevel: 0.16,
@@ -308,6 +308,61 @@ export const CHARACTERS = [
           radius: 22, damage: ctx.dmg * 9, markDuration: 14, speed: 74,
           pull: { time: 1.1, speed: 30 }, dashResets: 3, color: 0x3dffa5,
         });
+      },
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'chain',
+    name: 'Chain',
+    title: 'Wandering Ronin',
+    icon: '👒',
+    build: 'chain',
+    unlocked: false,
+    echoCost: 800,
+    color: 0x39222c, accent: 0xff5a4d, visor: 0xffc7b0,
+    desc: 'A straw hat, a robe, and no armour worth the name. Owns exactly one thing and throws it at everything — the hat that comes back, the hat that finds the next body, and the hat you left in a field to walk back to later.',
+    lore: 'He was told to leave the hat. He left everything else.',
+    stats: {
+      health: 104, healthPerLevel: 30, regen: 1.0, regenPerLevel: 0.2,
+      damage: 13.2, damagePerLevel: 2.65, moveSpeed: 8.5, armor: 3, crit: 0.04, jumps: 1,
+    },
+    utility: {
+      /* Two presses, one hat, and the second one is free.
+         Charging both halves would make "two charges" mean one round trip,
+         which is not what two of anything should mean. The throw is the cost;
+         the walk back is what you already bought. */
+      name: "Wanderer's Mark", key: 'SHIFT', icon: '🧭', cooldown: 10, charges: 2,
+      anim: 'lob',
+      desc: 'Throw the hat at what you are looking at and leave it lying there. Press again to be where it is — the trip back costs nothing, so two charges are two whole round trips. The hat gives up after 30s.',
+      fire(ctx) {
+        ctx.hatBlink({ speed: 62, life: 30, color: 0xff5a4d });
+      },
+    },
+    special: {
+      name: 'Hat Toss', key: 'R', icon: '👒', cooldown: 5,
+      anim: 'lob',
+      desc: 'Throw the hat for 210%. Find nobody and it simply comes back — but the first body it crosses it ricochets off into the next, and the next, taking 5% more with every bounce.',
+      fire(ctx) {
+        ctx.throwHat({
+          damage: ctx.dmg * 2.1, growth: 0.05, speed: 34, range: 34,
+          searchRadius: 18, radius: 1.5, color: 0xff5a4d, source: 'Hat Toss',
+        });
+      },
+    },
+    ultimate: {
+      name: 'Unbroken Chain', key: 'F', icon: '🌀',
+      anim: 'lob',
+      desc: 'Throw the hat and do not catch it. For 9s it ricochets without stopping, re-crossing bodies it has already cut, and every single bounce is another 5% — a crowd held together is worth several times what the throw opened at.',
+      fire(ctx) {
+        ctx.throwHat({
+          damage: ctx.dmg * 1.4, growth: 0.05, speed: 46, range: 1e4,
+          searchRadius: 26, radius: 1.8, endless: 9, scale: 0.75,
+          color: 0xff5a4d, source: 'Unbroken Chain',
+        });
+        ctx.toast('UNBROKEN CHAIN', '#ff5a4d');
+        ctx.shake(0.35);
       },
     },
   },

@@ -54,12 +54,19 @@ across the head and chest.
 
 ## Content
 
-- **6 characters** — Vanguard (baseline), **Unloader** (grapple + momentum punch, the
+- **7 characters** — Vanguard (baseline), **Unloader** (grapple + momentum punch, the
   Loader-alike), Wraith (glass cannon, blink), Bulwark (tank, shield charge + bastion),
   **Halcyon** (flies; low health, negative armour, slightly softer damage, impact bombs),
   **Dasher** (marking spear on two charges + a look-directed piercing dash that refunds
-  itself on a marked hit; the thinnest frame in the game, and the hardest hitting).
-  A character sets base stats plus utility, special and ultimate; weapons are independent.
+  itself on a marked hit; the thinnest frame in the game, and the hardest hitting — matte
+  black plate carried entirely by an additive aura), **Chain** (straw hat and robe; one hat,
+  thrown three different ways). A character sets base stats plus utility, special and
+  ultimate; weapons are independent.
+- **Chain's hat** is resolved in `Combat._tickHat` rather than as a projectile, because a
+  projectile flies at what it was pointed at and this one *chooses*: on every body it crosses
+  it picks the next within its search radius and turns, compounding 5% a bounce. It ignores
+  terrain deliberately. The worn hat's visibility is derived every frame from whether either
+  form is out, so the two abilities cannot desync it.
 - **A flight pose**, not an airborne walk. `poseFlight` in `entities/characterRig.js` runs
   after the gait and blends over it by `rig.fly`, driven by `flying` / `flightClimb` off the
   player. Legs trail and scissor, ankles point, the trunk pitches with the throttle, and the
