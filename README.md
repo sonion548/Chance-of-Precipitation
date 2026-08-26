@@ -253,8 +253,10 @@ you shoot.
 
 **Ultimates** are the one ability the game gives you for having been in a fight rather than
 for having waited. There is no cooldown: the meter beside the ability bar fills from kills
-(3% a kill, 9% an elite, 26% a boss) and from damage taken (0.6% per 1% of your health lost),
-plus a slow trickle so a quiet stretch is not dead time. It empties completely when spent.
+(0.28% a kill, 0.9% an elite, 11% a boss) and from damage taken (0.06% per 1% of your health
+lost), plus a slow trickle so a quiet stretch is not dead time. It empties completely when
+spent, and it is priced so that a full meter is worth about two stages of fighting — the
+boss is the single biggest contributor, because it is the one landmark every stage has.
 They are deliberately enormous — a 26-shell fire mission, a 2600% crater, three singularities
 with thirty shades thrown into them, six seconds of literal invulnerability.
 
@@ -267,7 +269,7 @@ first. Landing early cuts the thrusters and refunds half the time you did not us
 Its ultimate hands you no new button. **Ordnance Override** takes the limiter off the two
 things Halcyon already owns and rations: for fifteen seconds flight stops burning fuel and
 landing no longer ends it, and the bomb rack unlocks — Bomb Cluster becomes a single bunker
-charge dropped straight down for 1400% damage in 16m, on nothing but a half-second arming
+charge dropped straight down for 700% damage in 16m, on nothing but a half-second arming
 delay. Fifteen seconds of unlimited flight over an unlimited rack is a bigger ability than
 any one enormous explosion, because it is the character finally being what the silhouette
 has been promising.

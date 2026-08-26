@@ -226,7 +226,7 @@ export const CHARACTERS = [
     special: {
       name: 'Bomb Cluster', key: 'R', icon: '💣', cooldown: 3.2,
       anim: 'lob',
-      desc: 'Shoot a cluster of three bombs that detonate on impact for 340% damage in 7m. Under Ordnance Override it becomes a single bunker charge dropped straight down for 1400% in 16m, every half second, for as long as the override holds.',
+      desc: 'Shoot a cluster of three bombs that detonate on impact for 340% damage in 7m. Under Ordnance Override it becomes a single bunker charge dropped straight down for 700% in 16m, every half second, for as long as the override holds.',
       /* The rack is the same rack; the override just takes the limiter off it.
          Returning the *final* number rather than a multiplier is deliberate —
          half a second is the arming time of the bomb, not a cooldown, and it
@@ -234,7 +234,7 @@ export const CHARACTERS = [
       cooldownFor: (player, base) => (player.buffs.has('bombardier') ? 0.5 : base),
       fire(ctx) {
         if (ctx.player.buffs.has('bombardier')) {
-          ctx.bunkerBomb({ damage: ctx.dmg * 14, radius: 16, color: 0x7fe0ff });
+          ctx.bunkerBomb({ damage: ctx.dmg * 7, radius: 16, color: 0x7fe0ff });
           return;
         }
         ctx.bombVolley({ count: 3, damage: ctx.dmg * 3.4, radius: 7, speed: 44, spread: 0.09, color: 0x7fe0ff });
@@ -249,7 +249,7 @@ export const CHARACTERS = [
          enormous explosion would have been, because for those fifteen seconds
          the character finally gets to be the thing the silhouette promises:
          airborne, indefinitely, dropping ordnance on a timer. */
-      desc: 'Cut the limiters for 15s. Flight stops burning fuel and landing no longer ends it, and the bomb rack unlocks: Bomb Cluster becomes one bunker charge dropped straight down for 1400% damage in 16m, on nothing but a half-second arming delay.',
+      desc: 'Cut the limiters for 15s. Flight stops burning fuel and landing no longer ends it, and the bomb rack unlocks: Bomb Cluster becomes one bunker charge dropped straight down for 700% damage in 16m, on nothing but a half-second arming delay.',
       fire(ctx) {
         ctx.ordnanceOverride({ duration: 15, color: 0x7fe0ff });
       },
