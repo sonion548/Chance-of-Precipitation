@@ -382,8 +382,22 @@ function articulatedLimb(parent, x, y, z, spec, materials) {
 }
 
 /** Layered chest: core torso, chest plate, collar and back pack. */
+/**
+ * The body under the character's own hardware.
+ *
+ * `kit` is how much of the soldier's kit it is wearing, because not every
+ * silhouette in the descent is a soldier. A wanderer in a straw hat wearing a
+ * rebreather, a hard harness and two belt pouches under his robe is a wanderer
+ * nobody built on purpose — and every one of those parts is hidden by the robe
+ * anyway, so it is triangles spent on making the shape worse.
+ *
+ *   'armoured'  the full kit: pack, harness, pouches, exhaust stacks, cable
+ *   'light'     a frame: core, plates, collar, belt, chest light, abdomen
+ *   'cloth'     core, collar and belt, and nothing else — something covers it
+ */
 function buildTorso(group, materials, spec) {
   const { width, depth, height, accentColor } = spec;
+  const kit = spec.kit || 'armoured';
 
   const core = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.52, width * 0.46, height, 8), materials.suit);
   core.scale.z = depth / width;
@@ -408,9 +422,26 @@ function buildTorso(group, materials, spec) {
   belt.position.y = height * 0.12;
   group.add(belt);
 
+  // Whatever is going over the top of this owns the read from here on.
+  if (kit === 'cloth') return core;
+
   const chestLight = new THREE.Mesh(new THREE.CircleGeometry(width * 0.13, 8), materials.glow);
   chestLight.position.set(0, height * 0.74, depth * 0.53);
   group.add(chestLight);
+
+  // Segmented abdominal plates. Every frame gets these — they are the waist.
+  for (let i = 0; i < 3; i++) {
+    const ab = new THREE.Mesh(
+      new THREE.CylinderGeometry(width * (0.5 - i * 0.02), width * (0.48 - i * 0.02), height * 0.1, 8),
+      materials.trim);
+    ab.scale.z = depth / width;
+    ab.position.y = height * (0.28 - i * 0.09);
+    group.add(ab);
+  }
+
+  // A light frame stops here: no pack, no harness, no pouches. What hangs off
+  // one of these is the character's own hardware, and it goes on next.
+  if (kit === 'light') return core;
 
   const pack = new THREE.Mesh(new THREE.BoxGeometry(width * 0.72, height * 0.5, depth * 0.42), materials.trim);
   pack.position.set(0, height * 0.6, -depth * 0.6);
@@ -443,16 +474,6 @@ function buildTorso(group, materials, spec) {
   buckle.position.set(0, height * 0.32, depth * 0.53);
   group.add(buckle);
 
-  // Segmented abdominal plates.
-  for (let i = 0; i < 3; i++) {
-    const plate = new THREE.Mesh(
-      new THREE.CylinderGeometry(width * (0.5 - i * 0.02), width * (0.48 - i * 0.02), height * 0.1, 8),
-      materials.trim);
-    plate.scale.z = depth / width;
-    plate.position.y = height * (0.28 - i * 0.09);
-    group.add(plate);
-  }
-
   // Belt pouches and a shoulder pauldron rivet line.
   for (const sx of [-1, 1]) {
     const pouch = new THREE.Mesh(new THREE.BoxGeometry(width * 0.24, height * 0.24, depth * 0.24), materials.joint);
@@ -470,15 +491,54 @@ function buildTorso(group, materials, spec) {
   return core;
 }
 
-/** Helmet with a wrapped visor band. */
+/**
+ * The head, in as much gear as the character actually wears.
+ *
+ * `kit` again, and for the same reason as the torso: the comms boom, the jaw
+ * filters and the antenna are a trooper's helmet, and three of the seven
+ * characters are not troopers. A smooth frame reads by its silhouette, and
+ * hanging a microphone off it is how you lose the silhouette.
+ *
+ *   'trooper'  the issued helmet: crest, boom, mic, filters, vents, antenna
+ *   'smooth'   a shell and a visor, nothing protruding
+ *   'plain'    the shell alone — a hood or a hat is going over it
+ */
 function buildHead(parent, materials, spec) {
   const head = new THREE.Group();
   head.position.y = spec.y;
+  const kit = spec.kit || 'trooper';
 
   const skull = new THREE.Mesh(new THREE.IcosahedronGeometry(spec.r, 1), materials.suit);
   skull.scale.set(1, 1.06, 0.96);
   skull.castShadow = true;
   head.add(skull);
+
+  if (kit === 'plain') {
+    parent.add(head);
+    return head;
+  }
+
+  if (kit === 'smooth') {
+    /* One unbroken shell over the skull and a visor let into it. Slightly
+       larger than the skull so the face is a surface rather than a facet — at
+       range this is the whole difference between a helmet and a lump. */
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(spec.r * 1.04, 12, 10), materials.trim);
+    shell.scale.set(1, 1.1, 1.02);
+    shell.castShadow = true;
+    head.add(shell);
+    const band = new THREE.Mesh(
+      new THREE.TorusGeometry(spec.r * 0.86, spec.r * 0.15, 6, 16, Math.PI * 0.8), materials.visor);
+    band.rotation.set(Math.PI / 2, 0, Math.PI * 0.6);
+    band.position.set(0, spec.r * 0.06, spec.r * 0.12);
+    head.add(band);
+    // A raised keel down the crown: the shape that says "fast" from behind.
+    const keel = new THREE.Mesh(new THREE.BoxGeometry(spec.r * 0.14, spec.r * 0.3, spec.r * 1.7), materials.trim);
+    keel.position.set(0, spec.r * 0.9, -spec.r * 0.12);
+    keel.rotation.x = 0.12;
+    head.add(keel);
+    parent.add(head);
+    return head;
+  }
 
   const crest = new THREE.Mesh(new THREE.CylinderGeometry(spec.r * 0.92, spec.r * 0.86, spec.r * 0.5, 8), materials.trim);
   crest.position.y = spec.r * 0.62;
@@ -552,15 +612,20 @@ export function buildPlayerModel(char) {
   const m = characterMaterials(char);
   const build = char.build || 'vanguard';
 
-  // Proportions per build — the silhouette is what tells them apart at range.
+  /* Proportions per build — the silhouette is what tells them apart at range.
+     `torsoKit` and `headKit` decide how much issued gear the body underneath is
+     wearing; see `buildTorso` and `buildHead`. A frame whose whole read is a
+     robe or a wing does not want a rebreather and a harness under it. */
   const P = {
     vanguard: { w: 0.62, d: 0.4, torso: 0.68, hipY: 0.86, headR: 0.23, armR: [0.11, 0.095, 0.085], legR: [0.14, 0.12, 0.1], shoulder: 0.36 },
-    unloader: { w: 0.86, d: 0.52, torso: 0.72, hipY: 0.9, headR: 0.24, armR: [0.16, 0.14, 0.12], legR: [0.19, 0.16, 0.13], shoulder: 0.5 },
-    wraith:   { w: 0.5,  d: 0.34, torso: 0.7, hipY: 0.92, headR: 0.21, armR: [0.085, 0.075, 0.065], legR: [0.11, 0.095, 0.08], shoulder: 0.3 },
-    bulwark:  { w: 0.8,  d: 0.5, torso: 0.66, hipY: 0.84, headR: 0.23, armR: [0.14, 0.125, 0.11], legR: [0.18, 0.155, 0.13], shoulder: 0.46 },
-    halcyon:  { w: 0.54, d: 0.36, torso: 0.66, hipY: 0.9, headR: 0.22, armR: [0.095, 0.085, 0.072], legR: [0.12, 0.1, 0.085], shoulder: 0.33 },
-    dasher:   { w: 0.54, d: 0.35, torso: 0.72, hipY: 0.94, headR: 0.21, armR: [0.092, 0.082, 0.07], legR: [0.125, 0.105, 0.086], shoulder: 0.32 },
-    chain:    { w: 0.56, d: 0.37, torso: 0.7, hipY: 0.9, headR: 0.22, armR: [0.098, 0.088, 0.075], legR: [0.13, 0.11, 0.09], shoulder: 0.33 },
+    // The exosuit is freight equipment with somebody inside it: wider than
+    // anything else in the descent and deeper through the chest.
+    unloader: { w: 0.94, d: 0.58, torso: 0.74, hipY: 0.9, headR: 0.24, armR: [0.175, 0.15, 0.13], legR: [0.21, 0.175, 0.145], shoulder: 0.56, torsoKit: 'armoured', headKit: 'trooper' },
+    wraith:   { w: 0.48, d: 0.32, torso: 0.72, hipY: 0.94, headR: 0.2, armR: [0.078, 0.068, 0.058], legR: [0.105, 0.09, 0.075], shoulder: 0.29, torsoKit: 'light', headKit: 'plain' },
+    bulwark:  { w: 0.84, d: 0.52, torso: 0.66, hipY: 0.84, headR: 0.235, armR: [0.15, 0.13, 0.115], legR: [0.19, 0.16, 0.135], shoulder: 0.5, torsoKit: 'armoured', headKit: 'trooper' },
+    halcyon:  { w: 0.5,  d: 0.33, torso: 0.68, hipY: 0.92, headR: 0.21, armR: [0.088, 0.078, 0.066], legR: [0.115, 0.096, 0.08], shoulder: 0.31, torsoKit: 'light', headKit: 'smooth' },
+    dasher:   { w: 0.52, d: 0.34, torso: 0.72, hipY: 0.94, headR: 0.205, armR: [0.088, 0.078, 0.066], legR: [0.12, 0.1, 0.082], shoulder: 0.31, torsoKit: 'light', headKit: 'smooth' },
+    chain:    { w: 0.56, d: 0.37, torso: 0.7, hipY: 0.9, headR: 0.22, armR: [0.098, 0.088, 0.075], legR: [0.13, 0.11, 0.09], shoulder: 0.33, torsoKit: 'cloth', headKit: 'plain' },
   }[build] || {
     w: 0.62, d: 0.4, torso: 0.68, hipY: 0.86, headR: 0.23,
     armR: [0.11, 0.095, 0.085], legR: [0.14, 0.12, 0.1], shoulder: 0.36,
@@ -603,9 +668,11 @@ export function buildPlayerModel(char) {
   const torso = new THREE.Group();
   torso.position.y = P.hipY;
   g.add(torso);
-  buildTorso(torso, m, { width: P.w, depth: P.d, height: P.torso, accentColor: char.accent });
+  buildTorso(torso, m, {
+    width: P.w, depth: P.d, height: P.torso, accentColor: char.accent, kit: P.torsoKit,
+  });
 
-  const head = buildHead(torso, m, { y: P.torso * 1.24, r: P.headR });
+  const head = buildHead(torso, m, { y: P.torso * 1.24, r: P.headR, kit: P.headKit });
 
   // --- arms ---
   const armSpec = { upper: 0.34, lower: 0.32, rTop: P.armR[0], rMid: P.armR[1], rBot: P.armR[2], hand: true, pad: true };
@@ -618,16 +685,22 @@ export function buildPlayerModel(char) {
   armR.userData.lower.rotation.x = -0.45;
   armL.userData.lower.rotation.x = -0.6;
 
-  // Pauldrons: the single biggest readability win at distance.
-  for (const [side, arm] of [[-1, armL], [1, armR]]) {
-    const pauldron = new THREE.Mesh(
-      new THREE.SphereGeometry(P.armR[0] * 1.32, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55),
-      m.trim,
-    );
-    pauldron.position.set(side * P.shoulder * 1.04, P.torso * 0.8, 0);
-    pauldron.rotation.z = side * 0.24;
-    pauldron.castShadow = true;
-    torso.add(pauldron);
+  /* Pauldrons: the single biggest readability win at distance.
+     Chain gets none — the shoulder under his robe is a shoulder, and a dome of
+     plate on it is the one thing that would stop the silhouette reading as
+     cloth. Everything else keeps the dome and puts its own shape over it. */
+  if (build !== 'chain') {
+    for (const [side, arm] of [[-1, armL], [1, armR]]) {
+      const pauldron = new THREE.Mesh(
+        new THREE.SphereGeometry(P.armR[0] * 1.32, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55),
+        m.trim,
+      );
+      pauldron.position.set(side * P.shoulder * 1.04, P.torso * 0.8, 0);
+      pauldron.rotation.z = side * 0.24;
+      pauldron.castShadow = true;
+      torso.add(pauldron);
+      void arm;
+    }
   }
 
   /* Anything a build wants the game to be able to reach later is declared out
@@ -638,163 +711,504 @@ export function buildPlayerModel(char) {
   // --- per-build signature hardware ---
   switch (build) {
     case 'unloader': {
-      // Oversized gauntlet on the punching arm, hook launcher on the other.
-      // Gauntlet: forearm sleeve, a fist mass, and knuckle plates that catch light.
-      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 1.9, P.armR[2] * 2.3, 0.26, 8), m.accent);
+      /* Freight equipment with somebody inside it.
+       *
+       * The read is safety yellow on dark steel, and it is a *panelled* read —
+       * big flat plates bolted onto a dark frame, not a yellow suit. So the
+       * frame stays the base colour and the accent goes on in slabs: the
+       * shoulders, the chest, the knees, the shins. At range you see four
+       * yellow blocks arranged in the shape of a very large person.
+       */
+      const panel = m.accent;
+
+      // --- shoulders: the biggest slabs on the model ---
+      for (const sx of [-1, 1]) {
+        const cap = new THREE.Mesh(
+          new THREE.SphereGeometry(P.armR[0] * 1.9, 10, 7, 0, Math.PI * 2, 0, Math.PI * 0.52), panel);
+        cap.scale.set(1.05, 0.9, 1.05);
+        cap.position.set(sx * P.shoulder * 1.04, P.torso * 0.79, 0);
+        cap.rotation.z = sx * 0.3;
+        cap.castShadow = true;
+        torso.add(cap);
+        // Lip around the bottom of the cap, so it reads as a plate with an
+        // edge rather than a painted-on hemisphere.
+        const lip = new THREE.Mesh(new THREE.TorusGeometry(P.armR[0] * 1.86, 0.026, 4, 14), m.joint);
+        lip.rotation.x = Math.PI / 2;
+        lip.position.set(sx * P.shoulder * 1.04, P.torso * 0.73, 0);
+        torso.add(lip);
+        boltRow(torso, m.joint, {
+          from: [sx * (P.shoulder * 1.04 - 0.11), P.torso * 0.92, 0.1],
+          to: [sx * (P.shoulder * 1.04 + 0.11), P.torso * 0.92, 0.1], count: 3, r: 0.017,
+        });
+      }
+
+      // --- chest and belly plates ---
+      const bib = new THREE.Mesh(new THREE.BoxGeometry(P.w * 0.62, P.torso * 0.34, 0.09), panel);
+      bib.position.set(0, P.torso * 0.72, P.d * 0.58);
+      bib.castShadow = true;
+      torso.add(bib);
+      const bibLip = new THREE.Mesh(new THREE.BoxGeometry(P.w * 0.66, 0.045, 0.11), m.joint);
+      bibLip.position.set(0, P.torso * 0.55, P.d * 0.58);
+      torso.add(bibLip);
+      // Hazard chevrons across the belly: the one piece of livery on the model.
+      for (let i = 0; i < 3; i++) {
+        const chev = new THREE.Mesh(new THREE.BoxGeometry(P.w * 0.13, 0.05, 0.05), panel);
+        chev.position.set((i - 1) * P.w * 0.17, P.torso * 0.2, P.d * 0.56);
+        chev.rotation.z = 0.6;
+        torso.add(chev);
+      }
+
+      // Exo-frame ribs across the chest, in bare metal under the plate.
+      for (let i = 0; i < 3; i++) {
+        const rib = new THREE.Mesh(new THREE.TorusGeometry(P.w * 0.46, 0.03, 4, 10, Math.PI), m.joint);
+        rib.rotation.set(Math.PI / 2, 0, 0);
+        rib.position.y = P.torso * (0.36 + i * 0.15);
+        torso.add(rib);
+      }
+
+      // --- legs: knee caps and shin plates ---
+      for (const leg of [legL, legR]) {
+        const knee = new THREE.Mesh(
+          new THREE.SphereGeometry(P.legR[1] * 1.5, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), panel);
+        knee.rotation.x = 1.4;
+        knee.position.set(0, 0.01, P.legR[1] * 0.5);
+        knee.castShadow = true;
+        leg.userData.lower.add(knee);
+        const shin = new THREE.Mesh(new THREE.BoxGeometry(P.legR[2] * 2.1, 0.3, 0.07), panel);
+        shin.position.set(0, -0.2, P.legR[2] * 1.5);
+        leg.userData.lower.add(shin);
+      }
+
+      // --- the fist: the arm the character is named for ---
+      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 2.0, P.armR[2] * 2.5, 0.28, 8), panel);
       sleeve.position.y = -0.2;
       sleeve.castShadow = true;
       armR.userData.lower.add(sleeve);
 
-      const fist = new THREE.Mesh(new THREE.IcosahedronGeometry(P.armR[2] * 2.5, 1), m.trim);
+      const fist = new THREE.Mesh(new THREE.IcosahedronGeometry(P.armR[2] * 2.7, 1), m.trim);
       fist.scale.set(1, 0.92, 1.05);
-      fist.position.y = -0.44;
+      fist.position.y = -0.46;
       fist.castShadow = true;
       armR.userData.lower.add(fist);
 
       for (let k = 0; k < 3; k++) {
-        const knuckle = new THREE.Mesh(new THREE.SphereGeometry(P.armR[2] * 0.72, 6, 5), m.glow);
-        knuckle.position.set((k - 1) * P.armR[2] * 1.25, -0.5, P.armR[2] * 2.1);
+        const knuckle = new THREE.Mesh(new THREE.SphereGeometry(P.armR[2] * 0.78, 6, 5), m.glow);
+        knuckle.position.set((k - 1) * P.armR[2] * 1.3, -0.52, P.armR[2] * 2.2);
         armR.userData.lower.add(knuckle);
       }
-      const piston = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 0.5, P.armR[2] * 0.5, 0.3, 6), m.glow);
-      piston.position.set(0, -0.24, -P.armR[2] * 1.7);
-      armR.userData.lower.add(piston);
+      // Two hydraulic rams down the back of the forearm, feeding the fist.
+      for (const sx of [-1, 1]) {
+        const ram = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 0.42, P.armR[2] * 0.42, 0.32, 6), m.glow);
+        ram.position.set(sx * P.armR[2] * 0.9, -0.24, -P.armR[2] * 1.8);
+        armR.userData.lower.add(ram);
+      }
 
-      const launcher = new THREE.Mesh(new THREE.BoxGeometry(P.armR[2] * 2.4, P.armR[2] * 2.2, 0.42), m.trim);
-      launcher.position.set(0, -0.26, 0.12);
+      /* --- the grapple: a launcher, a chain, and a hook that hangs off it ---
+       *
+       * The chain is the whole reason this arm reads as a cargo grapple rather
+       * than a second gun. It is built hanging slack from the muzzle with the
+       * hook swinging at the bottom, because a hook stowed flush against the
+       * launcher is a detail nobody sees and a hook on a metre of chain is a
+       * silhouette you recognise across the arena. */
+      const launcher = new THREE.Mesh(new THREE.BoxGeometry(P.armR[2] * 2.7, P.armR[2] * 2.4, 0.46), m.trim);
+      launcher.position.set(0, -0.28, 0.14);
       launcher.castShadow = true;
       armL.userData.lower.add(launcher);
-      const hookTip = new THREE.Mesh(new THREE.ConeGeometry(P.armR[2] * 0.9, 0.16, 5), m.accent);
-      hookTip.rotation.x = Math.PI / 2;
-      hookTip.position.set(0, -0.26, 0.36);
-      armL.userData.lower.add(hookTip);
+      const drum = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 1.15, P.armR[2] * 1.15, P.armR[2] * 2.4, 10), panel);
+      drum.rotation.z = Math.PI / 2;
+      drum.position.set(0, -0.28, -0.06);
+      drum.castShadow = true;
+      armL.userData.lower.add(drum);
+      const muzzle = new THREE.Mesh(new THREE.CylinderGeometry(P.armR[2] * 0.8, P.armR[2] * 0.95, 0.2, 8), m.joint);
+      muzzle.rotation.x = Math.PI / 2;
+      muzzle.position.set(0, -0.28, 0.42);
+      armL.userData.lower.add(muzzle);
 
-      // Exo-frame ribs across the chest.
-      for (let i = 0; i < 3; i++) {
-        const rib = new THREE.Mesh(new THREE.TorusGeometry(P.w * 0.46, 0.028, 4, 10, Math.PI), m.accent);
-        rib.rotation.set(Math.PI / 2, 0, 0);
-        rib.position.y = P.torso * (0.4 + i * 0.16);
-        torso.add(rib);
+      const chain = new THREE.Group();
+      chain.position.set(0, -0.34, 0.44);
+      armL.userData.lower.add(chain);
+      for (let i = 0; i < 7; i++) {
+        const link = new THREE.Mesh(new THREE.TorusGeometry(0.042, 0.014, 4, 8), m.joint);
+        // Alternating link planes, which is what makes a run of toruses read
+        // as chain rather than as a stack of washers.
+        link.rotation.y = (i % 2) * Math.PI / 2;
+        link.position.set(0, -i * 0.068, Math.sin(i * 0.5) * 0.02);
+        chain.add(link);
       }
+      const hookShank = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, 6), panel);
+      hookShank.position.y = -0.53;
+      chain.add(hookShank);
+      const hookCurve = new THREE.Mesh(
+        new THREE.TorusGeometry(0.075, 0.024, 5, 10, Math.PI * 1.35), panel);
+      hookCurve.rotation.set(0, Math.PI / 2, 0.5);
+      hookCurve.position.y = -0.64;
+      hookCurve.castShadow = true;
+      chain.add(hookCurve);
+      const hookTip = new THREE.Mesh(new THREE.ConeGeometry(0.026, 0.09, 5), m.glow);
+      hookTip.position.set(0, -0.6, 0.075);
+      hookTip.rotation.x = -0.9;
+      chain.add(hookTip);
       break;
     }
     case 'wraith': {
-      // Hooded cowl and a trailing mantle.
+      /* A hood, a rag of a cloak, and a light source where the face should be.
+       *
+       * Almost nothing on this frame is armour — the concept is a thin body
+       * inside a lot of moving cloth, so the budget goes on the cloth. The
+       * mantle is built as seven ragged strips of different length rather than
+       * one cone, because a cone is a cape and strips are a thing coming apart.
+       */
+      const shroud = mat(0x0d0b11, { roughness: 0.95, metalness: 0.05 });
+
+      // --- the hood: a deep cowl that swallows the head ---
       const cowl = new THREE.Mesh(
-        new THREE.SphereGeometry(P.headR * 1.5, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), m.trim);
-      cowl.position.y = P.headR * 0.24;
-      cowl.rotation.x = -0.18;
+        new THREE.SphereGeometry(P.headR * 1.62, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.62), shroud);
+      cowl.scale.set(1.06, 1.18, 1.12);
+      cowl.position.y = P.headR * 0.26;
+      cowl.rotation.x = -0.2;
+      cowl.castShadow = true;
       head.add(cowl);
-      const mantle = new THREE.Mesh(new THREE.ConeGeometry(P.w * 0.62, 0.9, 7, 1, true), m.trim);
-      mantle.position.set(0, P.torso * 0.5, -P.d * 0.4);
-      mantle.rotation.x = 0.22;
-      torso.add(mantle);
-      for (let i = 0; i < 4; i++) {
-        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.26, 4), m.accent);
-        spike.position.set((i - 1.5) * 0.13, P.torso * 0.98, -P.d * 0.52);
-        spike.rotation.x = -0.5;
-        torso.add(spike);
+      // Peak at the front of the hood, which is what makes it read as drawn up
+      // rather than as a bowl resting on top.
+      const peak = new THREE.Mesh(new THREE.ConeGeometry(P.headR * 0.9, P.headR * 1.5, 7), shroud);
+      peak.position.set(0, P.headR * 0.9, -P.headR * 0.45);
+      peak.rotation.x = -0.5;
+      head.add(peak);
+      // The single eye under it. Everything else on the head is unlit.
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(P.headR * 0.26, 8, 7), m.visor);
+      eye.scale.set(1.5, 0.7, 0.6);
+      eye.position.set(0, 0, P.headR * 0.86);
+      head.add(eye);
+      const eyeGlow = new THREE.Mesh(
+        new THREE.SphereGeometry(P.headR * 0.5, 8, 7),
+        new THREE.MeshBasicMaterial({
+          color: char.visor, transparent: true, opacity: 0.28,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        }),
+      );
+      eyeGlow.position.set(0, 0, P.headR * 0.8);
+      head.add(eyeGlow);
+
+      // --- the mantle: strips, not a cape ---
+      for (let i = 0; i < 7; i++) {
+        const t = (i / 6) - 0.5;                       // −0.5 … +0.5 across the back
+        const len = 0.95 - Math.abs(t) * 0.42;         // longest down the middle
+        const strip = new THREE.Mesh(new THREE.BoxGeometry(0.13, len, 0.02), shroud);
+        strip.position.set(t * P.w * 1.25, P.torso * 0.5 - len * 0.42, -P.d * (0.62 + Math.abs(t) * 0.18));
+        strip.rotation.set(0.16 + Math.abs(t) * 0.1, t * 0.5, t * 0.22);
+        strip.castShadow = true;
+        torso.add(strip);
+      }
+      // Shoulder shrouds over the top of them.
+      for (const sx of [-1, 1]) {
+        const drape = new THREE.Mesh(new THREE.ConeGeometry(P.armR[0] * 2.3, 0.42, 7, 1, true), shroud);
+        drape.position.set(sx * P.shoulder * 1.02, P.torso * 0.72, -P.d * 0.1);
+        drape.rotation.z = sx * 0.3;
+        drape.castShadow = true;
+        torso.add(drape);
+      }
+      // A high collar behind the hood, standing up.
+      const collar = new THREE.Mesh(new THREE.CylinderGeometry(P.w * 0.4, P.w * 0.3, 0.3, 8, 1, true), shroud);
+      collar.position.set(0, P.torso * 1.02, -P.d * 0.2);
+      collar.rotation.x = -0.24;
+      torso.add(collar);
+
+      // --- lit edges: the frame under the cloth, glimpsed ---
+      for (const sx of [-1, 1]) {
+        const rib = new THREE.Mesh(new THREE.BoxGeometry(0.022, P.torso * 0.5, 0.022), m.glow);
+        rib.position.set(sx * P.w * 0.46, P.torso * 0.55, P.d * 0.2);
+        torso.add(rib);
+      }
+      const sternum = new THREE.Mesh(new THREE.BoxGeometry(0.03, P.torso * 0.34, 0.03), m.glow);
+      sternum.position.set(0, P.torso * 0.62, P.d * 0.56);
+      torso.add(sternum);
+      for (const leg of [legL, legR]) {
+        const line = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.34, 0.02), m.glow);
+        line.position.set(leg.userData.outZ * P.legR[1] * 1.1, -0.18, 0);
+        leg.userData.lower.add(line);
+      }
+
+      /* --- the orb, in the off hand ---
+       * Sat just past the fingers rather than in them: it is not held, it is
+       * kept. Two shells so it has a falloff instead of an edge. */
+      const orb = new THREE.Group();
+      orb.position.set(0, -0.46, 0.1);
+      armL.userData.lower.add(orb);
+      const orbCore = new THREE.Mesh(new THREE.IcosahedronGeometry(0.085, 1), m.glow);
+      orb.add(orbCore);
+      for (const [r, o] of [[0.15, 0.3], [0.24, 0.11]]) {
+        const halo = new THREE.Mesh(
+          new THREE.SphereGeometry(r, 10, 8),
+          new THREE.MeshBasicMaterial({
+            color: char.accent, transparent: true, opacity: o,
+            blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
+          }),
+        );
+        orb.add(halo);
+      }
+      // Three shards circling it, because a sphere on its own reads as a ball.
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2;
+        const shard = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.14, 4), m.accent);
+        shard.position.set(Math.cos(a) * 0.16, Math.sin(a) * 0.05, Math.sin(a) * 0.16);
+        shard.rotation.set(1.2, a, 0.4);
+        orb.add(shard);
       }
       break;
     }
     case 'bulwark': {
-      // Tower shield strapped to the off arm.
-      // Tower shield: a hexagonal slab standing upright, facing forward.
+      /* A very large plate of metal with a person behind it.
+       *
+       * The shield stopped being a hexagon: the concept is a full-height slab
+       * with a rounded top, wider than the body, and it carries the one piece
+       * of heraldry in the game. It is built as a flat box with a half-round
+       * cap rather than as an extruded cylinder, because the read is a *door*.
+       */
       const shield = new THREE.Group();
-      const face = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.5, 0.12, 6), m.trim);
-      face.rotation.x = Math.PI / 2;      // flat side toward +Z
+      const SW = 0.72;                  // slab width
+      const SH = 1.18;                  // slab height, before the cap
+
+      const face = new THREE.Mesh(new THREE.BoxGeometry(SW, SH, 0.1), m.trim);
       face.castShadow = true;
       face.receiveShadow = true;
       shield.add(face);
+      /* Rounded top: a whole cylinder laid across the head of the slab with its
+         lower half buried inside it. A half-cylinder would be the tidier answer
+         and is not worth it — getting the open half to point up survives
+         exactly until somebody changes a rotation, and the seven triangles it
+         saves are seven triangles. */
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(SW / 2, SW / 2, 0.1, 14), m.trim);
+      cap.rotation.set(Math.PI / 2, 0, 0);
+      cap.position.y = SH / 2;
+      cap.castShadow = true;
+      shield.add(cap);
 
-      const inner = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.38, 0.14, 6), m.suit);
-      inner.rotation.x = Math.PI / 2;
-      inner.position.z = 0.02;
-      shield.add(inner);
-
-      const boss = new THREE.Mesh(new THREE.IcosahedronGeometry(0.17, 0), m.glow);
-      boss.position.z = 0.12;
-      shield.add(boss);
-
-      const edge = new THREE.Mesh(new THREE.TorusGeometry(0.56, 0.05, 4, 6), m.accent);
-      edge.position.z = 0.01;
-      shield.add(edge);
-
-      // Ribs radiating from the boss.
-      for (let i = 0; i < 3; i++) {
-        const rib = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.9, 0.06), m.accent);
-        rib.position.z = 0.08;
-        rib.rotation.z = (i / 3) * Math.PI;
-        shield.add(rib);
+      // Banded iron edging all the way round, in the trim's darker metal.
+      for (const sx of [-1, 1]) {
+        const edge = new THREE.Mesh(new THREE.BoxGeometry(0.055, SH, 0.13), m.joint);
+        edge.position.set(sx * (SW / 2 - 0.02), 0, 0);
+        shield.add(edge);
+      }
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(SW + 0.03, 0.07, 0.14), m.accent);
+      foot.position.y = -SH / 2;
+      shield.add(foot);
+      // Two horizontal straps across the face, riveted.
+      for (const y of [-0.3, 0.26]) {
+        const strap = new THREE.Mesh(new THREE.BoxGeometry(SW, 0.07, 0.12), m.joint);
+        strap.position.set(0, y, 0.01);
+        shield.add(strap);
+        boltRow(shield, m.accent, {
+          from: [-SW * 0.38, y, 0.08], to: [SW * 0.38, y, 0.08], count: 4, r: 0.016,
+        });
       }
 
-      shield.position.set(-0.12, -0.36, 0.3);
-      shield.rotation.set(0, -0.18, 0);
+      /* The eight-pointed star, dead centre. Four crossed bars plus four short
+         diagonals — the shape is what a player remembers a tank by, and it is
+         cheap: eight boxes and a boss. */
+      const emblem = new THREE.Group();
+      emblem.position.z = 0.06;
+      shield.add(emblem);
+      for (let i = 0; i < 4; i++) {
+        const long = i < 2;
+        const ray = new THREE.Mesh(
+          new THREE.BoxGeometry(0.035, long ? 0.62 : 0.42, 0.03), m.accent);
+        ray.rotation.z = (i / 4) * Math.PI;
+        emblem.add(ray);
+      }
+      for (let i = 0; i < 4; i++) {
+        const barb = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.12, 4), m.accent);
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+        barb.position.set(Math.cos(a) * 0.2, Math.sin(a) * 0.2, 0);
+        barb.rotation.z = a - Math.PI / 2;
+        emblem.add(barb);
+      }
+      const boss = new THREE.Mesh(new THREE.IcosahedronGeometry(0.1, 0), m.glow);
+      boss.position.z = 0.04;
+      emblem.add(boss);
+
+      // Held close and slightly across the body — a tower shield is cover, and
+      // cover with daylight between it and the ribs is not cover.
+      shield.position.set(0.06, -0.52, 0.3);
+      shield.rotation.set(0, -0.12, 0);
       armL.userData.lower.add(shield);
 
-      const backplate = new THREE.Mesh(new THREE.CylinderGeometry(P.w * 0.5, P.w * 0.44, P.torso * 0.7, 6), m.trim);
+      // --- the body behind it ---
+      const backplate = new THREE.Mesh(new THREE.CylinderGeometry(P.w * 0.52, P.w * 0.46, P.torso * 0.74, 6), m.trim);
       backplate.scale.z = 0.4;
       backplate.position.set(0, P.torso * 0.6, -P.d * 0.78);
+      backplate.castShadow = true;
       torso.add(backplate);
+
+      // Gorget under the helmet, and a heavy brow over the lamps.
+      const gorget = new THREE.Mesh(new THREE.CylinderGeometry(P.w * 0.36, P.w * 0.44, 0.16, 8), m.joint);
+      gorget.position.y = P.torso * 1.02;
+      torso.add(gorget);
+      const brow = new THREE.Mesh(new THREE.BoxGeometry(P.headR * 1.9, P.headR * 0.3, P.headR * 0.5), m.trim);
+      brow.position.set(0, P.headR * 0.42, P.headR * 0.62);
+      brow.castShadow = true;
+      head.add(brow);
+
+      /* Tabard: three orange panels hanging off the belt, front and both hips.
+         The one soft edge on an otherwise entirely rigid character, and the
+         reason the waist does not read as a barrel. */
+      for (const [sx, w, len, rot] of [[0, 0.3, 0.62, 0], [-1, 0.2, 0.46, -0.25], [1, 0.2, 0.46, 0.25]]) {
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(w, len, 0.035), m.accent);
+        panel.position.set(sx * P.w * 0.4, P.torso * 0.02 - len * 0.5, P.d * (sx === 0 ? 0.56 : 0.3));
+        panel.rotation.z = rot;
+        panel.castShadow = true;
+        torso.add(panel);
+      }
+
+      // Pauldron spikes: three studs across the top of each shoulder.
+      for (const sx of [-1, 1]) {
+        for (let i = 0; i < 3; i++) {
+          const stud = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.11, 5), m.joint);
+          stud.position.set(sx * P.shoulder * 1.04 + (i - 1) * 0.11, P.torso * 0.96, -0.02);
+          torso.add(stud);
+        }
+      }
+
+      // Knee cops, so the legs read as armour rather than as posts.
+      for (const leg of [legL, legR]) {
+        const cop = new THREE.Mesh(
+          new THREE.SphereGeometry(P.legR[1] * 1.5, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), m.trim);
+        cop.rotation.x = 1.4;
+        cop.position.set(0, 0.01, P.legR[1] * 0.55);
+        cop.castShadow = true;
+        leg.userData.lower.add(cop);
+        const spur = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.1, 5), m.accent);
+        spur.position.set(0, 0.02, P.legR[1] * 1.5);
+        spur.rotation.x = 1.5;
+        leg.userData.lower.add(spur);
+      }
       break;
     }
     case 'halcyon': {
-      // Everything about this silhouette is thrust: a backpack with two
-      // gimballed nozzles, wing vanes off the shoulders, and a bomb rack.
-      const pack = new THREE.Mesh(new THREE.BoxGeometry(P.w * 0.78, P.torso * 0.62, 0.24), m.trim);
-      pack.position.set(0, P.torso * 0.62, -P.d * 0.72);
-      pack.castShadow = true;
-      torso.add(pack);
+      /* White airframe, and everything that is not white is thrust.
+       *
+       * The concept's whole silhouette is the wing: four long swept blades
+       * fanning off the back, lit from inside, longer than the body is tall.
+       * They are the reason you know what this character is from behind, so
+       * they get built first and everything else is arranged around them.
+       */
+      const blade = new THREE.MeshStandardMaterial({
+        color: char.accent, emissive: char.accent, emissiveIntensity: 2.6,
+        roughness: 0.2, metalness: 0.3, transparent: true, opacity: 0.92,
+      });
 
+      // --- the wing: four blades a side, fanning up and out ---
+      const wingRoot = new THREE.Group();
+      // Rooted at the shoulder blades rather than the base of the neck: a wing
+      // that grows out of the collar is a crown, and the concept's blades
+      // clearly hang off the back of the ribs.
+      wingRoot.position.set(0, P.torso * 0.66, -P.d * 0.7);
+      torso.add(wingRoot);
       for (const sx of [-1, 1]) {
-        // Nozzle: a cone pointing down, with the flame plate inside it lit.
-        const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 0.26, 8, 1, true), m.trim);
-        nozzle.position.set(sx * P.w * 0.34, P.torso * 0.3, -P.d * 0.74);
-        nozzle.rotation.x = -0.24;
+        for (let i = 0; i < 4; i++) {
+          const t = i / 3;                               // 0 innermost … 1 outermost
+          const len = 1.32 - t * 0.3;
+          const vane = new THREE.Mesh(new THREE.ConeGeometry(0.058 - t * 0.011, len, 4), blade);
+          /* Cones point +Y, so each blade is laid onto its own spoke: mostly
+             *out* to the side with a little lift and a little sweep back. The
+             first pass had them nearly vertical, which fanned them behind the
+             head into a collar instead of spreading them into a wing. */
+          vane.position.set(sx * (0.14 + t * 0.13), 0.1 - t * 0.06, -0.04 - t * 0.06);
+          vane.rotation.set(
+            -0.34 - t * 0.16,                            // swept back
+            0,
+            sx * (0.95 + t * 0.3),                       // fanned out and down
+          );
+          vane.castShadow = true;
+          wingRoot.add(vane);
+          // Housing at the root of each blade, in white.
+          const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.062, 0.13, 7), m.trim);
+          housing.position.copy(vane.position);
+          housing.rotation.copy(vane.rotation);
+          housing.translateY(-len * 0.46);
+          wingRoot.add(housing);
+        }
+      }
+      // Spine box the wing bolts to.
+      const spine = new THREE.Mesh(new THREE.BoxGeometry(P.w * 0.5, P.torso * 0.52, 0.16), m.trim);
+      spine.position.set(0, P.torso * 0.66, -P.d * 0.7);
+      spine.castShadow = true;
+      torso.add(spine);
+      const spineLight = new THREE.Mesh(new THREE.BoxGeometry(0.04, P.torso * 0.4, 0.04), m.glow);
+      spineLight.position.set(0, P.torso * 0.66, -P.d * 0.79);
+      torso.add(spineLight);
+
+      // --- thrusters: two under the pack, one behind each calf ---
+      for (const sx of [-1, 1]) {
+        const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.11, 0.24, 9, 1, true), m.trim);
+        nozzle.position.set(sx * P.w * 0.32, P.torso * 0.3, -P.d * 0.72);
+        nozzle.rotation.x = -0.26;
         nozzle.castShadow = true;
         torso.add(nozzle);
-        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.2, 7), m.glow);
-        flame.position.set(sx * P.w * 0.34, P.torso * 0.18, -P.d * 0.72);
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.26, 8), m.glow);
+        flame.position.set(sx * P.w * 0.32, P.torso * 0.14, -P.d * 0.68);
         flame.rotation.x = Math.PI;
         torso.add(flame);
-
-        // Wing vane: a swept blade off the shoulder, canted for lift.
-        const vane = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.03, 0.17), m.accent);
-        vane.position.set(sx * (P.shoulder + 0.26), P.torso * 0.86, -P.d * 0.3);
-        vane.rotation.set(0.1, sx * 0.34, sx * -0.42);
-        vane.castShadow = true;
-        torso.add(vane);
-        const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.24, 5), m.trim);
-        strut.position.set(sx * (P.shoulder + 0.1), P.torso * 0.84, -P.d * 0.2);
-        strut.rotation.z = Math.PI / 2;
-        torso.add(strut);
+      }
+      for (const leg of [legL, legR]) {
+        const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.062, 0.18, 8), m.trim);
+        pod.position.set(0, -0.16, -P.legR[2] * 2.0);
+        pod.rotation.x = 0.2;
+        leg.userData.lower.add(pod);
+        const jet = new THREE.Mesh(new THREE.ConeGeometry(0.042, 0.2, 7), m.glow);
+        jet.position.set(0, -0.3, -P.legR[2] * 2.1);
+        jet.rotation.x = Math.PI - 0.2;
+        leg.userData.lower.add(jet);
       }
 
-      // Bomb rack across the belly: three little ordnance eggs.
+      // --- ordnance: a cluster of three charges on the hip, and the rack ---
+      const rack = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.2), m.trim);
+      rack.position.set(P.w * 0.46, P.torso * 0.06, P.d * 0.24);
+      torso.add(rack);
       for (let i = 0; i < 3; i++) {
-        const bomb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 7, 6), m.accent);
-        bomb.position.set((i - 1) * 0.17, P.torso * 0.22, P.d * 0.52);
-        bomb.scale.z = 1.5;
+        const bomb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.062, 1), m.trim);
+        bomb.position.set(P.w * 0.46 + (i - 1) * 0.062, P.torso * 0.06 - 0.09, P.d * 0.24);
+        bomb.castShadow = true;
         torso.add(bomb);
+        const fuse = new THREE.Mesh(new THREE.SphereGeometry(0.022, 6, 5), m.glow);
+        fuse.position.set(P.w * 0.46 + (i - 1) * 0.062, P.torso * 0.06 - 0.14, P.d * 0.26);
+        torso.add(fuse);
       }
 
-      // Flight visor: a wraparound band rather than a slit.
-      const band = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 0.95, 0.03, 4, 12, Math.PI), m.glow);
-      band.rotation.set(0, 0, Math.PI);
-      band.position.set(0, 0.02, P.headR * 0.3);
-      head.add(band);
+      // --- white plating over the light frame ---
+      const breast = new THREE.Mesh(new THREE.SphereGeometry(P.w * 0.44, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), m.trim);
+      breast.scale.set(1, 0.8, 0.7);
+      breast.position.set(0, P.torso * 0.62, P.d * 0.2);
+      breast.castShadow = true;
+      torso.add(breast);
+      for (const sx of [-1, 1]) {
+        const intake = new THREE.Mesh(new THREE.BoxGeometry(0.05, P.torso * 0.3, 0.05), m.glow);
+        intake.position.set(sx * P.w * 0.44, P.torso * 0.56, P.d * 0.1);
+        torso.add(intake);
+      }
+      // Ankle fins — the last thing off the ground, and the concept has them lit.
+      for (const leg of [legL, legR]) {
+        const fin = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.24, 4), blade);
+        fin.position.set(leg.userData.outZ * P.legR[2] * 1.3, -0.36, -0.02);
+        fin.rotation.set(-0.3, 0, leg.userData.outZ * 0.5);
+        leg.userData.lower.add(fin);
+      }
       break;
     }
     case 'dasher': {
       /* Matte black, and the only thing you can actually see is the discharge.
        *
-       * The plate itself is nearly the background colour, so the silhouette has
-       * to be carried entirely by light: a soft additive shell around the body,
-       * a harder rim just off the chest, and lit edges wherever the frame has
-       * one. Two nested BackSide shells rather than one, because a single shell
-       * reads as a bubble and two read as falloff. `depthWrite: false` keeps
-       * them from punching a hole in whatever is drawn behind them, and neither
-       * one merges with anything because both own their material. */
+       * The plate is nearly the background colour, so the silhouette has to be
+       * carried entirely by light: a soft additive shell around the body, a
+       * harder rim just off the chest, lit edges wherever the frame has one —
+       * and, the thing the concept is actually built around, a teal scarf.
+       *
+       * The scarf is doing the work the old cone sash could not. A cone off the
+       * back is a tail; a wrapped collar with two long tails streaming behind
+       * is a neck, a direction of travel, and the only warm shape on an
+       * otherwise entirely hard body. It is also the one part of the character
+       * that is *cloth*, which is what stops the frame reading as another
+       * armoured trooper painted black.
+       */
       const auraColor = new THREE.Color(char.accent);
       for (const [radius, opacity] of [[0.92, 0.15], [1.22, 0.055]]) {
         const shell = new THREE.Mesh(
@@ -821,148 +1235,285 @@ export function buildPlayerModel(char) {
       halo.position.y = P.torso * 0.5;
       torso.add(halo);
 
-      // Everything on this frame is either a spear or a way of going faster.
-      // A quiver across the back, lit strips down the shins, and a sash that
-      // reads as speed even standing still.
-      const quiver = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.085, 0.6, 7), m.trim);
-      quiver.position.set(-P.w * 0.3, P.torso * 0.62, -P.d * 0.6);
-      quiver.rotation.set(0.2, 0, -0.42);
-      quiver.castShadow = true;
-      torso.add(quiver);
-      for (let i = 0; i < 3; i++) {
-        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.95, 5), m.suit);
-        shaft.position.set(-P.w * 0.3 + (i - 1) * 0.045, P.torso * 0.88, -P.d * 0.66);
-        shaft.rotation.set(0.2, 0, -0.42);
-        torso.add(shaft);
-        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.034, 0.14, 5), m.glow);
-        tip.position.set(-P.w * 0.3 + (i - 1) * 0.045 + 0.2, P.torso * 1.32, -P.d * 0.56);
-        tip.rotation.set(0.2, 0, -0.42);
-        torso.add(tip);
-      }
-
-      // Sprinter's greaves and heel blades: the legs are the character.
-      for (const leg of [legL, legR]) {
-        const greave = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.32, 0.03), m.glow);
-        greave.position.set(0, -0.2, P.legR[2] * 1.5);
-        leg.userData.lower.add(greave);
-        const blade = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.22, 4), m.accent);
-        blade.position.set(0, -0.3, -P.legR[2] * 1.9);
-        blade.rotation.x = -0.5;
-        leg.userData.lower.add(blade);
-      }
-
-      // Trailing sash, lit rather than painted — on a black frame an accent
-      // that only reflects is an accent nobody ever sees.
-      const sash = new THREE.Mesh(new THREE.ConeGeometry(P.w * 0.4, 0.78, 6, 1, true), m.glow);
-      sash.position.set(0, P.torso * 0.42, -P.d * 0.46);
-      sash.rotation.x = 0.3;
-      torso.add(sash);
-
-      // Lit edge along each pauldron and down the outside of each thigh, so the
-      // shape still resolves at range with no light on it at all.
+      /* --- the scarf --- */
+      const scarfMat = new THREE.MeshStandardMaterial({
+        color: char.accent, emissive: char.accent, emissiveIntensity: 0.55,
+        roughness: 0.85, metalness: 0.0,
+      });
+      // The wrap itself: a thick collar sitting on the shoulders, tipped
+      // forward so it bunches under the chin rather than ringing the neck.
+      const wrap = new THREE.Mesh(new THREE.TorusGeometry(P.w * 0.31, 0.055, 6, 16), scarfMat);
+      wrap.rotation.set(Math.PI / 2 + 0.12, 0, 0);
+      wrap.position.set(0, P.torso * 1.0, 0.01);
+      wrap.scale.z = 0.88;
+      wrap.castShadow = true;
+      torso.add(wrap);
+      // A knot at the throat and a short bib hanging off it.
+      const knot = new THREE.Mesh(new THREE.IcosahedronGeometry(0.055, 0), scarfMat);
+      knot.position.set(P.w * 0.13, P.torso * 0.96, P.d * 0.4);
+      torso.add(knot);
+      const bib = new THREE.Mesh(new THREE.ConeGeometry(P.w * 0.17, 0.22, 5, 1, true), scarfMat);
+      bib.position.set(P.w * 0.1, P.torso * 0.84, P.d * 0.34);
+      bib.rotation.set(-0.2, 0, 0.2);
+      torso.add(bib);
+      /* Two tails, streaming *back* and down. They were fanned out to the sides
+         and read as a bow tie: a scarf is only a scarf while it hangs behind
+         the shoulder line, so the lateral spread stays small and almost all the
+         travel is in −Z. Tapered segments rather than one long box, so they
+         read as fabric with weight in them. */
       for (const sx of [-1, 1]) {
-        const edge = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, P.d * 1.5), m.glow);
-        edge.position.set(sx * P.shoulder * 1.12, P.torso * 0.84, 0);
+        for (let k = 0; k < 3; k++) {
+          const t = k / 2;
+          const tail = new THREE.Mesh(
+            new THREE.BoxGeometry(0.085 - t * 0.022, 0.32 - t * 0.05, 0.02), scarfMat);
+          tail.position.set(
+            sx * (P.w * 0.11 + t * 0.045),
+            P.torso * 0.9 - t * 0.34,
+            -P.d * (0.62 + t * 0.62),
+          );
+          tail.rotation.set(0.85 + t * 0.3, sx * t * 0.14, sx * (0.06 + t * 0.08));
+          tail.castShadow = true;
+          torso.add(tail);
+        }
+      }
+
+      /* --- lit edges: how a black frame keeps a shape at range --- */
+      // A blade fin off each pauldron, angled back — the concept's shoulders
+      // are wedges, not domes, and the fin is what makes them read that way.
+      for (const sx of [-1, 1]) {
+        // Swept back along the body, not out from it — a fin that points
+        // sideways is an antler, and the concept's shoulders are wedges.
+        const fin = new THREE.Mesh(new THREE.ConeGeometry(0.042, 0.3, 4), m.glow);
+        fin.position.set(sx * P.shoulder * 1.02, P.torso * 0.88, -0.16);
+        fin.rotation.set(-1.42, 0, sx * 0.18);
+        fin.castShadow = true;
+        torso.add(fin);
+        const edge = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.028, P.d * 1.5), m.glow);
+        edge.position.set(sx * P.shoulder * 1.1, P.torso * 0.82, 0);
         torso.add(edge);
       }
+      // Ribs down the flanks and a line down the sternum.
+      for (const sx of [-1, 1]) {
+        for (let k = 0; k < 3; k++) {
+          const rib = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.13), m.glow);
+          rib.position.set(sx * P.w * 0.47, P.torso * (0.4 + k * 0.14), 0.02);
+          rib.rotation.y = sx * 0.3;
+          torso.add(rib);
+        }
+      }
+      const sternum = new THREE.Mesh(new THREE.BoxGeometry(0.024, P.torso * 0.36, 0.024), m.glow);
+      sternum.position.set(0, P.torso * 0.6, P.d * 0.56);
+      torso.add(sternum);
+
+      // Sprinter's greaves, heel blades and lit thigh stripes: the legs are
+      // the character, and they are the part that has to say "fast".
       for (const leg of [legL, legR]) {
-        const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.4, 0.028), m.glow);
+        const greave = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.32, 0.028), m.glow);
+        greave.position.set(0, -0.2, P.legR[2] * 1.5);
+        leg.userData.lower.add(greave);
+        const heel = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.24, 4), m.accent);
+        heel.position.set(0, -0.3, -P.legR[2] * 1.9);
+        heel.rotation.x = -0.5;
+        leg.userData.lower.add(heel);
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.4, 0.026), m.glow);
         stripe.position.set(leg.userData.outZ * P.legR[0] * 1.05, -0.2, 0);
         leg.add(stripe);
       }
 
       // Vents down the ribs — the frame is mostly cooling and almost no armour.
       ventStack(torso, m.trim, {
-        pos: [P.w * 0.44, P.torso * 0.5, 0], count: 4, size: [0.014, 0.09, 0.05], spacing: 0.075,
+        pos: [P.w * 0.44, P.torso * 0.5, -0.06], count: 4, size: [0.014, 0.09, 0.05], spacing: 0.075,
       });
       ventStack(torso, m.trim, {
-        pos: [-P.w * 0.44, P.torso * 0.5, 0], count: 4, size: [0.014, 0.09, 0.05], spacing: 0.075,
+        pos: [-P.w * 0.44, P.torso * 0.5, -0.06], count: 4, size: [0.014, 0.09, 0.05], spacing: 0.075,
       });
-
-      // Single-eye visor slit: nothing on this head but the part that aims.
-      const slit = new THREE.Mesh(new THREE.BoxGeometry(P.headR * 1.5, 0.035, 0.03), m.glow);
-      slit.position.set(0, 0.015, P.headR * 0.92);
-      head.add(slit);
       break;
     }
     case 'chain': {
-      /* A straw hat and a robe, and almost no hardware.
+      /* A straw hat, a robe, and no armour worth the name.
        *
        * Every other silhouette in the descent is plate and thrusters, so this
-       * one is deliberately cloth: the read at range is a wide flat disc where
-       * the head should be and a cone where the legs should be. Both are built
-       * from their own materials rather than the suit's, because a straw hat
-       * that takes the character's metalness stops looking like straw. */
-      const straw = mat(0xd8b877, { roughness: 0.94, metalness: 0.02 });
-      const strawDark = mat(0xa8863f, { roughness: 0.95, metalness: 0.02 });
-      const cloth = mat(char.color, { roughness: 0.92, metalness: 0.03 });
+       * one is deliberately cloth and deliberately layered: a dark red under-
+       * robe from the shoulders to the shins, a cream over-robe open down the
+       * front, a rope belt, and the widest flat disc in the game where the head
+       * should be. All of it is built from its own materials — a straw hat that
+       * takes the character's metalness stops looking like straw.
+       *
+       * The hat gets a red flower and the face gets a red scarf, and between
+       * them they are the only saturated colour on the model. That is the whole
+       * palette trick: everything else is linen, straw and dirt, so the eye
+       * goes to the two red marks and reads them as the character.
+       */
+      const straw = mat(0xd2b48c, { roughness: 0.94, metalness: 0.02 });
+      const strawDark = mat(0x9c7a48, { roughness: 0.95, metalness: 0.02 });
+      const linen = mat(0xf2e6c9, { roughness: 0.92, metalness: 0.02 });
+      const under = mat(0x7d2f31, { roughness: 0.9, metalness: 0.03 });
+      const rope = mat(0x8a6f4a, { roughness: 0.95, metalness: 0.02 });
+      const red = mat(0xc94a4a, { roughness: 0.86, metalness: 0.04 });
+      const iron = mat(0x4a4038, { roughness: 0.62, metalness: 0.7 });
 
-      // --- straw hat: a wide conical brim, a crown, and a band ---
+      /* --- the straw hat: a wide conical brim, a crown, a band, a flower --- */
       const hat = new THREE.Group();
-      const brim = new THREE.Mesh(new THREE.ConeGeometry(P.headR * 2.9, 0.14, 14, 1, true), straw);
+      const brim = new THREE.Mesh(new THREE.ConeGeometry(P.headR * 3.1, 0.16, 16, 1, true), straw);
       brim.position.y = P.headR * 0.42;
       brim.castShadow = true;
       hat.add(brim);
       // A second, shallower cone closes the top of the brim so it is not a
       // hollow funnel when you look down on it.
-      const crown = new THREE.Mesh(new THREE.ConeGeometry(P.headR * 1.15, P.headR * 1.5, 14), straw);
-      crown.position.y = P.headR * 1.05;
+      const crown = new THREE.Mesh(new THREE.ConeGeometry(P.headR * 1.2, P.headR * 1.6, 16), straw);
+      crown.position.y = P.headR * 1.08;
       crown.castShadow = true;
       hat.add(crown);
-      const band = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 1.06, 0.026, 4, 14), strawDark);
+      const band = new THREE.Mesh(new THREE.TorusGeometry(P.headR * 1.1, 0.028, 4, 16), strawDark);
       band.rotation.x = Math.PI / 2;
-      band.position.y = P.headR * 0.5;
+      band.position.y = P.headR * 0.52;
       hat.add(band);
       // Weave lines radiating out across the brim.
-      for (let i = 0; i < 8; i++) {
-        const a = (i / 8) * Math.PI * 2;
-        const rib = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.012, P.headR * 1.7), strawDark);
-        rib.position.set(Math.cos(a) * P.headR * 1.4, P.headR * 0.44, Math.sin(a) * P.headR * 1.4);
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        const rib = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.012, P.headR * 1.9), strawDark);
+        rib.position.set(Math.cos(a) * P.headR * 1.5, P.headR * 0.44, Math.sin(a) * P.headR * 1.5);
         rib.rotation.y = -a;
         hat.add(rib);
       }
-      hat.position.y = P.headR * 0.35;
+      // The flower, pinned to the brim on his right.
+      const flower = new THREE.Group();
+      flower.position.set(P.headR * 1.85, P.headR * 0.5, P.headR * 1.05);
+      hat.add(flower);
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const petal = new THREE.Mesh(new THREE.SphereGeometry(0.042, 6, 5), red);
+        petal.scale.set(1, 0.42, 1.25);
+        petal.position.set(Math.cos(a) * 0.045, 0.012, Math.sin(a) * 0.045);
+        petal.rotation.y = -a;
+        flower.add(petal);
+      }
+      const pistil = new THREE.Mesh(new THREE.SphereGeometry(0.026, 6, 5), strawDark);
+      pistil.position.y = 0.028;
+      flower.add(pistil);
+      // Two ribbons off the pin, hanging under the brim.
+      for (const sx of [-1, 1]) {
+        const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.2, 0.014), red);
+        ribbon.position.set(sx * 0.03, -0.11, 0.01);
+        ribbon.rotation.z = sx * 0.18;
+        flower.add(ribbon);
+      }
+      hat.position.y = P.headR * 0.34;
       head.add(hat);
       // Named so the hat-throw can take it off him — see `Combat._tickHat`.
       hatNode = hat;
 
-      // --- robe: one long cone from the shoulders past the knees ---
-      const robe = new THREE.Mesh(
-        new THREE.ConeGeometry(P.w * 1.15, P.torso + P.hipY * 0.78, 9, 1, true), cloth,
-      );
-      robe.position.y = P.torso * 0.52 - P.hipY * 0.36;
-      robe.castShadow = true;
-      torso.add(robe);
-      // Open front: two lapels laid over the cone so it reads as a garment
-      // rather than a traffic cone somebody is standing in.
-      for (const sx of [-1, 1]) {
-        const lapel = new THREE.Mesh(new THREE.BoxGeometry(0.14, P.torso * 1.15, 0.04), m.trim);
-        lapel.position.set(sx * P.w * 0.2, P.torso * 0.3, P.d * 0.58);
-        lapel.rotation.z = sx * 0.1;
-        torso.add(lapel);
-      }
-      // Sash at the waist, and the knot hanging off it.
-      const sash = new THREE.Mesh(new THREE.TorusGeometry(P.w * 0.56, 0.05, 5, 14), m.accent);
-      sash.rotation.x = Math.PI / 2;
-      sash.position.y = P.torso * 0.06;
-      sash.scale.z = 0.78;
-      torso.add(sash);
-      const knot = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.34, 0.06), m.accent);
-      knot.position.set(P.w * 0.32, -P.torso * 0.18, P.d * 0.5);
-      knot.rotation.z = 0.22;
-      torso.add(knot);
+      // --- the face: a red scarf over the lower half, and nothing else ---
+      const scarf = new THREE.Mesh(new THREE.SphereGeometry(P.headR * 1.06, 10, 8, 0, Math.PI * 2, Math.PI * 0.42, Math.PI * 0.4), red);
+      scarf.scale.set(1, 1.15, 1.02);
+      scarf.castShadow = true;
+      head.add(scarf);
+      const scarfKnot = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.16, 0.05), red);
+      scarfKnot.position.set(-P.headR * 0.72, -P.headR * 0.42, -P.headR * 0.3);
+      scarfKnot.rotation.z = 0.4;
+      head.add(scarfKnot);
+      // The dark under the brim, where a face would be.
+      const shade = new THREE.Mesh(new THREE.BoxGeometry(P.headR * 1.15, 0.03, 0.03), m.glow);
+      shade.position.set(0, P.headR * 0.06, P.headR * 0.88);
+      head.add(shade);
 
+      /* --- the robe, in two layers --- */
+      // Under-robe: dark red, shoulders to shins, the longer of the two.
+      const underRobe = new THREE.Mesh(
+        new THREE.ConeGeometry(P.w * 1.1, P.torso + P.hipY * 0.92, 10, 1, true), under);
+      underRobe.position.y = P.torso * 0.46 - P.hipY * 0.44;
+      underRobe.castShadow = true;
+      torso.add(underRobe);
+      // Over-robe: cream, shorter, and open down the front — built as two
+      // half-cones with a gap between them rather than one closed cone, which
+      // is what makes it read as a coat somebody is wearing open.
+      for (const sx of [-1, 1]) {
+        const half = new THREE.Mesh(
+          new THREE.ConeGeometry(P.w * 1.16, P.torso + P.hipY * 0.5, 8, 1, true, sx > 0 ? 0.35 : Math.PI + 0.35, Math.PI - 0.7),
+          linen,
+        );
+        half.position.set(0, P.torso * 0.5 - P.hipY * 0.22, 0);
+        half.castShadow = true;
+        torso.add(half);
+      }
+      // The shoulder yoke, which is what stops the two halves reading as wings.
+      const yoke = new THREE.Mesh(
+        new THREE.SphereGeometry(P.w * 0.62, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.42), linen);
+      yoke.scale.set(1, 0.66, 0.86);
+      yoke.position.y = P.torso * 0.78;
+      yoke.castShadow = true;
+      torso.add(yoke);
       // Wide sleeves over the upper arms — cloth, not plate.
       for (const arm of [armL, armR]) {
-        const sleeve = new THREE.Mesh(new THREE.ConeGeometry(P.armR[0] * 2.1, 0.34, 7, 1, true), cloth);
-        sleeve.position.y = -0.14;
+        const sleeve = new THREE.Mesh(new THREE.ConeGeometry(P.armR[0] * 2.3, 0.38, 8, 1, true), linen);
+        sleeve.position.y = -0.13;
+        sleeve.castShadow = true;
         arm.add(sleeve);
+        // Wrapped forearm underneath it.
+        const wrapArm = new THREE.Mesh(
+          new THREE.CylinderGeometry(P.armR[2] * 1.25, P.armR[2] * 1.1, 0.26, 8), under);
+        wrapArm.position.y = -0.18;
+        arm.userData.lower.add(wrapArm);
       }
 
-      // Under the brim there is nothing but the visor line.
-      const shade = new THREE.Mesh(new THREE.BoxGeometry(P.headR * 1.2, 0.03, 0.03), m.glow);
-      shade.position.set(0, -0.02, P.headR * 0.9);
-      head.add(shade);
+      /* --- the rope belt, and the chain hanging off it --- */
+      // Braided: two offset toruses reading as a twist, rather than one ring.
+      for (const [tilt, r] of [[0.05, 0.042], [-0.05, 0.038]]) {
+        const coil = new THREE.Mesh(new THREE.TorusGeometry(P.w * 0.58, r, 5, 16), rope);
+        coil.rotation.set(Math.PI / 2, 0, tilt);
+        coil.position.y = P.torso * 0.06;
+        coil.scale.z = 0.8;
+        torso.add(coil);
+      }
+      const beltKnot = new THREE.Mesh(new THREE.IcosahedronGeometry(0.075, 0), rope);
+      beltKnot.position.set(-P.w * 0.16, P.torso * 0.04, P.d * 0.54);
+      torso.add(beltKnot);
+      // Two cord ends hanging from the knot.
+      for (const sx of [-1, 1]) {
+        const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.013, 0.4, 6), rope);
+        cord.position.set(-P.w * 0.16 + sx * 0.05, P.torso * 0.04 - 0.22, P.d * 0.52);
+        cord.rotation.z = sx * 0.14;
+        torso.add(cord);
+      }
+
+      /* The chain, on his left hip. It is the ability made visible: the hat
+         goes out on it and comes back on it, and a run of alternating links
+         with a weight on the end is the shape that says so from any angle. */
+      const chain = new THREE.Group();
+      chain.position.set(-P.w * 0.5, P.torso * 0.02, P.d * 0.18);
+      chain.rotation.z = 0.16;
+      torso.add(chain);
+      for (let i = 0; i < 9; i++) {
+        const link = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.012, 4, 8), iron);
+        // Alternating link planes: what makes a stack of toruses read as chain.
+        link.rotation.y = (i % 2) * Math.PI / 2;
+        link.position.set(Math.sin(i * 0.55) * 0.03, -i * 0.058, 0);
+        chain.add(link);
+      }
+      // The weight at the end of it: a little straw hat, because of course.
+      const weight = new THREE.Group();
+      weight.position.y = -0.55;
+      chain.add(weight);
+      const wBrim = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.045, 10, 1, true), straw);
+      weight.add(wBrim);
+      const wCrown = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.055, 10), straw);
+      wCrown.position.y = 0.038;
+      weight.add(wCrown);
+      const wFlower = new THREE.Mesh(new THREE.SphereGeometry(0.024, 6, 5), red);
+      wFlower.scale.y = 0.5;
+      wFlower.position.set(0.062, 0.014, 0.03);
+      weight.add(wFlower);
+
+      // Sandals: a sole and two straps, so the feet are not boots.
+      for (const leg of [legL, legR]) {
+        const strapA = new THREE.Mesh(new THREE.BoxGeometry(P.legR[2] * 2.1, 0.024, 0.05), rope);
+        strapA.position.set(0, -0.4, P.legR[2] * 0.5);
+        leg.userData.lower.add(strapA);
+        const shinWrap = new THREE.Mesh(
+          new THREE.CylinderGeometry(P.legR[2] * 1.2, P.legR[2] * 1.35, 0.24, 8), under);
+        shinWrap.position.y = -0.26;
+        leg.userData.lower.add(shinWrap);
+      }
       break;
     }
     default: {
@@ -1030,10 +1581,11 @@ export function buildPlayerModel(char) {
  * it spends its life spinning through the air at thirty metres a second where
  * nobody is going to read the weave.
  */
-export function buildHatModel(accent = 0x9dff6a, scale = 1) {
+export function buildHatModel(accent = 0xc94a4a, scale = 1) {
   const g = new THREE.Group();
-  const straw = mat(0xd8b877, { roughness: 0.94, metalness: 0.02 });
-  const strawDark = mat(0xa8863f, { roughness: 0.95, metalness: 0.02 });
+  const straw = mat(0xd2b48c, { roughness: 0.94, metalness: 0.02 });
+  const strawDark = mat(0x9c7a48, { roughness: 0.95, metalness: 0.02 });
+  const petalMat = mat(0xc94a4a, { roughness: 0.86, metalness: 0.04 });
   const lit = new THREE.MeshStandardMaterial({
     color: accent, emissive: accent, emissiveIntensity: 2.0, roughness: 0.4,
   });
@@ -1046,6 +1598,20 @@ export function buildHatModel(accent = 0x9dff6a, scale = 1) {
   band.rotation.x = Math.PI / 2;
   band.position.y = 0.05;
   g.add(band);
+  /* The flower goes with it. It is the same object as the one on his head, and
+     the thing that makes a spinning disc identifiable as *his* hat mid-flight
+     rather than as a generic projectile — so it is worth six triangles. */
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const petal = new THREE.Mesh(new THREE.SphereGeometry(0.062, 6, 5), petalMat);
+    petal.scale.set(1, 0.4, 1.2);
+    petal.position.set(0.36 + Math.cos(a) * 0.065, 0.03, Math.sin(a) * 0.065);
+    petal.rotation.y = -a;
+    g.add(petal);
+  }
+  const pistil = new THREE.Mesh(new THREE.SphereGeometry(0.036, 6, 5), strawDark);
+  pistil.position.set(0.36, 0.055, 0);
+  g.add(pistil);
   // A lit rim around the edge: it has to be findable across an arena.
   const rim = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.018, 4, 20), lit);
   rim.rotation.x = Math.PI / 2;
