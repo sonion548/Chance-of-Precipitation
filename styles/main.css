@@ -146,6 +146,14 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: none; ba
 #reload.bad .rl-track { border-color: var(--danger); }
 #reload.bad .rl-zone { background: rgba(120,60,60,.5); box-shadow: none; }
 #reload.bad .rl-label { color: var(--danger); }
+/* A magazine is a wait, not a test: no marker to chase, and the fill runs cool
+   rather than in the hot orange the active-reload window uses to say "now". */
+#reload.timed .rl-marker { display: none; }
+#reload.timed .rl-zone {
+  background: linear-gradient(180deg, rgba(70,224,192,.8), rgba(70,224,192,.28));
+  box-shadow: 0 0 12px rgba(70,224,192,.45);
+}
+#reload.timed .rl-label { color: var(--accent-2); }
 
 /* --- top bar --- */
 #hud-top {
@@ -221,6 +229,22 @@ button { font-family: inherit; color: inherit; cursor: pointer; border: none; ba
   box-shadow: 0 0 12px rgba(255,77,94,.4);
   transition: width .12s linear;
 }
+/* Phase thresholds. A boss that changes at 66% and 33% should say so on the
+   bar rather than surprising you with it — the tick is the thing you push
+   toward, and it is how "three phases" reads as a structure instead of as two
+   unexplained interruptions. */
+#boss-phases { position: absolute; inset: 0; pointer-events: none; }
+#boss-phases .bb-tick {
+  position: absolute; top: -1px; bottom: -1px; width: 2px; margin-left: -1px;
+  background: rgba(12,8,12,.85);
+  box-shadow: 0 0 0 1px rgba(255,224,228,.35);
+}
+#boss-bar.armoured .bb-track { border-color: #ffd9dd; }
+#boss-bar.armoured #boss-fill {
+  background: linear-gradient(180deg, #cfd6e6, #7d8798);
+  box-shadow: 0 0 16px rgba(226,238,255,.55);
+}
+
 #objective-bar { height: 6px; background: #0a0d14; border-radius: 4px; margin-top: 8px; overflow: hidden; }
 #objective-fill { height: 100%; width: 0%; background: linear-gradient(90deg,#46e0c0,#57b7ff); transition: width .2s linear; }
 #objective-sub { font-size: 12px; color: var(--muted); margin-top: 6px; letter-spacing: 1px; }

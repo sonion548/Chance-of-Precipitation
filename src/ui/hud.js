@@ -59,6 +59,7 @@ export class HUD {
       bossHpText: $('boss-hp-text'),
       bossFill: $('boss-fill'),
       bossLag: $('boss-lag'),
+      bossPhases: $('boss-phases'),
       pickupCard: $('pickup-card'),
       pcGlyph: $('pc-glyph'),
       pcName: $('pc-name'),
@@ -237,11 +238,22 @@ export class HUD {
     if (!r) { if (this.reloadOn) this._setReload(false); return; }
     if (!this.reloadOn) this._setReload(true);
     const el = this.el;
+    const frac = clamp01(r.t / r.time);
+    el.reload.classList.toggle('timed', !!r.timed);
+    if (r.timed) {
+      /* A magazine has nothing to aim at, so the bar is a bar: the zone fills
+         left to right as the hands work and there is no marker to chase. */
+      el.reload.classList.remove('good', 'bad');
+      el.reloadZone.style.left = '0%';
+      el.reloadZone.style.width = `${frac * 100}%`;
+      el.reloadLabel.textContent = 'RELOADING';
+      return;
+    }
     el.reload.classList.toggle('good', r.result === 'good');
     el.reload.classList.toggle('bad', r.result === 'bad');
     el.reloadZone.style.left = `${r.zoneStart * 100}%`;
     el.reloadZone.style.width = `${(r.zoneEnd - r.zoneStart) * 100}%`;
-    el.reloadMarker.style.left = `${clamp01(r.t / r.time) * 100}%`;
+    el.reloadMarker.style.left = `${frac * 100}%`;
     el.reloadLabel.textContent = r.result === 'good' ? 'CHAMBERED'
       : r.result === 'bad' ? 'JAMMED' : 'RELOAD';
   }
@@ -249,7 +261,7 @@ export class HUD {
   _setReload(on) {
     this.reloadOn = on;
     this.el.reload.classList.toggle('hidden', !on);
-    if (!on) this.el.reload.classList.remove('good', 'bad');
+    if (!on) this.el.reload.classList.remove('good', 'bad', 'timed');
   }
 
   _updateAbilities(p) {
@@ -267,6 +279,9 @@ export class HUD {
         total = w.primary.cooldown / Math.max(0.05, p.stats.attackSpeed);
         remaining = combat.primaryTimer;
         if (w.primary.beam) chargeFrac = combat.heat;
+        // Rounds left, for a weapon that counts them. The badge is the only
+        // warning you get before the two seconds land, so it is always on.
+        if (combat.ammo !== null) stackText = `${combat.ammo}`;
       } else if (a.kind === 'secondary') {
         total = w.secondary.cooldown * p.stats.cooldownMult;
         remaining = combat.secondaryTimer;
@@ -320,7 +335,8 @@ export class HUD {
     const el = this.el;
     if (!enemy) {
       el.bossBar.classList.add('hidden');
-      el.bossBar.classList.remove('show');
+      el.bossBar.classList.remove('show', 'armoured');
+      el.bossPhases.innerHTML = '';
       return;
     }
     this.bossLagValue = 1;
@@ -336,6 +352,16 @@ export class HUD {
     } else {
       el.bossAffix.textContent = '';
     }
+    /* Threshold ticks, for a boss that changes form at one. The first row is
+       where the fight opens, so it is not a threshold and gets no mark. */
+    el.bossPhases.innerHTML = '';
+    for (const phase of (enemy.def.phases || []).slice(1)) {
+      const tick = document.createElement('div');
+      tick.className = 'bb-tick';
+      tick.style.left = `${clamp01(phase.at) * 100}%`;
+      tick.title = phase.name || '';
+      el.bossPhases.appendChild(tick);
+    }
   }
 
   _updateBossBar(dt) {
@@ -348,7 +374,13 @@ export class HUD {
     this.el.bossFill.style.width = `${f * 100}%`;
     this.bossLagValue = Math.max(f, this.bossLagValue - dt * 0.22);
     this.el.bossLag.style.width = `${this.bossLagValue * 100}%`;
-    this.el.bossHpText.textContent = `${formatNumber(Math.ceil(boss.health))} / ${formatNumber(Math.round(boss.maxHealth))}`;
+    // Mid-shed the bar goes cold and the name says what it is doing, so the
+    // seconds your damage does nothing are seconds you can see a reason for.
+    const shedding = boss.shellTimer > 0;
+    this.el.bossBar.classList.toggle('armoured', shedding);
+    this.el.bossHpText.textContent = shedding
+      ? 'IMMUNE'
+      : `${formatNumber(Math.ceil(boss.health))} / ${formatNumber(Math.round(boss.maxHealth))}`;
   }
 
   /**

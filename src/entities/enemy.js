@@ -3,7 +3,7 @@ import { DIRECTOR, DIFFICULTY } from '../core/config.js';
 import { clamp01, damp, armorMultiplier, angleLerp } from '../core/mathx.js';
 import { moveWithCollision, rayCapsule, raycastWorld, distanceToBody } from '../systems/physics.js';
 import { buildEnemyModel } from './models.js';
-import { ENEMIES_BY_ID, AFFIX_BY_ID } from '../data/enemies.js';
+import { ENEMIES_BY_ID, AFFIX_BY_ID, SOVEREIGN_PHASES } from '../data/enemies.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -52,6 +52,11 @@ export class Enemy {
     // ground (which is also what makes it unhittable).
     this.ward = 0;
     this.burrowed = false;
+    // Which row of its phase table a multi-phase boss is fighting out of, and
+    // how long it has left of being untouchable while it changes between them.
+    this.phaseIndex = 0;
+    this.phase = 1;
+    this.shellTimer = 0;
     this.minions = null;
     this.spawnTime = 0;
     this.volleyLeft = 0;
@@ -203,6 +208,15 @@ export class Enemy {
 
   takeDamage(amount, opts = {}) {
     if (this.dead) return 0;
+
+    /* Total immunity is its own answer, not a damage number that reads zero.
+       Only the Sovereign's shed reaches a full ward — the Choir's caps at 0.72
+       — and during it the screen should say "nothing is happening" once rather
+       than saying it eleven times a second in floating zeroes. */
+    if (this.ward >= 1) {
+      this.hitFlash = Math.max(this.hitFlash, 0.35);
+      return 0;
+    }
 
     let dmg = amount;
     // A warded boss is protected by something else that is still alive. The
@@ -816,13 +830,18 @@ export class Enemy {
    * The Null Sovereign — the optional fight at the bottom.
    *
    * Three phases rather than one rotation of patterns, because the difference
-   * between a long boss and a hard one is whether it changes its mind. Each
-   * threshold cuts the pause between attacks and adds a pattern rather than
-   * replacing one, so the last third is everything at once.
+   * between a long boss and a hard one is whether it changes its mind. Every
+   * number that moves between them lives in `SOVEREIGN_PHASES` (data/enemies.js)
+   * and is read from the row below; nothing here decides anything by comparing
+   * a phase number against a literal.
    *
-   *   Above 66%  barrage, summons
-   *   Above 33%  + rifts (expanding hazard rings) and blink-slams
-   *   Below 33%  + a sweeping wall of fire, and no time to breathe
+   *   Sealed      100–66%  barrage and summons, at arm's length
+   *   Shelled      66–33%  + rifts and blink-slams, closing in
+   *   Unravelled   33–0%   + a sweeping wall of fire, and no time to breathe
+   *
+   * Each threshold armours it for a second or two while it sheds — untouchable,
+   * motionless, venting a ring of fire you have to leave — so the change is a
+   * beat in the fight rather than a line on the health bar.
    */
   /**
    * Thornmaw: half the fight happens underground.
@@ -1052,24 +1071,59 @@ export class Enemy {
     }
   }
 
+  /** The phase row it is currently fighting out of. Never undefined. */
+  get sovereignPhase() {
+    const table = this.def.phases || SOVEREIGN_PHASES;
+    return table[Math.min(this.phaseIndex ?? 0, table.length - 1)];
+  }
+
   _aiSovereign(dt, player, world, dist) {
+    const table = this.def.phases || SOVEREIGN_PHASES;
     const frac = this.health / this.maxHealth;
-    const phase = frac > 0.66 ? 1 : frac > 0.33 ? 2 : 3;
-    if (phase !== this.phase) {
-      this.phase = phase;
-      this._sovereignPhaseShift(phase, player);
+
+    // The last row whose threshold we have fallen past. Read forward rather
+    // than compared against two magic numbers, so adding a fourth phase to the
+    // table is the whole of adding a fourth phase.
+    let index = 0;
+    for (let i = 0; i < table.length; i++) if (frac <= table[i].at) index = i;
+    if (index !== (this.phaseIndex ?? 0)) {
+      this.phaseIndex = index;
+      // `phase` stays a 1-based number because the rest of the model animation
+      // and the co-op snapshot read it that way.
+      this.phase = index + 1;
+      this._sovereignPhaseShift(table[index], player);
     }
+    const P = table[this.phaseIndex ?? 0];
+
+    /* Shedding. Untouchable, motionless and attacking nothing while the shell
+       comes off — the one window in the fight where the damage race stops, so
+       the change of form is something you watch rather than something you burst
+       straight through without noticing. */
+    if (this.shellTimer > 0) {
+      this.shellTimer -= dt;
+      this.velocity.x *= 0.8;
+      this.velocity.z *= 0.8;
+      this._faceTarget(dt, player.position, 1.2);
+      if (this.shellTimer <= 0) {
+        this.ward = 0;
+        this.game.fx.explosion(this.center, 20, this.def.accent, 2.6);
+        this.game.fx.ring(this.position, 2, 30, this.def.accent, 0.8, 1);
+        this.game.engine.addShake(0.7);
+      }
+      return;
+    }
+
     this._faceTarget(dt, player.position, 3.6);
 
     // Keeps its distance, but never stops moving — it drifts around the ring.
     const pref = this.def.preferredRange;
-    const orbit = this.game.time * (0.22 + phase * 0.1) * (this.orbitDir ?? 1);
+    const orbit = this.game.time * P.orbitSpeed * (this.orbitDir ?? 1);
     _v2.set(
       player.position.x + Math.cos(orbit) * pref,
       this.position.y,
       player.position.z + Math.sin(orbit) * pref,
     );
-    this._steer(dt, _v2, phase >= 3 ? 1.25 : 1, world);
+    this._steer(dt, _v2, P.moveScale, world);
 
     if (this.state === 'windup') {
       this.windupTimer -= dt;
@@ -1093,33 +1147,47 @@ export class Enemy {
 
     if (this.attackTimer > 0) return;
     // Faster and faster as it loses health.
-    this.attackTimer = this.def.attackCooldown * (phase === 1 ? 1 : phase === 2 ? 0.78 : 0.56);
+    this.attackTimer = this.def.attackCooldown * P.cooldown;
     this.state = 'windup';
-    this.windupTimer = this.def.windup * (phase === 3 ? 0.7 : 1);
-    this.pendingAttack = this._sovereignPick(phase, dist);
+    this.windupTimer = this.def.windup * P.windup;
+    this.pendingAttack = this._sovereignPick(P, dist);
     this._sovereignTelegraph(this.pendingAttack, player);
   }
 
-  _sovereignPick(phase, dist) {
-    const pool = ['barrage', 'summon'];
-    if (phase >= 2) pool.push('rift', 'slam');
-    if (phase >= 3) pool.push('sweep', 'rift', 'barrage');
-    if (dist < 9) pool.push('slam');
+  _sovereignPick(P, dist, depth = 0) {
+    const pool = dist < 9 ? [...P.attacks, 'slam'] : P.attacks;
     const pick = pool[Math.floor(Math.random() * pool.length)];
     // Never the same thing twice running; a boss that repeats reads as stuck.
-    return pick === this.lastAttack && pool.length > 1 ? this._sovereignPick(phase, dist) : pick;
+    // Bounded, because a one-entry pool would otherwise recurse forever.
+    if (pick === this.lastAttack && pool.length > 1 && depth < 6) {
+      return this._sovereignPick(P, dist, depth + 1);
+    }
+    return pick;
   }
 
-  _sovereignPhaseShift(phase, player) {
+  /**
+   * Crossing a threshold: it stops, armours up, and comes back different.
+   *
+   * The ring of fire is the reason the window is not free damage — it goes out
+   * at the moment it becomes untouchable, so the seconds you cannot hurt it are
+   * seconds you spend getting out of the middle rather than standing in it.
+   */
+  _sovereignPhaseShift(P, player) {
     this.orbitDir = Math.random() < 0.5 ? 1 : -1;
-    if (phase === 1) return;
-    this.attackTimer = 0.9;
+    this.volleyLeft = 0;
+    if (!P.armour) return;
+
+    this.shellTimer = P.armour;
+    this.ward = 1;                       // untouchable while the shell comes off
+    this.attackTimer = P.armour + 0.5;
+    this.state = 'chase';
+    this.windupTimer = 0;
     this.invulnFlash = 1;
     this.game.fx.explosion(this.center, 16, this.def.accent, 2.2);
     this.game.fx.ring(this.position, 2, 26, this.def.accent, 0.9, 1);
     this.game.engine.addShake(0.9);
-    this.game.ui.toast(phase === 2 ? 'THE SOVEREIGN SHEDS ITS SHELL' : 'THE SOVEREIGN UNRAVELS', '#ff2f8f');
-    this.game.chat?.system(phase === 2 ? 'The Sovereign sheds its shell.' : 'The Sovereign unravels.', '#ff2f8f');
+    if (P.toast) this.game.ui.toast(P.toast, '#ff2f8f');
+    if (P.line) this.game.chat?.system(P.line, '#ff2f8f');
     // A ring of fire on every phase change: get out of the middle.
     for (let i = 0; i < 14; i++) {
       const a = (i / 14) * Math.PI * 2;
@@ -1128,6 +1196,7 @@ export class Enemy {
         { radius: 4.2, damage: this.damage * 0.7, delay: 0.7, color: this.def.accent },
       );
     }
+    void player;
   }
 
   _sovereignTelegraph(kind, player) {
@@ -1145,7 +1214,7 @@ export class Enemy {
       case 'slam': return this._sovereignSlam(player);
       case 'sweep': return this._sovereignSweep(player);
       default:
-        this.volleyLeft = this.phase >= 3 ? 9 : this.phase === 2 ? 6 : 4;
+        this.volleyLeft = this.sovereignPhase.volley;
         this.volleyTimer = 0;
         return null;
     }
@@ -1153,12 +1222,12 @@ export class Enemy {
 
   /** A spiral of shots, so standing still is never the answer. */
   _sovereignBarrage(player, count) {
-    const spokes = this.phase >= 3 ? 9 : 7;
+    const P = this.sovereignPhase;
     this.spiral = (this.spiral ?? 0) + 0.42;
-    for (let i = 0; i < spokes; i++) {
-      const a = this.spiral + (i / spokes) * Math.PI * 2;
+    for (let i = 0; i < P.spokes; i++) {
+      const a = this.spiral + (i / P.spokes) * Math.PI * 2;
       this.game.spawnEnemyProjectile(this, {
-        speed: 27 + this.phase * 3, radius: 0.38, gravity: 0, color: this.def.accent,
+        speed: P.projectileSpeed, radius: 0.38, gravity: 0, color: this.def.accent,
         damage: this.damage * 0.45,
         direction: _v.set(Math.cos(a), -0.05, Math.sin(a)).clone(),
       });
@@ -1167,18 +1236,19 @@ export class Enemy {
   }
 
   _sovereignSummon(player, world) {
+    const P = this.sovereignPhase;
     const room = DIRECTOR.maxActiveEnemies - this.game.enemies.aliveCount;
-    const want = Math.min(room, this.phase >= 3 ? 6 : 4);
+    const want = Math.min(room, P.summons);
     for (let i = 0; i < want; i++) {
       const a = Math.random() * Math.PI * 2;
       const p = this.position.clone();
       p.x += Math.cos(a) * 7;
       p.z += Math.sin(a) * 7;
       p.y = world.groundHeightAt(p.x, p.z);
-      const kind = this.phase >= 2 && Math.random() < 0.45 ? 'charger' : 'husk';
+      const kind = P.summonKinds[Math.floor(Math.random() * P.summonKinds.length)];
       this.game.enemies.spawn(kind, p, {
         difficulty: this.game.director.difficulty * 0.8,
-        elite: this.phase >= 3 && Math.random() < 0.4 ? 'voidtouched' : undefined,
+        elite: Math.random() < P.summonElite ? 'voidtouched' : undefined,
       });
       this.game.fx.explosion(p, 4, this.def.accent, 0.7);
     }
@@ -1186,7 +1256,7 @@ export class Enemy {
 
   /** Expanding rings of ground fire centred on the party. */
   _sovereignRift(player) {
-    const rings = this.phase >= 3 ? 4 : 3;
+    const rings = this.sovereignPhase.riftRings;
     for (let r = 0; r < rings; r++) {
       const radius = 7 + r * 6;
       const count = 6 + r * 3;

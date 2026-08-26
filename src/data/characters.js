@@ -73,7 +73,7 @@ export const CHARACTERS = [
     build: 'unloader',
     unlocked: false,
     echoCost: 600,
-    color: 0xd08a3a, accent: 0xffd24b, visor: 0xff9a3a,
+    color: 0x3a4048, accent: 0xfdb515, visor: 0xf29c11,
     desc: 'Industrial exosuit with a cargo grapple welded to one arm and far too much power routed to the other. Grapple in, hit something very hard, repeat.',
     lore: 'The suit was built to move freight. Nobody specified how fast.',
     stats: {
@@ -122,7 +122,7 @@ export const CHARACTERS = [
     build: 'wraith',
     unlocked: false,
     echoCost: 750,
-    color: 0x3a2c54, accent: 0xd94bff, visor: 0xff6ad0,
+    color: 0x1f1b29, accent: 0x7a3ff2, visor: 0xa855f7,
     desc: 'Thin armour, sharpened everything else. Blinks instead of running and pays for its damage in health it does not have.',
     lore: 'Phase-shift trials had a survivor. This is what came back.',
     stats: {
@@ -167,7 +167,7 @@ export const CHARACTERS = [
     build: 'bulwark',
     unlocked: false,
     echoCost: 700,
-    color: 0x46607a, accent: 0x6fd0ff, visor: 0x9fe8ff,
+    color: 0x4a5d73, accent: 0xf97316, visor: 0x8fd0ff,
     desc: 'Walks slowly toward the problem behind a very large plate of metal. Trades reach and speed for the ability to simply not die.',
     lore: 'Issued one shield and one instruction: hold.',
     stats: {
@@ -209,7 +209,7 @@ export const CHARACTERS = [
     build: 'halcyon',
     unlocked: false,
     echoCost: 900,
-    color: 0x2f5d78, accent: 0x7fe0ff, visor: 0xd8f4ff,
+    color: 0xb9c3d2, accent: 0x49f7e6, visor: 0x85fff0,
     desc: 'Thrusters where the armour should be. Thin, brittle and a little short on punch — and the only thing in the descent that never has to touch the floor.',
     lore: 'The airframe was salvage. The pilot did not ask what from.',
     stats: {
@@ -265,7 +265,7 @@ export const CHARACTERS = [
     build: 'dasher',
     unlocked: false,
     echoCost: 850,
-    color: 0x08090d, accent: 0x3dffa5, visor: 0x9dffd0,
+    color: 0x0b0d11, accent: 0x00ffa6, visor: 0x7ffff0,
     desc: 'A silhouette with almost nothing in it — matte black plate that gives the light back to nobody, wrapped in the discharge it never quite contains. The fastest and hardest-hitting thing in the descent. Paints a crowd with a spear, then travels through it; every dash that lands on paint is a dash you did not spend.',
     lore: 'Armour is weight. Weight is time. Time is the only thing that kills you.',
     stats: {
@@ -321,7 +321,7 @@ export const CHARACTERS = [
     build: 'chain',
     unlocked: false,
     echoCost: 800,
-    color: 0x39222c, accent: 0xff5a4d, visor: 0xffc7b0,
+    color: 0x5a473e, accent: 0xc94a4a, visor: 0xffd9b0,
     desc: 'A straw hat, a robe, and no armour worth the name. Owns exactly one thing and throws it at everything — the hat that comes back, the hat that finds the next body, and the hat you left in a field to walk back to later.',
     lore: 'He was told to leave the hat. He left everything else.',
     stats: {
@@ -330,12 +330,13 @@ export const CHARACTERS = [
     },
     utility: {
       /* Two presses, one hat, and the second one is free.
-         Charging both halves would make "two charges" mean one round trip,
-         which is not what two of anything should mean. The throw is the cost;
-         the walk back is what you already bought. */
-      name: "Wanderer's Mark", key: 'SHIFT', icon: '🧭', cooldown: 10, charges: 2,
+         Charging both halves would make one round trip cost two charges, which
+         is not what a round trip is. The throw is the cost; the walk back is
+         what you already bought — so the single charge is back the instant you
+         land, and the five seconds are only ever paid by a hat you left behind. */
+      name: "Wanderer's Mark", key: 'SHIFT', icon: '🧭', cooldown: 5, charges: 1,
       anim: 'lob',
-      desc: 'Throw the hat at what you are looking at and leave it lying there. Press again to be where it is — the trip back costs nothing, so two charges are two whole round trips. The hat gives up after 30s.',
+      desc: 'Throw the hat at what you are looking at and leave it lying there. Press again to be where it is — the trip back costs nothing and hands the charge straight back. Five seconds to throw another; the hat gives up after 30s.',
       fire(ctx) {
         ctx.hatBlink({ speed: 62, life: 30, color: 0xff5a4d });
       },
@@ -343,10 +344,10 @@ export const CHARACTERS = [
     special: {
       name: 'Hat Toss', key: 'R', icon: '👒', cooldown: 5,
       anim: 'lob',
-      desc: 'Throw the hat for 210%. Find nobody and it simply comes back — but the first body it crosses it ricochets off into the next, and the next, taking 5% more with every bounce.',
+      desc: 'Throw the hat for 210%. Find nobody and it simply comes back — but the first body it crosses it ricochets off into the next, and the next, taking 10% more with every bounce. It will come back around for a second cut on anything it has already crossed, so a crowd of three is six bounces.',
       fire(ctx) {
         ctx.throwHat({
-          damage: ctx.dmg * 2.1, growth: 0.05, speed: 34, range: 34,
+          damage: ctx.dmg * 2.1, growth: 0.10, speed: 34, range: 34,
           searchRadius: 18, radius: 1.5, color: 0xff5a4d, source: 'Hat Toss',
         });
       },
@@ -354,10 +355,10 @@ export const CHARACTERS = [
     ultimate: {
       name: 'Unbroken Chain', key: 'F', icon: '🌀',
       anim: 'lob',
-      desc: 'Throw the hat and do not catch it. For 9s it ricochets without stopping, re-crossing bodies it has already cut, and every single bounce is another 5% — a crowd held together is worth several times what the throw opened at.',
+      desc: 'Throw the hat and do not catch it. For 9s it ricochets without stopping, re-crossing bodies it has already cut, and every single bounce is another 10% — a crowd held together is worth many times what the throw opened at.',
       fire(ctx) {
         ctx.throwHat({
-          damage: ctx.dmg * 1.4, growth: 0.05, speed: 46, range: 1e4,
+          damage: ctx.dmg * 1.4, growth: 0.10, speed: 46, range: 1e4,
           searchRadius: 26, radius: 1.8, endless: 9, scale: 0.75,
           color: 0xff5a4d, source: 'Unbroken Chain',
         });

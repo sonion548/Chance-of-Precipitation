@@ -135,6 +135,11 @@ camera stays on the boom the whole way to 74° and the crosshair keeps working.
 die. Chests are scattered around each arena and cost gold to open; each gives one item.
 Items **stack** — every copy strengthens the effect, with no cap.
 
+A run is funded by the trash between beacons, not by the guardians. A guardian pays out a
+little under half what a normal enemy of its size would suggest, and the Sovereign about
+half: killing a boss is rewarded with its **item**, and the gold is a tip. XP is untouched —
+the levels were never the problem.
+
 **Eight things to walk up to.** Three chest tiers and a shrine take gold for a roll. The other
 four each ask for something else entirely:
 
@@ -183,6 +188,14 @@ a ~42-second charge that advances *only while you stand inside the ring*, and su
 guardian. Survive both and the way down opens: a fresh arena, a higher baseline, richer
 gold. You may instead ignore it and farm — but the clock keeps running either way, so
 farming is never free.
+
+**Charging it is the pressure, and it ends when the meter does.** Spawn rate slightly more
+than doubles for those forty-two seconds. The moment the beacon fills, the arena stops
+feeding the fight and stays stopped for the rest of the stage: whatever is on the ground is
+what you finish the guardian with, and once the guardian is down the stage is genuinely
+quiet — time to spend the gold rather than another forty seconds of husks between you and
+the chest. The difficulty clock is deliberately *not* stopped with it, so standing on a
+charged beacon is not a way to pause the ramp.
 
 **Death pays out.** Echoes are awarded mostly for time survived, plus stages cleared, bosses
 killed, and how deep into the ramp you got. Spend them in the **Sanctum**. Unlocking an item
@@ -250,7 +263,7 @@ you shoot.
 | Bulwark | 200 HP and 16 armour, walks slowly at the problem | Shield Charge | Bastion | Last Stand |
 | Halcyon | 84 HP, −10 armour, slightly softer damage — and it **flies** | **Thruster Flight** | **Bomb Cluster** | Ordnance Override |
 | Dasher | 76 HP, −8 armour, the fastest and hardest-hitting frame in the descent | **Lance Dash** | **Marking Spear** (×2) | Skewer |
-| Chain | 104 HP wanderer in a straw hat. Owns one thing and throws it | **Wanderer's Mark** (×2) | **Hat Toss** | Unbroken Chain |
+| Chain | 104 HP wanderer in a straw hat. Owns one thing and throws it | **Wanderer's Mark** | **Hat Toss** | Unbroken Chain |
 
 **Ultimates** are the one ability the game gives you for having been in a fight rather than
 for having waited. There is no cooldown: the meter beside the ability bar fills from kills
@@ -306,20 +319,26 @@ and can be taken back to back.
 It is the only character you cannot actually see. The plate is matte black, near enough to
 the background colour that nothing reflects off it, so the whole silhouette is carried by
 light instead: two nested additive shells around the body, a hard ring at the chest, and lit
-edges down the pauldrons, thighs and sash. At range you read the aura and work out the shape
-from it.
+edges down the pauldrons, thighs and shins — and a teal scarf, the one piece of cloth on an
+otherwise entirely hard body, wrapped at the throat with two tails trailing behind. At range
+you read the aura and the scarf and work out the shape from them.
 
 **Chain** owns one object and throws it at everything. **Hat Toss** puts it through the first
-body it crosses and then *ricochets* — off that one into the next, and the next, taking five
+body it crosses and then *ricochets* — off that one into the next, and the next, taking ten
 percent more with every bounce, until it runs out of people within eighteen metres and comes
-home. Thrown at nobody it simply comes back, so a miss costs the cooldown and nothing else.
+home. It comes back around for a second cut on a body it has already crossed, so a crowd of
+three is six bounces rather than three with the growth compounding across all of them; fresh
+bodies are always taken first, so a throw into a crowd still reaches the back of it. That
+second cut is a real rebound — the hat deflects, swings clear and turns — because a hat that
+simply struck twice on consecutive frames would read as a stutter rather than a bounce.
+Thrown at nobody it simply comes back, so a miss costs the cooldown and nothing else.
 **Wanderer's Mark** throws the same hat at what you are looking at and leaves it lying in the
-grass; press again and you are standing where it is. Only the throw spends a charge — the
-walk back is already paid for — so two charges are two whole round trips rather than one.
+grass; press again and you are standing where it is. Only the throw spends the charge — the
+walk back is already paid for and hands it straight back — so one charge is one whole round
+trip, and the five seconds are only ever paid by a hat you threw and walked away from.
 **Unbroken Chain** throws it and does not catch it: nine seconds of ricochet that re-crosses
-bodies it has already cut, with the five percent compounding the entire time. Measured on
-three enemies held together it managed twenty-seven bounces and finished hitting for close to
-four times what it opened at.
+bodies it has already cut, with the ten percent compounding the entire time. It is the one
+ability in the game whose damage is decided by how tightly the room is packed.
 
 **Unloader** is the combo character. The grapple anchors to terrain *or* enemies and reels
 you in at 40 u/s, and — critically — it hands that momentum back on release instead of
@@ -353,9 +372,25 @@ zero curls it back into an egg for fifteen seconds rather than deleting a purcha
 three stages ago.
 
 **An ending, if you want one.** From stage 5, clearing a stage tears a rift open beside the
-Beacon. Through it is the Null Sanctum and the Null Sovereign — no chests, no eggs, no way
-back, and a boss that changes how it fights twice on the way down. Beating it finishes the run
-as a win. Ignoring it is a perfectly good answer; the stages keep going forever.
+Beacon. Through it is the Null Sanctum and the Null Sovereign — no chests, no eggs and no way
+back. Beating it finishes the run as a win. Ignoring it is a perfectly good answer; the stages
+keep going forever.
+
+**The Sovereign fights in three phases**, and each threshold *adds* rather than replaces, so
+the last third is genuinely all of it at once:
+
+| | Health | Name | What arrives |
+| --- | --- | --- | --- |
+| 1 | 100–66% | Sealed | Spiral barrages and summoned husks, at arm's length |
+| 2 | 66–33% | Shelled | + expanding rifts of ground fire and blink-slams; it starts closing |
+| 3 | 33–0% | Unravelled | + a wall of fire across the arena, elite summons, and no time to breathe |
+
+Crossing a threshold costs you the damage window. It stops, armours up completely, and sheds
+for a second or two — motionless and untouchable, venting a ring of fire you have to walk out
+of — so the change of form is a beat in the fight rather than a line on the health bar you
+burst straight through without noticing. The bar shows both thresholds as ticks, goes cold and
+reads IMMUNE while it sheds. Every number that moves between phases lives in one table
+(`SOVEREIGN_PHASES`), so a fourth phase is a fourth row.
 
 **81 items** across five rarities — 49 available from the start, 32 unlockable. Every item
 draws its own icon procedurally from a shape library, so all 81 are distinguishable on the
@@ -393,7 +428,7 @@ deliberately steps outside that, because what it trades is not damage:
 | Arc Emitter | Chains through 3 extra targets | Overload Sphere — drifting orb that zaps an area |
 | Rivet Driver | 13/s, pierces 2 | Harpoon — **winches** a target all the way in over 0.9s |
 | Seeker Launcher | Homing explosive arcs | Cluster Barrage — 9 mortars on your aim point |
-| Photon Lance | Beam that ramps to 3× on a held target — but only 1.6× on a boss | Prism Burst — discharge stored heat |
+| Photon Lance | Beam that ramps to 3× on a held target — but only 1.6× on a boss. 30-round cell | Prism Burst — discharge stored heat |
 | Void Reaper | Flat horizontal slash that **throws the cut** as a crescent wave | Blink Slash — phase 14m along your line of sight, cutting the path |
 | Siege Gauntlets | Punches a 9m compression wave out of the knuckles | Jet Boost — ride the blast straight up |
 | Meridian Longrifle | Scoped bolt gun. Never rolls a crit — earns them off a visible seam | Sidearm Revolver — free to holster if it finishes the job |
@@ -418,6 +453,16 @@ against; a boss is a stationary wall that pays that cost once and then stands th
 strength — 7.66 against a husk and 7.66 against the Colossus, measured — and then climbs to
 3× on ordinary bodies against 1.6× on a boss. At full heat that is 53% of the damage. Prism
 Burst splits the same way, since half of it is stored heat.
+
+It also has the only magazine in the arsenal: thirty rounds in the cell, then two flat
+seconds of nothing. Thirty ticks is a shade under three seconds held down, which is exactly
+the length of the ramp — so the weapon now reaches the top of its own curve at about the
+moment the cell runs dry, and holding the beam on one target costs you the reload instead of
+being free forever. The two seconds do not shorten with attack speed: attack speed buys
+rounds, not hands. This is a second, simpler kind of reload beside the Meridian Longrifle's
+active-reload minigame — there is no window and nothing to get right, just a hole in your
+damage the weapon's rhythm is priced around. The round count sits on the M1 slot and the
+reload bar runs without a marker.
 
 The **Rivet Driver**'s Harpoon is a winch rather than a shove. A single impulse barely moved
 anything heavy; the target is now dragged under power for 0.9s at 34 u/s, lifted just enough
@@ -672,7 +717,14 @@ and a throwing hook is caught and logged rather than killing the frame.
 ### Adding a character
 
 Append to `src/data/characters.js` with base stats, a `build` key for the model, and a
-`utility`, `special` and (optionally) `ultimate`. Abilities receive the same combat context
+`utility`, `special` and (optionally) `ultimate`. The `build` key selects a branch in
+`buildPlayerModel` (`entities/models.js`) that hangs the character's own hardware onto a
+shared body; that body's proportions and its `torsoKit` / `headKit` live in the same table.
+The kits decide how much issued gear is under the character's own — `armoured` is the full
+soldier (pack, harness, pouches), `light` is a bare frame, `cloth` is a core something else
+is going over, and the head runs `trooper` / `smooth` / `plain` the same way. A wanderer in a
+straw hat does not want a rebreather and two belt pouches under his robe, and every one of
+those parts would be hidden by the robe anyway. Abilities receive the same combat context
 weapons use, extended with movement primitives — `dash`, `lanceDash`, `fireGrapple`,
 `momentumPunch`, `blink`, `flight`, `homingVolley`, `bombVolley`, `markSpear`, `shieldCharge`,
 `bastion` — and the ultimate-scale helpers `mortarStorm`, `meteorSlam`, `voidStorm`,

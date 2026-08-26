@@ -1,6 +1,13 @@
 /**
  * Bestiary. `cost` is what the director pays in credits to spawn one; health and
  * damage are base values before the difficulty coefficient is applied.
+ *
+ * A guardian pays out a little under half what it used to. It was never the
+ * fight that funded a run — the trash between beacons is — and a boss worth
+ * five or six chests on its own meant the stage-clear moment handed you a
+ * shopping trip you had not earned anywhere else. The item drop is the reward
+ * for killing a boss; the gold is a tip. XP is untouched: the levels were never
+ * the problem.
  */
 
 export const ENEMIES = [
@@ -76,7 +83,7 @@ export const BOSSES = [
   {
     id: 'colossus', name: 'The Colossus', cost: 0, boss: true,
     health: 2600, damage: 40, speed: 3.4, radius: 2.3, height: 6.0,
-    xp: 480, gold: 260, color: 0x5a4a3a, accent: 0xffb347, model: 'colossus',
+    xp: 480, gold: 145, color: 0x5a4a3a, accent: 0xffb347, model: 'colossus',
     ai: 'boss_colossus', attackRange: 8, attackCooldown: 2.6, windup: 0.9, slamRadius: 12,
     knockbackResist: 1, guaranteedDrop: true,
     lore: 'The basin grew a guardian out of its own rubble. It has never had to move quickly.',
@@ -84,7 +91,7 @@ export const BOSSES = [
   {
     id: 'leviathan', name: 'Ashen Leviathan', cost: 0, boss: true,
     health: 2300, damage: 34, speed: 6.2, radius: 1.8, height: 4.2,
-    xp: 460, gold: 250, color: 0x3a5a6a, accent: 0x6fd0ff, model: 'leviathan',
+    xp: 460, gold: 140, color: 0x3a5a6a, accent: 0x6fd0ff, model: 'leviathan',
     ai: 'boss_leviathan', attackRange: 34, preferredRange: 20, attackCooldown: 2.2, windup: 0.6,
     flyHeight: 9, volley: 5,
     projectile: { speed: 48, radius: 0.35, gravity: 0, color: 0x6fd0ff, splash: 4 },
@@ -94,7 +101,7 @@ export const BOSSES = [
   {
     id: 'harbinger', name: 'Void Harbinger', cost: 0, boss: true,
     health: 3100, damage: 46, speed: 5.0, radius: 1.6, height: 4.6,
-    xp: 560, gold: 300, color: 0x2a1a4a, accent: 0xd94bff, model: 'harbinger',
+    xp: 560, gold: 165, color: 0x2a1a4a, accent: 0xd94bff, model: 'harbinger',
     ai: 'boss_harbinger', attackRange: 30, preferredRange: 14, attackCooldown: 2.0, windup: 0.5,
     flying: true, flyHeight: 6,
     knockbackResist: 1, guaranteedDrop: true,
@@ -113,7 +120,7 @@ export const BOSSES = [
   {
     id: 'thornmaw', name: 'Thornmaw', cost: 0, boss: true,
     health: 2800, damage: 38, speed: 5.6, radius: 2.0, height: 4.4,
-    xp: 500, gold: 270, color: 0x4a5a32, accent: 0xc8e04b, model: 'thornmaw',
+    xp: 500, gold: 150, color: 0x4a5a32, accent: 0xc8e04b, model: 'thornmaw',
     ai: 'boss_thornmaw', attackRange: 9, attackCooldown: 2.4, windup: 0.7,
     burrowTime: 4.5, surfaceTime: 9.0, eruptRadius: 9,
     knockbackResist: 1, guaranteedDrop: true,
@@ -122,7 +129,7 @@ export const BOSSES = [
   {
     id: 'fulgurant', name: 'The Fulgurant', cost: 0, boss: true,
     health: 2500, damage: 42, speed: 7.4, radius: 1.7, height: 4.0,
-    xp: 520, gold: 285, color: 0x2c3c52, accent: 0x7fd8ff, model: 'fulgurant',
+    xp: 520, gold: 155, color: 0x2c3c52, accent: 0x7fd8ff, model: 'fulgurant',
     ai: 'boss_fulgurant', attackRange: 40, preferredRange: 22, attackCooldown: 1.5, windup: 0.4,
     flying: true, flyHeight: 12, novaInterval: 9, novaRadius: 27,
     knockbackResist: 1, guaranteedDrop: true,
@@ -131,7 +138,7 @@ export const BOSSES = [
   {
     id: 'choir', name: 'The Ossuary Choir', cost: 0, boss: true,
     health: 2400, damage: 36, speed: 4.2, radius: 1.9, height: 4.8,
-    xp: 540, gold: 295, color: 0xa89878, accent: 0xff6a9a, model: 'choir',
+    xp: 540, gold: 160, color: 0xa89878, accent: 0xff6a9a, model: 'choir',
     ai: 'boss_choir', attackRange: 26, preferredRange: 17, attackCooldown: 2.1, windup: 0.55,
     // Every living chorister it has raised takes a bite out of incoming damage.
     wardPerMinion: 0.16, wardCap: 0.72, maxMinions: 6, summonInterval: 4.5,
@@ -168,19 +175,73 @@ export const ELITE_AFFIXES = [
 ];
 
 /**
+ * The Null Sovereign's three phases.
+ *
+ * One table rather than a scatter of `phase >= 3 ?` ternaries through the AI,
+ * because a boss whose phases are an emergent property of six separate
+ * conditionals is a boss nobody can retune. Every number that changes between
+ * thresholds is here; the AI reads the row and does what it says.
+ *
+ * The shape of the fight is *addition*, not replacement — each threshold keeps
+ * everything the last one had and puts something new on top, so the last third
+ * is genuinely all of it at once rather than a different fight wearing the same
+ * model. `at` is the health fraction the phase begins at, so the first row is
+ * the one it opens on and the thresholds are 66% and 33%.
+ *
+ * `armour` is how long it is untouchable while it sheds. A phase change you can
+ * burst straight through is not a phase change, it is a health bar with lines
+ * drawn on it: the shift has to cost you the damage window to read as a beat.
+ */
+export const SOVEREIGN_PHASES = [
+  {
+    at: 1.0, name: 'Sealed', armour: 0,
+    // Opening form: it keeps its distance and works you with spirals and adds.
+    attacks: ['barrage', 'summon'],
+    cooldown: 1.0, windup: 1.0, orbitSpeed: 0.32, moveScale: 1.0,
+    volley: 4, spokes: 7, projectileSpeed: 30,
+    summons: 4, summonKinds: ['husk'], summonElite: 0,
+    riftRings: 3,
+  },
+  {
+    at: 0.66, name: 'Shelled', armour: 1.4,
+    // The shell comes off: ground it can deny, and it starts closing on you.
+    attacks: ['barrage', 'summon', 'rift', 'slam'],
+    cooldown: 0.78, windup: 1.0, orbitSpeed: 0.42, moveScale: 1.0,
+    volley: 6, spokes: 7, projectileSpeed: 33,
+    summons: 4, summonKinds: ['husk', 'charger'], summonElite: 0,
+    riftRings: 3,
+    toast: 'THE SOVEREIGN SHEDS ITS SHELL',
+    line: 'The Sovereign sheds its shell.',
+  },
+  {
+    at: 0.33, name: 'Unravelled', armour: 1.8,
+    // Everything, faster, and a wall of fire across the whole arena.
+    attacks: ['barrage', 'summon', 'rift', 'slam', 'sweep', 'rift', 'barrage'],
+    cooldown: 0.56, windup: 0.7, orbitSpeed: 0.52, moveScale: 1.25,
+    volley: 9, spokes: 9, projectileSpeed: 36,
+    summons: 6, summonKinds: ['husk', 'charger'], summonElite: 0.4,
+    riftRings: 4,
+    toast: 'THE SOVEREIGN UNRAVELS',
+    line: 'The Sovereign unravels.',
+  },
+];
+
+/**
  * The optional final fight.
  *
  * Kept out of BOSSES so the director can never roll it as a stage guardian —
  * the only way to meet it is to walk through the rift on purpose. Its health is
  * three times a normal boss before difficulty and party scaling touch it, and
- * it fights in three escalating phases rather than one loop of patterns.
+ * it fights in the three escalating phases above rather than one loop of
+ * patterns.
  */
 export const FINAL_BOSS = {
   id: 'sovereign', name: 'The Null Sovereign', cost: 0, boss: true, final: true,
   health: 9400, damage: 62, speed: 6.2, radius: 2.1, height: 6.2,
-  xp: 2400, gold: 1200, color: 0x1a0e2c, accent: 0xff2f8f, model: 'sovereign',
+  xp: 2400, gold: 640, color: 0x1a0e2c, accent: 0xff2f8f, model: 'sovereign',
   ai: 'boss_sovereign', attackRange: 46, preferredRange: 17, attackCooldown: 1.9, windup: 0.55,
   knockbackResist: 1, flyHeight: 4.2, guaranteedDrop: true,
+  phases: SOVEREIGN_PHASES,
   lore: 'The thing the descent was built to keep down here. It has been waiting the whole time.',
 };
 

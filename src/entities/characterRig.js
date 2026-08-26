@@ -851,11 +851,26 @@ function poseDeath(ud, rig, dt) {
 }
 
 /* ----------------------------------------------------------------- cloak */
+/**
+ * Fades the whole body out while something is hiding it.
+ *
+ * What a part comes *back* to is whatever it was authored at, which has to be
+ * remembered before the first dim — restoring everything to 1 turns the
+ * Wraith's 28%-opacity eye glow and the shells around its orb into solid balls
+ * the moment Event Horizon drops. It is recorded on the material rather than
+ * the mesh because merging leaves several meshes sharing one material, and the
+ * second of those would otherwise record the already-dimmed value.
+ *
+ * `Math.min` for the same reason in the other direction: a shell authored at 5%
+ * must not become *more* visible for being cloaked.
+ */
 function applyCloak(model, cloaked) {
   if (!cloaked && !model.userData._wasCloaked) return;
   model.userData._wasCloaked = !!cloaked;
   model.traverse((c) => {
     if (!c.material || !c.material.transparent) return;
-    c.material.opacity = cloaked ? 0.35 : (c.userData.baseOpacity ?? 1);
+    const ud = c.material.userData;
+    if (ud.baseOpacity === undefined) ud.baseOpacity = c.material.opacity;
+    c.material.opacity = cloaked ? Math.min(ud.baseOpacity, 0.35) : ud.baseOpacity;
   });
 }
