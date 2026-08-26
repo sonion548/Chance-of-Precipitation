@@ -23,6 +23,11 @@
  * and `primary.activeReload: { time, window, cooldown }`, which takes the fire
  * button away after each shot until the reload bar is answered.
  *
+ * `primary.magazine: { size, time }` is the other kind: a round is spent on
+ * every shot, and when the last one goes the weapon stops for `time` seconds
+ * flat — no window, nothing to get right, just a hole in your damage the
+ * weapon's rhythm is priced around.
+ *
  * `anim` names the body animation the ability plays: 'shoot' (a recoil punch
  * through the shoulder), 'pump', 'slash', 'punch', 'thrust', 'beam' or 'lob'.
  * It is a hint to the rig, not a state machine — see entities/characterRig.js.
@@ -242,7 +247,7 @@ export const WEAPONS = [
     unlocked: false,
     echoCost: 850,
     desc: 'A continuous coherent beam that heats up the longer it stays on a target — up to triple damage. Rewards commitment and punishes flinching. The ramp is what a boss is armoured against: against one it is worth barely a third as much.',
-    displayStats: { Damage: '58%/tick →170%', 'Tick Rate': '11/s', 'vs Boss': 'ramp ×0.3', Proc: '0.15' },
+    displayStats: { Damage: '58%/tick →170%', 'Tick Rate': '11/s', Magazine: '30 · 2s', 'vs Boss': 'ramp ×0.3', Proc: '0.15' },
     /* The ramp is the weapon, and a boss is the one target that lets it sit at
        the top of its curve for free.
        Everything else in the arena moves, dies, or has to be re-acquired, which
@@ -254,8 +259,14 @@ export const WEAPONS = [
     primary: {
       name: 'Coherent Beam', key: 'M1', icon: '━', hold: true, beam: true,
       anim: 'beam',
-      desc: 'Sustained beam dealing 58% damage per tick, ramping to 170% after 3s on target — but only to 93% against a boss.',
+      desc: 'Sustained beam dealing 58% damage per tick, ramping to 170% after 3s on target — but only to 93% against a boss. Thirty rounds in the cell, then two seconds of nothing.',
       cooldown: 0.09, scalesWithAttackSpeed: true,
+      /* Thirty ticks is a little under three seconds held down — which is the
+         exact length of the ramp. The weapon reaches the top of its own curve
+         at almost the same moment the cell runs dry, so holding the beam on one
+         target now costs you the reload rather than being free forever. The two
+         seconds are flat: attack speed buys rounds, not hands. */
+      magazine: { size: 30, time: 2.0 },
       fire(ctx) {
         const heat = ctx.getHeat();
         const ramp = 1 + 2.0 * heat;

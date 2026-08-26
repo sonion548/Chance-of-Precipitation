@@ -27,6 +27,7 @@ const _v2 = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _origin = new THREE.Vector3();
 const _ray = new THREE.Vector3();   // hitscan direction — must survive item procs
+const _hatUp = new THREE.Vector3(0, 1, 0);  // the axis a rebounding hat swings around
 
 /* Abilities are addressed by action, not by key: the settings screen can move
    any of them onto any key or mouse button, and nothing downstream cares. */
@@ -60,6 +61,10 @@ export class Combat {
     // The active-reload minigame, while one is running. Weapons opt in through
     // `primary.activeReload`; everything else leaves this null forever.
     this.reload = null;
+    // Rounds left in the magazine, for a weapon that has one. `null` is a
+    // weapon that does not — most of the arsenal — and nothing downstream has
+    // to special-case it beyond that one check.
+    this.ammo = null;
     this._secondaryRefund = false;
     // Chain's hat, in its two possible places: in the air ricocheting, and on
     // the ground waiting to be teleported to. Never both at once.
@@ -203,6 +208,9 @@ export class Combat {
     this.secondaryTimer = 0;
     this.heat = 0;
     this.reload = null;
+    // Anything picked up comes with a full magazine. Carrying a half-empty one
+    // across a swap would punish trying a weapon out.
+    this.ammo = this.weapon.primary.magazine?.size ?? null;
     // A precision weapon rewrites what crit chance is worth, so the stat block
     // has to be rebuilt the moment the weapon in the hands changes.
     player.markStatsDirty();
@@ -219,6 +227,7 @@ export class Combat {
       // Dying mid-reload must not leave the bar on screen for the next run,
       // and a hat in flight has nobody to come back to.
       this.reload = null;
+      if (this.weapon) this.ammo = this.weapon.primary.magazine?.size ?? null;
       this._clearHat();
       this._clearHatMarker();
       return;
@@ -328,7 +337,9 @@ export class Combat {
       this.heat = damp(this.heat, 0, 2.4, dt);
       primary.onRelease?.(this.ctx);
     }
-    this.beamActive = !!(primary.beam && primaryHeld);
+    // A beam with an empty cell is not a beam: holding the button through a
+    // reload must not keep the body in its firing pose.
+    this.beamActive = !!(primary.beam && primaryHeld && !reloading);
 
     // Weapon visual: emitter glow tracks heat/charge.
     if (this.weaponModel?.userData.glow) {
@@ -374,6 +385,10 @@ export class Combat {
       this.game.inventory.trigger('onSecondary', { ability });
     }
     if (kind === 'primary' && ability.activeReload) this._beginReload(ability.activeReload);
+    if (kind === 'primary' && ability.magazine && this.ammo !== null) {
+      this.ammo--;
+      if (this.ammo <= 0) this._beginMagazineReload(ability.magazine);
+    }
   }
 
   /* ------------------------------------------------------------------ active reload */
@@ -401,6 +416,31 @@ export class Combat {
   }
 
   /**
+   * Works a spent magazine.
+   *
+   * Not the minigame above: there is no mark to hit and nothing to get wrong,
+   * just a fixed hole in your damage that the weapon's whole rhythm is priced
+   * around. A beam that never has to stop is a beam you hold down forever, and
+   * the ramp is worth what it is worth precisely because it is interrupted.
+   *
+   * The two seconds are flat on purpose. Attack speed buys rounds per second,
+   * not hands per second, and letting it shorten the reload would hand the
+   * weapon its uptime back exactly where the magazine was meant to take it.
+   */
+  _beginMagazineReload(spec) {
+    const time = spec.time ?? 2.0;
+    this.reload = {
+      timed: true, size: spec.size ?? 30,
+      time, t: 0, zoneStart: 0, zoneEnd: 1, cooldown: 0, result: null, hold: 0,
+    };
+    // A beam that stops firing should stop being hot as well — the ramp is
+    // time on target, and the reload is time very much not on it.
+    this.heat = 0;
+    this.primaryTimer = time;
+    audio.uiClick('back');
+  }
+
+  /**
    * Runs the reload bar. Returns true while it owns the fire button.
    *
    * The bar outlives its own result by a fraction of a second so the player
@@ -410,6 +450,19 @@ export class Combat {
   _tickReload(dt, input, player, canAct) {
     const r = this.reload;
     if (!r) return false;
+    if (r.timed) {
+      // A pause is not part of the reload; neither is being dead.
+      if (!canAct) return true;
+      r.t += dt;
+      if (r.t >= r.time) {
+        this.ammo = r.size;
+        this.reload = null;
+        this.primaryTimer = 0;
+        this.game.fxApi.ring(player.position, 0.4, 2.2, 0x46e0c0, 0.28, 0.6);
+        audio.uiClick('confirm');
+      }
+      return true;
+    }
     if (r.result) {
       r.hold -= dt;
       if (r.hold <= 0) this.reload = null;
@@ -597,11 +650,33 @@ export class Combat {
     h.mesh.rotation.z = Math.sin(h.age * 9) * 0.5;
 
     if (h.state === 'out') {
+      /* Swinging clear of the body it just came off.
+       *
+       * The second cut on the same enemy has to be a rebound, not a second
+       * frame of contact: without this the hat is still inside the hit radius
+       * on the frame after it strikes, and "twice" resolves as one double-tap
+       * nobody can read. So it carries on past, turns, and comes back — and it
+       * cuts nothing on the way out. */
+      if (h.rearm > 0) {
+        h.rearm -= dt;
+        if (h.rearm <= 0) {
+          const back = h.reboundTo;
+          h.reboundTo = null;
+          if (back && !back.dead) {
+            this.game.fxApi.lightning(h.position, back.center, h.color, 0.12, 4);
+            h.velocity.copy(back.center).sub(h.position).normalize().multiplyScalar(h.speed);
+          } else if (!this._aimHatAtNextTarget(h)) {
+            h.state = 'return';
+          }
+        }
+        return;
+      }
+
       const struck = this.game.enemies
         .inRadius(h.position, h.radius)
-        .find((e) => !h.hit.has(e));
+        .find((e) => (h.hits.get(e) ?? 0) < h.maxHits);
       if (struck) {
-        h.hit.add(struck);
+        h.hits.set(struck, (h.hits.get(struck) ?? 0) + 1);
         this.damageEnemy(struck, h.damage, {
           proc: 0.7, source: h.source, hitPoint: struck.center.clone(),
           knockback: 4, knockbackDir: _v.copy(h.velocity).normalize().setY(0.3).clone(),
@@ -609,7 +684,7 @@ export class Combat {
         h.bounces++;
         h.damage *= 1 + h.growth;
         this.game.fxApi.ring(struck.center, 0.3, h.radius * 1.6, h.color, 0.28, 0.85);
-        if (!this._aimHatAtNextTarget(h)) h.state = 'return';
+        if (!this._aimHatAtNextTarget(h, struck)) h.state = 'return';
       } else if (h.travelled >= h.range) {
         h.state = 'return';
       }
@@ -636,17 +711,28 @@ export class Combat {
    * ramp never resets, so a small crowd held together is worth as much as a
    * large one strung out.
    */
-  _aimHatAtNextTarget(h) {
-    let pool = this.game.enemies
-      .inRadius(h.position, h.searchRadius)
-      .filter((e) => !h.hit.has(e));
+  _aimHatAtNextTarget(h, justStruck = null) {
+    const spare = (e) => (h.hits.get(e) ?? 0) < h.maxHits;
+    let pool = this.game.enemies.inRadius(h.position, h.searchRadius).filter(spare);
     if (!pool.length && h.endless > 0) {
-      h.hit.clear();
+      h.hits.clear();
       pool = this.game.enemies.inRadius(h.position, h.searchRadius);
     }
     if (!pool.length) return false;
     pool.sort((a, b) => a.position.distanceToSquared(h.position) - b.position.distanceToSquared(h.position));
-    const next = pool[0];
+
+    /* A fresh body first, every time. Coming back around onto the one it just
+       cut is the fallback, not the preference — otherwise a hat thrown into a
+       crowd would spend both its cuts on whoever happened to be nearest and
+       never reach the second man. */
+    const next = pool.find((e) => e !== justStruck) ?? pool[0];
+    if (next === justStruck) {
+      // Carry on past, deflected, and come back for the second cut.
+      h.reboundTo = next;
+      h.rearm = 0.26;
+      h.velocity.applyAxisAngle(_hatUp, 0.9);
+      return true;
+    }
     this.game.fxApi.lightning(h.position, next.center, h.color, 0.12, 4);
     h.velocity.copy(next.center).sub(h.position).normalize().multiplyScalar(h.speed);
     return true;
@@ -1482,7 +1568,12 @@ export class Combat {
           endless: spec.endless ?? 0,
           maxAge: spec.maxAge ?? ((spec.endless ?? 0) + 12),
           source: spec.source ?? 'Hat Toss',
-          color, travelled: 0, age: 0, bounces: 0, state: 'out', hit: new Set(),
+          // Two cuts per body, not one. A crowd of three is six bounces rather
+          // than three, and the growth compounds across all of them — which is
+          // what makes a small crowd held together worth staying in.
+          maxHits: spec.maxHits ?? 2,
+          color, travelled: 0, age: 0, bounces: 0, state: 'out',
+          hits: new Map(), rearm: 0, reboundTo: null,
         };
         player.addRecoil(1.2);
       },

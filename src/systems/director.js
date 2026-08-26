@@ -22,6 +22,13 @@ export class Director {
     this.elapsed = 0;
     this.stagesCleared = 0;
     this.eventMultiplier = 1;     // raised during the teleporter event
+    /* Set the moment the beacon finishes charging, and held for the rest of
+       the stage. Whatever is on the ground is the fight you finish the
+       guardian with, and once it is down the stage is genuinely quiet — time
+       to spend the gold rather than another forty seconds of husks between you
+       and the chest. The clock is deliberately *not* stopped with it: standing
+       on a charged beacon must not be a way to pause the difficulty ramp. */
+    this.spawnsHalted = false;
     this.paused = false;
     this.totalSpawned = 0;
     this.stageTime = 0;
@@ -105,6 +112,9 @@ export class Director {
     const [lo, hi] = DIRECTOR.waveInterval;
     this.nextWaveIn = this.game.rng.range(lo, hi) / Math.max(0.6, this.eventMultiplier);
 
+    // The interval is still rolled above, so lifting the halt does not dump a
+    // wave on the first frame it comes back.
+    if (this.spawnsHalted) return;
     if (this.game.enemies.aliveCount >= this.activeEnemyCap) return;
     this._spawnWave(player, arena);
   }
@@ -205,5 +215,7 @@ export class Director {
     this.stageTime = 0;
     this.credits = Math.min(this.credits, 24);
     this.nextWaveIn = 6;
+    // A new arena spawns again, whatever the last one ended up doing.
+    this.spawnsHalted = false;
   }
 }

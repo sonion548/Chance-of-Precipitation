@@ -330,12 +330,13 @@ export const CHARACTERS = [
     },
     utility: {
       /* Two presses, one hat, and the second one is free.
-         Charging both halves would make "two charges" mean one round trip,
-         which is not what two of anything should mean. The throw is the cost;
-         the walk back is what you already bought. */
-      name: "Wanderer's Mark", key: 'SHIFT', icon: '🧭', cooldown: 10, charges: 2,
+         Charging both halves would make one round trip cost two charges, which
+         is not what a round trip is. The throw is the cost; the walk back is
+         what you already bought — so the single charge is back the instant you
+         land, and the five seconds are only ever paid by a hat you left behind. */
+      name: "Wanderer's Mark", key: 'SHIFT', icon: '🧭', cooldown: 5, charges: 1,
       anim: 'lob',
-      desc: 'Throw the hat at what you are looking at and leave it lying there. Press again to be where it is — the trip back costs nothing, so two charges are two whole round trips. The hat gives up after 30s.',
+      desc: 'Throw the hat at what you are looking at and leave it lying there. Press again to be where it is — the trip back costs nothing and hands the charge straight back. Five seconds to throw another; the hat gives up after 30s.',
       fire(ctx) {
         ctx.hatBlink({ speed: 62, life: 30, color: 0xff5a4d });
       },
@@ -343,10 +344,10 @@ export const CHARACTERS = [
     special: {
       name: 'Hat Toss', key: 'R', icon: '👒', cooldown: 5,
       anim: 'lob',
-      desc: 'Throw the hat for 210%. Find nobody and it simply comes back — but the first body it crosses it ricochets off into the next, and the next, taking 5% more with every bounce.',
+      desc: 'Throw the hat for 210%. Find nobody and it simply comes back — but the first body it crosses it ricochets off into the next, and the next, taking 10% more with every bounce. It will come back around for a second cut on anything it has already crossed, so a crowd of three is six bounces.',
       fire(ctx) {
         ctx.throwHat({
-          damage: ctx.dmg * 2.1, growth: 0.05, speed: 34, range: 34,
+          damage: ctx.dmg * 2.1, growth: 0.10, speed: 34, range: 34,
           searchRadius: 18, radius: 1.5, color: 0xff5a4d, source: 'Hat Toss',
         });
       },
@@ -354,10 +355,10 @@ export const CHARACTERS = [
     ultimate: {
       name: 'Unbroken Chain', key: 'F', icon: '🌀',
       anim: 'lob',
-      desc: 'Throw the hat and do not catch it. For 9s it ricochets without stopping, re-crossing bodies it has already cut, and every single bounce is another 5% — a crowd held together is worth several times what the throw opened at.',
+      desc: 'Throw the hat and do not catch it. For 9s it ricochets without stopping, re-crossing bodies it has already cut, and every single bounce is another 10% — a crowd held together is worth many times what the throw opened at.',
       fire(ctx) {
         ctx.throwHat({
-          damage: ctx.dmg * 1.4, growth: 0.05, speed: 46, range: 1e4,
+          damage: ctx.dmg * 1.4, growth: 0.10, speed: 46, range: 1e4,
           searchRadius: 26, radius: 1.8, endless: 9, scale: 0.75,
           color: 0xff5a4d, source: 'Unbroken Chain',
         });

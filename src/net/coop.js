@@ -352,6 +352,9 @@ export class Coop {
         r2(e.position.x), r2(e.position.y), r2(e.position.z),
         r2(e.yaw), Math.max(0, Math.round(e.health)),
         e.state === 'windup' ? 1 : 0,
+        // Mid-shed the boss is untouchable. Replicated so a client's predicted
+        // damage does not sail through a phase change the host is ignoring.
+        e.shellTimer > 0 ? 1 : 0,
       ]);
     }
     const tp = this.game.teleporter;
@@ -540,7 +543,7 @@ export class Coop {
     this.game.applyDirectorSnapshot(m.d, m.t);
     const seen = new Set();
     for (const row of m.e) {
-      const [netId, x, y, z, yaw, hp, windup] = row;
+      const [netId, x, y, z, yaw, hp, windup, shed] = row;
       seen.add(netId);
       const e = this.game.enemies.byNetId.get(netId);
       if (!e) continue;
@@ -550,6 +553,11 @@ export class Coop {
       e.netBlend = 0;
       e.health = Math.max(1, hp);
       e.state = windup ? 'windup' : 'chase';
+      /* Safe to assign outright: a ghost runs no AI (see `Enemy.update`), so
+         nothing on this machine maintains a ward of its own and the host is the
+         only authority on one. */
+      e.shellTimer = shed ? 1 : 0;
+      e.ward = shed ? 1 : 0;
     }
     // Anything the host has stopped reporting is gone; drop it quietly rather
     // than leaving a statue in the arena.

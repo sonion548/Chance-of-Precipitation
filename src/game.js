@@ -692,6 +692,17 @@ export class Game {
       const charged = tp.chargeFraction >= 1;
       const living = this.livingBosses();
       const bossDown = living.length === 0;
+      /* The moment the beacon fills, the arena stops feeding the fight.
+         Charging is the pressure — double spawn rate for forty-two seconds —
+         and the guardian is the wall at the end of it. Once the meter is full
+         there is nothing left to hold, so a stream of fresh husks arriving
+         while you finish the boss is pressure that is no longer buying
+         anything. It stays halted for the rest of the stage: the quiet
+         afterwards is where the gold gets spent. */
+      if (charged && !this.director.spawnsHalted) {
+        this.director.spawnsHalted = true;
+        this.hud.toast('BEACON CHARGED — NO REINFORCEMENTS', '#46e0c0');
+      }
       // Keep the boss bar on something that is still standing.
       if (living.length && this.hud.bossTarget !== living[0]) this.hud.setBoss(living[0], living.length);
 
