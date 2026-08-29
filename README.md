@@ -716,6 +716,18 @@ and a throwing hook is caught and logged rather than killing the frame.
 
 ### Adding a character
 
+**Proportions first, geometry second.** The measure that decides whether a figure reads as a
+character or as a toy is *heads tall*, and nothing else comes close: an early pass built these
+at 4.7 heads with the legs at 40% of height, which is bobblehead, and no amount of smoothing
+rescued it. They are laid out at about 7 heads now with the legs just over half the height —
+close to the concept sheets — and the torso is lathed from a profile with hips, a waist pinch,
+a ribcage and a chest flare instead of being one cylinder from belt to collar. There is a neck,
+too; a figure with no neck has nowhere for the head to attach, so it reads as placed on top.
+Every piece of a character's own hardware is quoted off `P.w`, `P.torso` or a limb radius
+rather than in metres, because anything given an absolute size stops fitting the moment the
+proportions move — the shield became a door and the wing became a hang-glider exactly once
+before this rule existed.
+
 **How round anything is lives in one table.** `SEG` in `entities/models.js` names segment
 counts by what the part *is* — `SEG.torso`, `SEG.limb`, `SEG.tiny` — rather than by number,
 so "make the arms rounder" is one edit instead of forty at the call sites. It is deliberately
