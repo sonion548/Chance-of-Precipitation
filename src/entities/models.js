@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { characterSurfaces, makeCharacterMaterial } from '../world/textures.js';
 import { itemIconCanvas } from '../data/itemArt.js';
 
 /**
@@ -757,23 +758,60 @@ function buildHead(parent, materials, spec) {
   return head;
 }
 
-const characterMaterials = (char) => ({
-  suit: mat(char.color, { roughness: 0.52, metalness: 0.45 }),
-  trim: mat(new THREE.Color(char.color).offsetHSL(0, -0.04, 0.13).getHex(), { roughness: 0.38, metalness: 0.66 }),
-  joint: mat(0x1c202b, { roughness: 0.7, metalness: 0.4 }),
-  accent: mat(char.accent, { emissive: char.accent, emissiveIntensity: 0.85, roughness: 0.4 }),
-  glow: new THREE.MeshStandardMaterial({
-    color: char.accent, emissive: char.accent, emissiveIntensity: 2.2, roughness: 0.3, metalness: 0.4,
-  }),
-  visor: new THREE.MeshStandardMaterial({
-    color: char.visor, emissive: char.visor, emissiveIntensity: 2.4, roughness: 0.18, metalness: 0.7,
-  }),
-});
+/**
+ * The materials one character is made of.
+ *
+ * Every one of these used to be a bare colour at a uniform roughness, which is
+ * the whole reason the bodies read as moulded plastic — a flat surface tells
+ * you nothing about what it is made of, so a steel pauldron, a rubber joint and
+ * a linen sleeve all came back as "smooth thing, tinted". They now carry
+ * procedural detail maps (see `characterSurfaces` in world/textures.js): seams
+ * and bolts on plate, a fibre grid on cloth, concertina ribs on a joint, and a
+ * roughness map under each so the three of them catch light differently. The
+ * maps are neutral, so the character's own palette still supplies every colour.
+ *
+ * `heavy` picks the coarser, more damaged plate for the industrial frames over
+ * the tighter panelling the precision ones wear.
+ */
+const characterMaterials = (char, heavy = false) => {
+  const S = characterSurfaces();
+  const shell = heavy ? S.plate : S.tech;
+  return {
+    suit: makeCharacterMaterial(shell, {
+      color: char.color, roughness: 0.62, metalness: 0.42, scale: heavy ? 4.4 : 5.6,
+    }),
+    trim: makeCharacterMaterial(shell, {
+      color: new THREE.Color(char.color).offsetHSL(0, -0.04, 0.13).getHex(),
+      roughness: 0.46, metalness: 0.62, scale: heavy ? 5.0 : 6.2,
+    }),
+    joint: makeCharacterMaterial(S.joint, {
+      color: 0x2a3040, roughness: 0.86, metalness: 0.22, scale: 7.0,
+    }),
+    accent: makeCharacterMaterial(shell, {
+      color: char.accent, emissive: char.accent, emissiveIntensity: 0.85,
+      roughness: 0.5, metalness: 0.35, scale: 5.4,
+    }),
+    // The lit parts stay untextured on purpose: a detail map on an emissive
+    // strip reads as dirt on a light, which is the one place grime is wrong.
+    glow: new THREE.MeshStandardMaterial({
+      color: char.accent, emissive: char.accent, emissiveIntensity: 2.2, roughness: 0.3, metalness: 0.4,
+    }),
+    visor: new THREE.MeshStandardMaterial({
+      color: char.visor, emissive: char.visor, emissiveIntensity: 2.4, roughness: 0.18, metalness: 0.7,
+    }),
+    // Handed to the per-build hardware so a robe, a rope belt or a straw hat
+    // can be made of the right thing rather than of tinted plastic.
+    surfaces: S,
+  };
+};
 
 export function buildPlayerModel(char) {
   const g = new THREE.Group();
-  const m = characterMaterials(char);
   const build = char.build || 'vanguard';
+  // The three heavy frames wear the coarse, damaged plate; the rest wear the
+  // finer panelling. It is the same difference the concept sheets draw between
+  // industrial equipment and a precision airframe.
+  const m = characterMaterials(char, build === 'unloader' || build === 'bulwark' || build === 'vanguard');
 
   /* Proportions per build — the silhouette is what tells them apart at range.
    *
@@ -1092,8 +1130,8 @@ export function buildPlayerModel(char) {
        */
       /* Double-sided: the hood is an open shell and the mantle is rags, and
          both are seen from inside as often as out. */
-      const shroud = new THREE.MeshStandardMaterial({
-        color: 0x0d0b11, roughness: 0.95, metalness: 0.05, side: THREE.DoubleSide,
+      const shroud = makeCharacterMaterial(m.surfaces.cloth, {
+        color: 0x14111c, roughness: 0.96, metalness: 0.04, scale: 3.4, side: THREE.DoubleSide,
       });
 
       /* --- the hood ---
@@ -1262,7 +1300,7 @@ export function buildPlayerModel(char) {
 
       // Banded iron edging all the way round, in the trim's darker metal.
       for (const sx of [-1, 1]) {
-        const edge = roundedBox(SW * 0.09, SH, SW * 0.17, m.joint, SW * 0.03);
+        const edge = roundedBox(SW * 0.09, SH, SW * 0.17, m.trim, SW * 0.03);
         edge.position.set(sx * (SW / 2 - SW * 0.03), 0, 0);
         shield.add(edge);
       }
@@ -1271,7 +1309,7 @@ export function buildPlayerModel(char) {
       shield.add(foot);
       // Two horizontal straps across the face, riveted.
       for (const y of [-SH * 0.26, SH * 0.22]) {
-        const strap = roundedBox(SW, SW * 0.1, SW * 0.16, m.joint, SW * 0.035);
+        const strap = roundedBox(SW, SW * 0.1, SW * 0.16, m.trim, SW * 0.035);
         strap.position.set(0, y, SW * 0.015);
         shield.add(strap);
         boltRow(shield, m.accent, {
@@ -1527,9 +1565,9 @@ export function buildPlayerModel(char) {
       torso.add(halo);
 
       /* --- the scarf --- */
-      const scarfMat = new THREE.MeshStandardMaterial({
-        color: char.accent, emissive: char.accent, emissiveIntensity: 0.55,
-        roughness: 0.85, metalness: 0.0,
+      const scarfMat = makeCharacterMaterial(m.surfaces.cloth, {
+        color: char.accent, emissive: char.accent, emissiveIntensity: 0.5,
+        roughness: 0.88, metalness: 0.0, scale: 6.0,
       });
       // The wrap itself: a thick collar sitting on the shoulders, tipped
       // forward so it bunches under the chin rather than ringing the neck.
@@ -1634,13 +1672,14 @@ export function buildPlayerModel(char) {
        * palette trick: everything else is linen, straw and dirt, so the eye
        * goes to the two red marks and reads them as the character.
        */
-      const straw = mat(0xd2b48c, { roughness: 0.94, metalness: 0.02 });
-      const strawDark = mat(0x9c7a48, { roughness: 0.95, metalness: 0.02 });
-      const linen = mat(0xf2e6c9, { roughness: 0.92, metalness: 0.02 });
-      const under = mat(0x7d2f31, { roughness: 0.9, metalness: 0.03 });
-      const rope = mat(0x8a6f4a, { roughness: 0.95, metalness: 0.02 });
-      const red = mat(0xc94a4a, { roughness: 0.86, metalness: 0.04 });
-      const iron = mat(0x4a4038, { roughness: 0.62, metalness: 0.7 });
+      const S = m.surfaces;
+      const straw = makeCharacterMaterial(S.straw, { color: 0xd2b48c, roughness: 0.94, scale: 5.0 });
+      const strawDark = makeCharacterMaterial(S.straw, { color: 0x9c7a48, roughness: 0.95, scale: 5.0 });
+      const linen = makeCharacterMaterial(S.cloth, { color: 0xf2e6c9, roughness: 0.94, scale: 4.4 });
+      const under = makeCharacterMaterial(S.cloth, { color: 0x7d2f31, roughness: 0.92, scale: 4.0 });
+      const rope = makeCharacterMaterial(S.rope, { color: 0x8a6f4a, roughness: 0.96, scale: 9.0 });
+      const red = makeCharacterMaterial(S.cloth, { color: 0xc94a4a, roughness: 0.88, scale: 6.0 });
+      const iron = makeCharacterMaterial(S.plate, { color: 0x4a4038, roughness: 0.55, metalness: 0.72, scale: 8.0 });
 
       /* --- the straw hat: a wide conical brim, a crown, a band, a flower --- */
       const hat = new THREE.Group();

@@ -739,6 +739,30 @@ and a throwing hook is caught and logged rather than killing the frame.
 
 ### Adding a character
 
+**The characters are made of something.** Every part of every body used to be a bare colour
+at a uniform roughness, which is the single reason they read as moulded plastic however good
+the proportions underneath were — a flat surface tells you nothing about what it is made of,
+so a steel pauldron, a rubber joint and a linen sleeve all came back as "smooth thing,
+tinted". The note at the top of `world/textures.js` had said so since the world got its own
+materials on day one; the characters simply never got theirs.
+
+They now carry six procedural surfaces — panelled plate, fine tech panel, woven cloth,
+plaited straw, joint rubber, rope and leather — each with a matching roughness map, which is
+the half that actually does the work: a body where the shoulder plate is polished, the joint
+under it is matte and the cloth between them drinks light reads as three materials before you
+have registered a single shape. The maps are painted *neutral*, so one straw texture dresses a
+hat of any colour and the character's own palette still supplies every hue.
+
+Two details make it work rather than merely exist. They are projected **triplanar in object
+space**: these bodies are assembled from primitives at wildly different sizes — a torso lathe
+and a rivet both carry a 0..1 UV square — so a UV-mapped detail map would put as many seams on
+the rivet as on the chest, and projecting by position instead fixes texel density in *metres*.
+Object space rather than the world space the scenery uses, because a character walks, and a
+world-projected texture would swim across it like it was being held under a running tap. And
+each map is **normalised to a fixed mean**: a detail map multiplies, so every seam and speck of
+grime can only take light away, and enough of them quietly drag a character two stops darker
+than the palette says. Measured, the maps now shift mean luminance by 0.3%.
+
 **Proportions first, geometry second.** The measure that decides whether a figure reads as a
 character or as a toy is *heads tall*, and nothing else comes close: an early pass built these
 at 4.7 heads with the legs at 40% of height, which is bobblehead, and no amount of smoothing
