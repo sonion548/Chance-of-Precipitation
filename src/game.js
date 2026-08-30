@@ -150,7 +150,8 @@ export class Game {
 
     this.combat = new Combat(this);
     this.combat.setCharacter(this.profile.data.equippedCharacter);
-    this.combat.equip(this.profile.data.equippedWeapon);
+    // The weapon is the character's, not a separate choice — see characters.js.
+    this.combat.equip(characterById(this.profile.data.equippedCharacter).weapon);
 
     this.hud.buildAbilities(this.combat.weapon, this.combat.character);
     this.hud.show();

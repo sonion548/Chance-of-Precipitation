@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { swayCape } from './authoredRig.js';
 import { clamp, clamp01, damp, lerp, wrapAngle, angleLerp } from '../core/mathx.js';
 
 /**
@@ -253,6 +254,8 @@ export function updateRig(model, rig, dt, s) {
     rig.deathTime += dt;
     poseDeath(ud, rig, dt);
     applyCloak(model, s.cloaked);
+    // A cape keeps falling after its owner stops.
+    swayCape(model, rig, dt, s);
     return;
   }
   rig.deathTime = 0;
@@ -277,6 +280,8 @@ export function updateRig(model, rig, dt, s) {
   poseFlight(ud, rig, dt, s);
   poseWeapon(ud, rig, dt, s);
   applyCloak(model, s.cloaked);
+  // Cloth trails whatever the body just did, so it is settled last of all.
+  swayCape(model, rig, dt, s);
 }
 
 /* How far the pelvis twists into each step, in radians at a full stride.

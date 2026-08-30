@@ -69,10 +69,128 @@ const HALCYON_RIG = {
      this line goes to `torso` no matter which bone is geometrically nearest,
      which stops a blade sweeping past a knee from being weighted to that knee. */
   wing: { minY: 0.18, behind: -0.16, outward: 0.30, bone: 'torso' },
+  region(cx, cy, cz) {
+    const wing = cy > 0.18 && (cz < -0.16 || Math.abs(cx) > 0.30) && Math.abs(cx) > 0.2;
+    /* A band across the front of the head. Measured off the mesh: the skull
+       runs roughly 1.62–1.88 and its front face peaks at z ≈ 0.25, so the eye
+       line sits well forward — an earlier pass at z > 0.10 painted the crown. */
+    const visor = !wing && cy > 1.665 && cy < 1.755 && cz > 0.185 && Math.abs(cx) < 0.115;
+    return visor ? 2 : wing ? 1 : 0;
+  },
+  materials(char) {
+    const S = characterSurfaces();
+    return [
+      // Airframe: the white shell, panelled like every other precision frame.
+      makeCharacterMaterial(S.tech, {
+        color: char.color, roughness: 0.52, metalness: 0.34, scale: 5.6,
+      }),
+      // Wings: lit from inside, the way the sheet draws them.
+      makeCharacterMaterial(S.tech, {
+        color: char.accent, emissive: char.accent, emissiveIntensity: 0.85,
+        roughness: 0.34, metalness: 0.2, scale: 6.4,
+      }),
+      new THREE.MeshStandardMaterial({
+        color: char.visor, emissive: char.visor, emissiveIntensity: 2.4,
+        roughness: 0.18, metalness: 0.7,
+      }),
+    ];
+  },
 };
 
-const RIGS = { halcyon: HALCYON_RIG };
-const SOURCES = { halcyon: './assets/models/halcyon.glb' };
+/**
+ * Dasher: hooded, wide-stanced, and wearing the one thing the rig has never had
+ * to move before — a cape.
+ *
+ * Measured the same way. The body is modelled symmetric about x = +0.085 and
+ * the stance is deliberately wide: the hips are ±0.12 apart and the feet ±0.375,
+ * so the legs splay rather than hang. The cape leaves the +X shoulder and
+ * trails back to z ≈ −0.6, which is why it needs bones of its own; bound to the
+ * chest like Halcyon's wings it would be a plank of cloth welded to his back.
+ */
+const DASHER_RIG = {
+  recentre: [-0.085, 0, -0.03],
+  hipY: 0.95,
+  bones: [
+    { name: 'pelvis', parent: null,    head: [0, 0.95, 0.04],   tail: [0, 1.05, 0.02] },
+    { name: 'torso',  parent: 'pelvis', head: [0, 0.95, 0.04],  tail: [0, 1.46, 0.00] },
+    { name: 'head',   parent: 'torso',  head: [0, 1.58, 0.02],  tail: [0, 1.89, 0.05] },
+
+    { name: 'armL',      parent: 'torso', head: [-0.22, 1.44, 0.02],  tail: [-0.36, 1.16, 0.04],
+      bind: [0.4, 0.16, -0.9] },
+    { name: 'armLlower', parent: 'armL',  head: [-0.36, 1.16, 0.04],  tail: [-0.42, 0.93, 0.06],
+      bind: [-0.24, 0, 0] },
+    { name: 'armR',      parent: 'torso', head: [0.22, 1.44, 0.02],   tail: [0.36, 1.16, 0.04],
+      bind: [0.4, -0.16, 0.9] },
+    { name: 'armRlower', parent: 'armR',  head: [0.36, 1.16, 0.04],   tail: [0.42, 0.93, 0.06],
+      bind: [-0.24, 0, 0] },
+
+    { name: 'legL',       parent: 'pelvis',    head: [-0.12, 0.95, 0.04],  tail: [-0.27, 0.55, 0.00] },
+    { name: 'legLlower',  parent: 'legL',      head: [-0.27, 0.55, 0.00],  tail: [-0.36, 0.14, -0.06] },
+    { name: 'legLankle',  parent: 'legLlower', head: [-0.36, 0.14, -0.06], tail: [-0.38, 0.02, 0.00] },
+    { name: 'legR',       parent: 'pelvis',    head: [0.12, 0.95, 0.04],   tail: [0.29, 0.55, -0.02] },
+    { name: 'legRlower',  parent: 'legR',      head: [0.29, 0.55, -0.02],  tail: [0.39, 0.14, -0.14] },
+    { name: 'legRankle',  parent: 'legRlower', head: [0.39, 0.14, -0.14],  tail: [0.42, 0.02, -0.08] },
+
+    /* The cape: a three-link chain off the right shoulder blade, following the
+       line the cloth is actually modelled along. Chained rather than rigid so
+       it can trail — see `swayCape`. */
+    { name: 'capeA', parent: 'torso', head: [0.16, 1.42, -0.14], tail: [0.36, 1.20, -0.36] },
+    { name: 'capeB', parent: 'capeA', head: [0.36, 1.20, -0.36], tail: [0.53, 0.99, -0.52] },
+    { name: 'capeC', parent: 'capeB', head: [0.53, 0.99, -0.52], tail: [0.60, 0.68, -0.56] },
+  ],
+  // Dasher has no wings; the cape is claimed by its own region test instead.
+  wing: { minY: 99, behind: -99, outward: 99, bone: 'torso' },
+  cape: { bones: ['capeA', 'capeB', 'capeC'], test: (x, y, z) => x > 0.16 && z < -0.12 && y > 0.35 },
+  /* Matte black plate, and everything that is not plate is discharge.
+     0 armour · 1 cape · 2 visor · 3 lit trim (hood collar, forearm blades) */
+  region(cx, cy, cz) {
+    /* Every one of these thresholds is fighting the stance. Dasher is modelled
+       with his feet ±0.375 apart, so "outboard" is not on its own a test for
+       anything — an early pass called everything past |x| > 0.30 a forearm
+       blade and painted both boots teal, and called everything behind z < −0.12
+       cape and painted the back of his right leg with it. The tests below are
+       all bounded in Y as well, which is what actually separates an arm from
+       the leg underneath it. */
+    // Cape: outboard, and properly behind — the legs reach z ≈ −0.14, so the
+    // cloth has to start further back than that to be told apart from them.
+    if (cx > 0.20 && cz < -0.20 && cy > 0.45) return 1;
+    // The slot in the mask. Narrow, and set into the front of the hood.
+    if (cy > 1.63 && cy < 1.73 && cz > 0.14 && Math.abs(cx) < 0.10) return 2;
+    // Collar of the hood where it sits on the shoulders.
+    if (cy > 1.42 && cy < 1.60 && cz > -0.16 && Math.hypot(cx, cz) > 0.17) return 3;
+    // Forearm blades. Bounded above the knee, or the shins qualify.
+    if (cy > 0.80 && cy < 1.12 && Math.abs(cx) > 0.33 && cz > -0.16) return 3;
+    return 0;
+  },
+  materials(char) {
+    const S = characterSurfaces();
+    return [
+      // The plate gives the light back to nobody.
+      makeCharacterMaterial(S.tech, {
+        color: char.color, roughness: 0.44, metalness: 0.55, scale: 6.2,
+      }),
+      // Cloth, and the brightest thing on him.
+      makeCharacterMaterial(S.cloth, {
+        color: char.accent, emissive: char.accent, emissiveIntensity: 1.05,
+        roughness: 0.72, metalness: 0.05, scale: 4.6, side: THREE.DoubleSide,
+      }),
+      new THREE.MeshStandardMaterial({
+        color: char.visor, emissive: char.visor, emissiveIntensity: 2.8,
+        roughness: 0.16, metalness: 0.6,
+      }),
+      makeCharacterMaterial(S.tech, {
+        color: char.accent, emissive: char.accent, emissiveIntensity: 1.3,
+        roughness: 0.34, metalness: 0.4, scale: 7.0,
+      }),
+    ];
+  },
+};
+
+const RIGS = { halcyon: HALCYON_RIG, dasher: DASHER_RIG };
+const SOURCES = {
+  halcyon: './assets/models/halcyon.glb',
+  dasher: './assets/models/dasher.glb',
+};
 
 /* ------------------------------------------------------------------ skinning */
 const _a = new THREE.Vector3();
@@ -109,6 +227,7 @@ function computeSkinWeights(positions, spec, boneOrder) {
   const POWER = 4.0;
   const EPS = 1e-4;
   const wingBone = boneOrder.indexOf(spec.wing.bone);
+  const capeBones = spec.cape ? spec.cape.bones.map((n) => boneOrder.indexOf(n)) : null;
   const cand = [];
 
   for (let i = 0; i < n; i++) {
@@ -122,6 +241,33 @@ function computeSkinWeights(positions, spec, boneOrder) {
     if (isWing && wingBone >= 0) {
       skinIndex[i * 4] = wingBone;
       skinWeight[i * 4] = 1;
+      continue;
+    }
+
+    /* Cloth is claimed too, and for the same reason as a wing: the hem of a
+       cape hangs beside a thigh, so nearest-bone would sew it to the leg and
+       the cape would kick when he walks. Inside the chain the weights are
+       blended between neighbouring links rather than snapped to the closest —
+       a cape that switches bone abruptly creases in a hard line across itself,
+       which is exactly what cloth does not do. */
+    if (capeBones && spec.cape.test(x, y, z)) {
+      let best = 0, bestD = Infinity;
+      const d = capeBones.map((bi, k) => {
+        const bone = spec.bones[bi];
+        const dist = distToSegment(x, y, z, bone.head, bone.tail);
+        if (dist < bestD) { bestD = dist; best = k; }
+        return dist;
+      });
+      let total = 0;
+      const w = d.map((dist) => {
+        const v = 1 / Math.pow(Math.max(dist, EPS), 2.0);
+        total += v; return v;
+      });
+      for (let k = 0; k < Math.min(4, capeBones.length); k++) {
+        skinIndex[i * 4 + k] = capeBones[k];
+        skinWeight[i * 4 + k] = w[k] / total;
+      }
+      void best;
       continue;
     }
 
@@ -140,6 +286,45 @@ function computeSkinWeights(positions, spec, boneOrder) {
     }
   }
   return { skinIndex, skinWeight };
+}
+
+/* ------------------------------------------------------------------ cape */
+/**
+ * Trails the cape behind whatever the body just did.
+ *
+ * There is no cloth simulation here and there does not need to be one: a cape
+ * reads correctly if it lags the body, lifts with speed and swings when you
+ * turn. Each link takes a fraction of the one above it, so the motion runs down
+ * the chain and the tip moves furthest — which is the whole visual difference
+ * between cloth and a board.
+ *
+ * `lift` is signed by travel direction rather than raw speed, so backpedalling
+ * throws it forward instead of pretending you are still running away.
+ */
+export function swayCape(model, rig, dt, s) {
+  const bones = model.userData?.capeBones;
+  if (!bones || !bones.length) return;
+
+  const speed = s.speed ?? Math.hypot(s.velocity.x, s.velocity.z);
+  const stride = Math.min(1, speed / Math.max(1, s.moveSpeed || 8));
+  const st = model.userData.capeState || (model.userData.capeState = {
+    lift: 0, swing: 0, phase: Math.random() * 10,
+  });
+
+  st.phase += dt * (1.2 + stride * 2.4);
+  // Damp toward the target so a direction change eases rather than snaps.
+  const k = 1 - Math.exp(-6 * dt);
+  st.lift += ((rig.forward ?? 0) * 0.55 * stride - st.lift) * k;
+  st.swing += ((rig.turnRate ?? 0) * 0.5 + (rig.strafe ?? 0) * 0.35 - st.swing) * k;
+
+  const flutter = Math.sin(st.phase) * (0.03 + stride * 0.07);
+  bones.forEach((bone, i) => {
+    // Each link inherits a little less, so the motion accumulates outward.
+    const f = 0.55 + i * 0.28;
+    bone.rotation.x = st.lift * f + flutter * f;
+    bone.rotation.y = st.swing * f * 0.8;
+    bone.rotation.z = Math.sin(st.phase * 0.7 + i) * 0.05 * (0.4 + stride);
+  });
 }
 
 /* ------------------------------------------------------------------ colour */
@@ -167,19 +352,11 @@ function assignMaterialGroups(geometry, spec, char) {
     }
     cx /= 3; cy /= 3; cz /= 3;
 
-    const wing = cy > spec.wing.minY
-      && (cz < spec.wing.behind || Math.abs(cx) > spec.wing.outward)
-      && Math.abs(cx) > 0.2;
-    /* A band across the front of the head. Measured off the mesh: the skull
-       runs roughly 1.62–1.88, so the eye line is a little above its middle and
-       well forward of centre — the first pass sat at 1.70–1.80 and painted the
-       crown instead of the face. */
-    const visor = !wing && cy > 1.665 && cy < 1.755 && cz > 0.185 && Math.abs(cx) < 0.115;
-    region[t] = visor ? 2 : wing ? 1 : 0;
+    region[t] = spec.region(cx, cy, cz);
   }
 
   // Reorder the index buffer so each region is one contiguous draw group.
-  const order = [[], [], []];
+  const order = spec.materials(char).map(() => []);
   for (let t = 0; t < triCount; t++) order[region[t]].push(t);
   const out = new (index && index.BYTES_PER_ELEMENT === 4 ? Uint32Array : Uint16Array)(triCount * 3);
   let w = 0;
@@ -193,22 +370,7 @@ function assignMaterialGroups(geometry, spec, char) {
   });
   geometry.setIndex(new THREE.BufferAttribute(out, 1));
 
-  const S = characterSurfaces();
-  return [
-    // Airframe: the white shell, panelled like every other precision frame.
-    makeCharacterMaterial(S.tech, {
-      color: char.color, roughness: 0.52, metalness: 0.34, scale: 5.6,
-    }),
-    // Wings: lit from inside, the way the sheet draws them.
-    makeCharacterMaterial(S.tech, {
-      color: char.accent, emissive: char.accent, emissiveIntensity: 0.85,
-      roughness: 0.34, metalness: 0.2, scale: 6.4,
-    }),
-    new THREE.MeshStandardMaterial({
-      color: char.visor, emissive: char.visor, emissiveIntensity: 2.4,
-      roughness: 0.18, metalness: 0.7,
-    }),
-  ];
+  return spec.materials(char);
 }
 
 /* ------------------------------------------------------------------ build */
@@ -305,7 +467,10 @@ function publishRigContract(g, byName, spec, char, visorMaterial) {
   weaponMount.position.set(0.06, -0.2, 0.06);
   byName.get('armRlower').add(weaponMount);
 
+  const capeBones = (spec.cape?.bones || []).map((n) => byName.get(n)).filter(Boolean);
+
   g.userData = {
+    capeBones,
     torso, torsoBaseY: torso.position.y, head: byName.get('head'),
     armL: arm('L'), armR,
     legL: leg('L', -1), legR: leg('R', 1),

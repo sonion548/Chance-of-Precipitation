@@ -2,7 +2,7 @@ import { RARITY, RARITY_ORDER, RUN_MODES, VERSION, COOP, PETS, FINAL, ECHOES } f
 import { PETS_SPECIES } from '../data/pets.js';
 import { ITEMS, ITEMS_BY_RARITY, itemDescription } from '../data/items.js';
 import { itemIconDataURL } from '../data/itemArt.js';
-import { WEAPONS } from '../data/weapons.js';
+import { weaponById } from '../data/weapons.js';
 import { CHARACTERS } from '../data/characters.js';
 import { ENEMIES, BOSSES } from '../data/enemies.js';
 import { unlockCatalogue } from '../meta/progression.js';
@@ -20,7 +20,6 @@ export class Menus {
     this.game = game;
     this.profile = game.profile;
     this.current = 'loading';
-    this.selectedWeapon = this.profile.data.equippedWeapon;
     this.selectedCharacter = this.profile.data.equippedCharacter;
     this.unlockTab = 'items';
     this.codexTab = 'items';
@@ -86,15 +85,6 @@ export class Menus {
       if (ch && !ch.classList.contains('locked')) {
         this.selectedCharacter = ch.dataset.id;
         this.profile.equipCharacter(this.selectedCharacter);
-        this.game.coop.announceLoadout();
-        this._renderLoadout();
-        return;
-      }
-
-      const wpn = e.target.closest('.wpn-row');
-      if (wpn && !wpn.classList.contains('locked')) {
-        this.selectedWeapon = wpn.dataset.id;
-        this.profile.equipWeapon(this.selectedWeapon);
         this.game.coop.announceLoadout();
         this._renderLoadout();
         return;
@@ -191,7 +181,6 @@ export class Menus {
     // Everything the menus were holding on to came from the profile, so it all
     // has to come back from the fresh one — otherwise the loadout still shows a
     // character the account no longer owns.
-    this.selectedWeapon = this.profile.data.equippedWeapon;
     this.selectedCharacter = this.profile.data.equippedCharacter;
     btn.classList.remove('armed');
     btn.textContent = 'Reset Account';
@@ -312,10 +301,9 @@ export class Menus {
     }
     this._unlockArmed = false;
     const got = this.profile.unlockEverything();
-    this.selectedWeapon = this.profile.data.equippedWeapon;
     this.selectedCharacter = this.profile.data.equippedCharacter;
     audio.levelUp();
-    this.game.hud.toast(`Everything unlocked — ${got.items} items, ${got.weapons} weapons, ${got.characters} characters`, '#ffcf5c');
+    this.game.hud.toast(`Everything unlocked — ${got.items} items, ${got.characters} characters`, '#ffcf5c');
     this._renderSettings();
     this._renderMenu();
   }
@@ -450,7 +438,6 @@ export class Menus {
         <div class="sect-label">Status</div>
         <div class="stat-rows">
           <div class="stat-row"><span>Items</span><b>${this.profile.data.unlockedItems.length} / ${ITEMS.length}</b></div>
-          <div class="stat-row"><span>Weapons</span><b>${this.profile.data.unlockedWeapons.length} / ${WEAPONS.length}</b></div>
           <div class="stat-row"><span>Characters</span><b>${this.profile.data.unlockedCharacters.length} / ${CHARACTERS.length}</b></div>
           <div class="stat-row"><span>Echoes</span><b>${formatNumber(this.profile.echoes)}</b></div>
         </div>
@@ -459,12 +446,10 @@ export class Menus {
 
   _purchase(kind, id, cost) {
     const ok = kind === 'item' ? this.profile.unlockItem(id, cost)
-      : kind === 'character' ? this.profile.unlockCharacter(id, cost)
-      : this.profile.unlockWeapon(id, cost);
+      : this.profile.unlockCharacter(id, cost);
     if (ok) {
       const name = kind === 'item' ? ITEMS.find((i) => i.id === id)?.name
-        : kind === 'character' ? CHARACTERS.find((c) => c.id === id)?.name
-        : WEAPONS.find((w) => w.id === id)?.name;
+        : CHARACTERS.find((c) => c.id === id)?.name;
       this.game.hud.toast(`Unlocked ${name}`, '#ffcf5c');
     }
     this._renderUnlocks();
@@ -483,13 +468,12 @@ export class Menus {
     if (launch) launch.textContent = coop.active && coop.isHost ? 'Launch Descent (Party)' : 'Launch Run';
     $('menu-echoes').textContent = `${formatNumber(this.profile.echoes)} Echoes`;
     $('unlock-echoes').textContent = formatNumber(this.profile.echoes);
-    $('menu-version').textContent = `v${VERSION} · ${CHARACTERS.length} characters · ${WEAPONS.length} weapons · ${ITEMS.length} items`;
+    $('menu-version').textContent = `v${VERSION} · ${CHARACTERS.length} characters · ${ITEMS.length} items`;
   }
 
   // ------------------------------------------------------------------ loadout
   _renderLoadout() {
     const data = this.profile.data;
-    if (!this.profile.isWeaponUnlocked(this.selectedWeapon)) this.selectedWeapon = data.equippedWeapon;
     if (!this.profile.isCharacterUnlocked(this.selectedCharacter)) this.selectedCharacter = data.equippedCharacter;
 
     const char = CHARACTERS.find((c) => c.id === this.selectedCharacter) || CHARACTERS[0];
@@ -539,17 +523,9 @@ export class Menus {
           <p>${esc(char.ultimate.desc)}</p></div>
       </div>` : ''}`;
 
-    $('weapon-list').innerHTML = WEAPONS.map((w) => {
-      const owned = this.profile.isWeaponUnlocked(w.id);
-      const sel = w.id === this.selectedWeapon;
-      return `<button class="wpn-row ${sel ? 'sel' : ''} ${owned ? '' : 'locked'}" data-id="${w.id}">
-        <span class="wi">${w.icon}</span>
-        <span class="wn">${esc(w.name)}</span>
-        <span class="wl">${owned ? (sel ? 'EQUIPPED' : '') : `🔒 ${w.echoCost}`}</span>
-      </button>`;
-    }).join('');
-
-    const w = WEAPONS.find((x) => x.id === this.selectedWeapon) || WEAPONS[0];
+    // The weapon panel is a readout, not a picker: it shows what the selected
+    // character carries, and changes when the character does.
+    const w = weaponById(char.weapon);
     $('weapon-detail').innerHTML = `
       <div class="wd-head">
         <span class="wd-ico">${w.icon}</span>
@@ -652,7 +628,7 @@ export class Menus {
       <div class="party-list">
         ${list.map((p) => {
           const char = CHARACTERS.find((c) => c.id === p.character) || CHARACTERS[0];
-          const weapon = WEAPONS.find((w) => w.id === p.weapon);
+          const weapon = weaponById(p.weapon);
           const hex = `#${char.accent.toString(16).padStart(6, '0')}`;
           return `<div class="party-row" style="border-left-color:${hex}">
             <span class="pr-ico">${char.icon}</span>
@@ -751,15 +727,6 @@ export class Menus {
       return;
     }
 
-    if (this.unlockTab === 'weapons') {
-      body.innerHTML = `
-        <p style="color:var(--muted);font-size:13.5px;margin-bottom:16px;line-height:1.6">
-          Weapons change how a run plays from the first second. Unlocked weapons can be equipped in the Loadout screen before any descent.
-        </p>
-        <div class="grid">${cat.weapons.map((w) => this._weaponCard(w)).join('')}</div>`;
-      return;
-    }
-
     const groups = RARITY_ORDER.map((rar) => {
       const entries = cat.items.filter((i) => i.ref.rarity === rar);
       if (!entries.length) return '';
@@ -818,23 +785,6 @@ export class Menus {
     </button>`;
   }
 
-  _weaponCard(entry) {
-    const w = entry.ref;
-    const affordable = !entry.owned && this.profile.echoes >= entry.cost;
-    return `<button class="card ${entry.owned ? '' : 'locked'} ${affordable ? 'affordable' : ''}"
-        style="border-left-color:#ffb347"
-        ${entry.owned ? '' : `data-buy="${w.id}" data-kind="weapon" data-cost="${entry.cost}"`}>
-      <span class="c-ico">${w.icon}</span>
-      <span class="c-body">
-        <span class="c-name" style="color:#ffb347">${esc(w.name)}</span>
-        <span class="c-desc">${esc(w.desc)}</span>
-        <span class="c-stack">${esc(w.tag)}</span>
-        ${entry.owned
-          ? '<span class="c-owned">✓ Unlocked</span>'
-          : `<span class="c-cost">◈ ${entry.cost}</span>`}
-      </span>
-    </button>`;
-  }
 
   // ------------------------------------------------------------------ codex
   _renderCodex() {
@@ -908,7 +858,6 @@ export class Menus {
       ['Echoes Available', formatNumber(this.profile.echoes)],
     ];
     const itemsUnlocked = this.profile.data.unlockedItems.length;
-    const weaponsUnlocked = this.profile.data.unlockedWeapons.length;
     $('stats-body').innerHTML = `
       <div class="stat-rows">
         ${rows.map(([k, v]) => `<div class="stat-row"><span>${k}</span><b>${v}</b></div>`).join('')}
@@ -916,7 +865,6 @@ export class Menus {
       <div class="sect-label">Collection</div>
       <div class="stat-rows">
         <div class="stat-row"><span>Items Unlocked</span><b>${itemsUnlocked} / ${ITEMS.length}</b></div>
-        <div class="stat-row"><span>Weapons Unlocked</span><b>${weaponsUnlocked} / ${WEAPONS.length}</b></div>
         <div class="stat-row"><span>Characters Unlocked</span><b>${this.profile.data.unlockedCharacters.length} / ${CHARACTERS.length}</b></div>
       </div>`;
   }
