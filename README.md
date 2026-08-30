@@ -739,6 +739,36 @@ and a throwing hook is caught and logged rather than killing the frame.
 
 ### Adding a character
 
+**One character is not procedural.** Halcyon is an authored mesh — modelled elsewhere, shipped
+as glTF in `assets/models/`, and rigged at load time by `entities/authoredRig.js`. It arrives
+the way exported art usually does: one welded shell of 33k triangles, no skeleton, no
+animation, a single flat grey material. Three jobs stand between that and a playable body, and
+that module does all three: it fits a skeleton to the mesh *measured from its own geometry*
+(horizontal slabs clustered in x/z, which is the only way to find an arm in a shell that also
+contains six wing blades passing through the same heights), skins every vertex to it with
+inverse-distance falloff weights, and paints it by region into the character's palette.
+
+The skeleton it fits is not arbitrary. `characterRig.js` animates whatever it finds under
+`model.userData` — `torso`, `armL.userData.lower`, `legR.userData.ankle` — and never asks what
+those objects *are*. So the bones are given exactly that shape, and the whole existing
+animation system (gait blending, aim tracking, the six attack poses, the weapon tracking the
+crosshair) drives an authored mesh without one line of it changing.
+
+The subtle part is the bind pose. Skinning cares about the difference between a bone's current
+transform and its bind transform, and the rig writes *absolute* rotations — it settles an idle
+arm on `rotation.z = ±0.9` because a procedural arm is built pointing straight down and needs
+swinging out. This mesh's arms are already sculpted hanging down and out, so binding them at
+zero adds that 0.9 on top and the character stands like a scarecrow. They are bound *at* the
+rig's idle values instead, which makes the sculpted pose the idle pose exactly and every
+animation deviate from what the artist drew rather than from a T-pose the mesh has never been
+in. That in turn means a child bone's offset has to be expressed in its parent's rotated
+frame, or the elbow lands somewhere the elbow is not.
+
+Meshes are loaded once at boot, before the menu opens, because `buildPlayerModel` is called
+synchronously from three places and threading promises through all of them to accommodate a
+file load would be the tail wagging the dog. A file that fails to arrive simply leaves that
+character on its procedural body.
+
 **The characters are made of something.** Every part of every body used to be a bare colour
 at a uniform roughness, which is the single reason they read as moulded plastic however good
 the proportions underneath were — a flat surface tells you nothing about what it is made of,

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { characterSurfaces, makeCharacterMaterial } from '../world/textures.js';
+import { buildAuthoredModel } from './authoredRig.js';
 import { itemIconCanvas } from '../data/itemArt.js';
 
 /**
@@ -806,6 +807,14 @@ const characterMaterials = (char, heavy = false) => {
 };
 
 export function buildPlayerModel(char) {
+  /* An authored mesh wins where one has been shipped for this build. It comes
+     back already rigged and already carrying the same `userData` contract the
+     animation reads, so nothing downstream can tell the difference — and if the
+     file did not load, this returns null and the built body below runs as it
+     always has. */
+  const authored = buildAuthoredModel(char);
+  if (authored) return authored;
+
   const g = new THREE.Group();
   const build = char.build || 'vanguard';
   // The three heavy frames wear the coarse, damaged plate; the rest wear the

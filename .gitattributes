@@ -14,3 +14,9 @@ vendor/**  linguist-vendored=true
 # LF endings mis-parses its own labels. play.sh is the opposite and stays LF.
 play.cmd text eol=crlf
 play.sh  text eol=lf
+
+# Authored art. `* text=auto` guesses per file and a .glb that guesses wrong is
+# a .glb with its line endings rewritten, which is a corrupt .glb.
+*.glb binary
+*.gltf text eol=lf
+assets/** linguist-vendored=true

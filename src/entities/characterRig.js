@@ -868,9 +868,14 @@ function applyCloak(model, cloaked) {
   if (!cloaked && !model.userData._wasCloaked) return;
   model.userData._wasCloaked = !!cloaked;
   model.traverse((c) => {
-    if (!c.material || !c.material.transparent) return;
-    const ud = c.material.userData;
-    if (ud.baseOpacity === undefined) ud.baseOpacity = c.material.opacity;
-    c.material.opacity = cloaked ? Math.min(ud.baseOpacity, 0.35) : ud.baseOpacity;
+    if (!c.material) return;
+    // An authored mesh carries one material per region, so `c.material` is an
+    // array — reading `.transparent` off the array itself silently skipped it.
+    for (const mat of (Array.isArray(c.material) ? c.material : [c.material])) {
+      if (!mat.transparent) continue;
+      const ud = mat.userData;
+      if (ud.baseOpacity === undefined) ud.baseOpacity = mat.opacity;
+      mat.opacity = cloaked ? Math.min(ud.baseOpacity, 0.35) : ud.baseOpacity;
+    }
   });
 }
