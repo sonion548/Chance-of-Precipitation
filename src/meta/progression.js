@@ -1,7 +1,6 @@
 /** Echo award maths and the unlock catalogue shown in the Sanctum. */
 import { ECHOES, RARITY, RUN_MODES } from '../core/config.js';
 import { ITEMS } from '../data/items.js';
-import { WEAPONS } from '../data/weapons.js';
 import { CHARACTERS } from '../data/characters.js';
 
 export function runModeById(id) {
@@ -63,13 +62,6 @@ export function unlockCatalogue(profileData) {
     cost: itemEchoCost(i),
     owned: profileData.unlockedItems.includes(i.id),
   }));
-  const weapons = WEAPONS.filter((w) => !w.unlocked).map((w) => ({
-    kind: 'weapon',
-    id: w.id,
-    ref: w,
-    cost: w.echoCost,
-    owned: profileData.unlockedWeapons.includes(w.id),
-  }));
   const characters = CHARACTERS.filter((c) => !c.unlocked).map((c) => ({
     kind: 'character',
     id: c.id,
@@ -77,7 +69,9 @@ export function unlockCatalogue(profileData) {
     cost: c.echoCost,
     owned: profileData.unlockedCharacters.includes(c.id),
   }));
-  return { items, weapons, characters };
+  // Weapons are not in the Sanctum: a character carries one, and buying a
+  // character buys the weapon with it.
+  return { items, characters };
 }
 
 /** The item pool a run draws from: default items plus everything unlocked. */

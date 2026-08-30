@@ -4,7 +4,6 @@
  * storage is unavailable (private browsing, file:// sandboxes).
  */
 import { ITEMS, DEFAULT_UNLOCKED_ITEMS } from '../data/items.js';
-import { WEAPONS, DEFAULT_UNLOCKED_WEAPONS, DEFAULT_WEAPON } from '../data/weapons.js';
 import { CHARACTERS, DEFAULT_UNLOCKED_CHARACTERS, DEFAULT_CHARACTER } from '../data/characters.js';
 import { VERSION } from '../core/config.js';
 
@@ -20,8 +19,6 @@ function freshProfile() {
     echoes: 0,
     lifetimeEchoes: 0,
     unlockedItems: [...DEFAULT_UNLOCKED_ITEMS],
-    unlockedWeapons: [...DEFAULT_UNLOCKED_WEAPONS],
-    equippedWeapon: DEFAULT_WEAPON,
     unlockedCharacters: [...DEFAULT_UNLOCKED_CHARACTERS],
     equippedCharacter: DEFAULT_CHARACTER,
     runMode: 'storm',
@@ -81,25 +78,29 @@ function writeRaw(profile) {
 function migrate(p) {
   const base = freshProfile();
   const merged = { ...base, ...p };
+  delete merged.unlockedWeapons;
+  delete merged.equippedWeapon;
   merged.stats = { ...base.stats, ...(p.stats || {}) };
   merged.itemsSeen = { ...(p.itemsSeen || {}) };
   merged.enemiesSeen = { ...(p.enemiesSeen || {}) };
   merged.stagesEverCleared = { ...(p.stagesEverCleared || {}) };
-  // Guarantee the default unlocks are always present, and drop ids that no
-  // longer exist. A retired weapon left in the list is not harmless: the
-  // "everything unlocked" test counts entries against the catalogue, so one
-  // phantom makes a partly-unlocked account claim to be complete.
+  /* Guarantee the default unlocks are always present, and drop ids that no
+     longer exist. A retired id left in a list is not harmless: the "everything
+     unlocked" test counts entries against the catalogue, so one phantom makes a
+     partly-unlocked account claim to be complete.
+
+     Weapons are no longer in any of this. They are not bought and not chosen —
+     a character carries one and that is the whole of it — so an old profile's
+     `unlockedWeapons` and `equippedWeapon` are simply dropped on load. */
   const known = (list, catalogue) => {
     const ids = new Set(catalogue.map((e) => e.id));
     return list.filter((id) => ids.has(id));
   };
   merged.unlockedItems = known([...new Set([...base.unlockedItems, ...(p.unlockedItems || [])])], ITEMS);
-  merged.unlockedWeapons = known([...new Set([...base.unlockedWeapons, ...(p.unlockedWeapons || [])])], WEAPONS);
   merged.unlockedCharacters = known([...new Set([...base.unlockedCharacters, ...(p.unlockedCharacters || [])])], CHARACTERS);
   // The same goes for what is *equipped*: a retired id here leaves the loadout
   // screen with nothing selected and the run silently starting as somebody
   // else, which reads as the save having been corrupted.
-  if (!WEAPONS.some((w) => w.id === merged.equippedWeapon)) merged.equippedWeapon = DEFAULT_WEAPON;
   if (!CHARACTERS.some((c) => c.id === merged.equippedCharacter)) merged.equippedCharacter = DEFAULT_CHARACTER;
   // Settings moved out to their own store and their own storage key. The
   // spread above would otherwise carry an old profile's copy forward for ever,
@@ -138,21 +139,12 @@ export class Profile {
   }
 
   isItemUnlocked(id) { return this.data.unlockedItems.includes(id); }
-  isWeaponUnlocked(id) { return this.data.unlockedWeapons.includes(id); }
   isCharacterUnlocked(id) { return this.data.unlockedCharacters.includes(id); }
 
   unlockItem(id, cost) {
     if (this.isItemUnlocked(id)) return false;
     if (!this.spendEchoes(cost)) return false;
     this.data.unlockedItems.push(id);
-    this.save();
-    return true;
-  }
-
-  unlockWeapon(id, cost) {
-    if (this.isWeaponUnlocked(id)) return false;
-    if (!this.spendEchoes(cost)) return false;
-    this.data.unlockedWeapons.push(id);
     this.save();
     return true;
   }
@@ -168,13 +160,6 @@ export class Profile {
   equipCharacter(id) {
     if (!this.isCharacterUnlocked(id)) return false;
     this.data.equippedCharacter = id;
-    this.save();
-    return true;
-  }
-
-  equipWeapon(id) {
-    if (!this.isWeaponUnlocked(id)) return false;
-    this.data.equippedWeapon = id;
     this.save();
     return true;
   }
@@ -222,13 +207,11 @@ export class Profile {
    */
   unlockEverything() {
     this.data.unlockedItems = [...new Set([...this.data.unlockedItems, ...ITEMS.map((i) => i.id)])];
-    this.data.unlockedWeapons = [...new Set([...this.data.unlockedWeapons, ...WEAPONS.map((w) => w.id)])];
     this.data.unlockedCharacters = [...new Set([...this.data.unlockedCharacters, ...CHARACTERS.map((c) => c.id)])];
     this.data.unlockedAll = true;
     this.save();
     return {
       items: this.data.unlockedItems.length,
-      weapons: this.data.unlockedWeapons.length,
       characters: this.data.unlockedCharacters.length,
     };
   }
@@ -236,7 +219,6 @@ export class Profile {
   /** True when there is nothing left in the Sanctum to buy. */
   get everythingUnlocked() {
     return this.data.unlockedItems.length >= ITEMS.length
-      && this.data.unlockedWeapons.length >= WEAPONS.length
       && this.data.unlockedCharacters.length >= CHARACTERS.length;
   }
 

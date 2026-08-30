@@ -2429,6 +2429,72 @@ export function buildWeaponModel(weapon) {
       break;
     }
     case 'scythe':
+    case 'spear': {
+      /*
+       * A long haft with a head of contained discharge.
+       *
+       * Built to read from behind the shoulder, which is where it is seen from:
+       * almost all of the length is dark haft so the silhouette is a line, and
+       * the only lit thing is the head — a narrow leaf with a fuller down the
+       * middle. A spear whose whole shaft glows reads as a lightsaber, and the
+       * character it belongs to is defined by being almost invisible.
+       */
+      const haftMat = mat(0x14181e, { roughness: 0.42, metalness: 0.72 });
+      const headMat = mat(weapon.color, {
+        emissive: weapon.color, emissiveIntensity: 1.9, roughness: 0.2, metalness: 0.6,
+      });
+
+      // --- Haft: one long shaft, wrapped where the hands go. ---
+      const haft = cyl(0.026, 0.03, 1.28, SEG.small, haftMat, 0, 0, -0.18);
+      haft.rotation.x = Math.PI / 2;
+      g.add(haft);
+      for (let i = 0; i < 5; i++) {
+        const wrap = new THREE.Mesh(new THREE.TorusGeometry(0.032, 0.008, 6, SEG.medium), dark);
+        wrap.rotation.x = Math.PI / 2;
+        wrap.position.z = -0.52 + i * 0.07;
+        g.add(wrap);
+      }
+      // Butt spike, so it is a weapon at both ends.
+      const butt = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.14, SEG.small), steel);
+      butt.rotation.x = -Math.PI / 2;
+      butt.position.z = -0.86;
+      g.add(butt);
+
+      // --- Collar where the head is socketed onto the haft. ---
+      const collar = cyl(0.042, 0.034, 0.09, SEG.small, steel, 0, 0, 0.44);
+      collar.rotation.x = Math.PI / 2;
+      g.add(collar);
+      for (const sx of [-1, 1]) {
+        const barb = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.13, 4), headMat);
+        barb.position.set(sx * 0.05, 0, 0.47);
+        barb.rotation.set(-1.9, 0, sx * 0.5);
+        g.add(barb);
+      }
+
+      /* --- Head: a narrow leaf, lit, with a dark fuller down the centre.
+         Two cones base-to-base rather than one, so it has a widest point
+         partway along instead of tapering the whole way like a dart. */
+      const shoulder = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.2, 4), headMat);
+      shoulder.rotation.x = -Math.PI / 2;
+      shoulder.position.z = 0.58;
+      shoulder.scale.x = 0.42;
+      g.add(shoulder);
+      const point = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.44, 4), headMat);
+      point.rotation.x = Math.PI / 2;
+      point.position.z = 0.9;
+      point.scale.x = 0.42;
+      g.add(point);
+      // The fuller: a dark slot down the middle of the head.
+      const fuller = box(0.018, 0.02, 0.4, haftMat, 0, 0, 0.76);
+      g.add(fuller);
+
+      const tip = new THREE.Object3D();
+      tip.position.set(0, 0, 1.12);
+      g.add(tip);
+      g.userData.muzzle = tip;
+      break;
+    }
+
     case 'voidblade': {
       /*
        * A straight two-handed blade.

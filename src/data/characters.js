@@ -14,6 +14,14 @@
  *
  * Ability `fire` receives the same combat context weapons use, plus the
  * character-specific helpers documented in systems/combat.js.
+ *
+ * A character also names its `weapon`, and that is not a default — it is the
+ * only one they carry. Weapons used to be a separate list you unlocked and
+ * chose from, which meant every character could be handed every gun and none of
+ * the nine said anything about whoever was holding it. Binding one to each
+ * makes the pair the unit of identity: Unloader's fists are the suit's fists,
+ * Bulwark is the only frame that can stand still long enough to let a beam
+ * ramp, and Dasher's spear has exactly the weakness his dash exists to escape.
  */
 
 export const CHARACTERS = [
@@ -29,6 +37,8 @@ export const CHARACTERS = [
     color: 0x4c5a72, accent: 0xffb347, visor: 0x46e0c0,
     desc: 'Standard issue and deliberately unremarkable. Good health, good speed, no sharp edges — the baseline every other character is tuned against.',
     lore: 'Whoever they were before the descent, they were trained for this.',
+    /* Standard issue for the standard soldier. The weapon every other one is measured against, in the hands of the character every other one is tuned against. */
+    weapon: 'mk4_sidearm',
     stats: {
       health: 115, healthPerLevel: 33, regen: 1.0, regenPerLevel: 0.2,
       damage: 12, damagePerLevel: 2.4, moveSpeed: 8.2, armor: 0, crit: 0.01, jumps: 1,
@@ -76,6 +86,8 @@ export const CHARACTERS = [
     color: 0x3a4048, accent: 0xfdb515, visor: 0xf29c11,
     desc: 'Industrial exosuit with a cargo grapple welded to one arm and far too much power routed to the other. Grapple in, hit something very hard, repeat.',
     lore: 'The suit was built to move freight. Nobody specified how fast.',
+    /* The suit's own fists. A cargo handler does not carry a gun; the punch *is* the weapon, and it is the only one that keeps up with the grapple. */
+    weapon: 'siege_gauntlets',
     stats: {
       health: 165, healthPerLevel: 46, regen: 1.3, regenPerLevel: 0.26,
       damage: 14, damagePerLevel: 2.8, moveSpeed: 7.1, armor: 8, crit: 0.01, jumps: 1,
@@ -125,6 +137,8 @@ export const CHARACTERS = [
     color: 0x1f1b29, accent: 0x7a3ff2, visor: 0xa855f7,
     desc: 'Thin armour, sharpened everything else. Blinks instead of running and pays for its damage in health it does not have.',
     lore: 'Phase-shift trials had a survivor. This is what came back.',
+    /* A blade that feeds. Thin armour and negative health regeneration need a weapon that pays some of it back, and Blink Slash is the same phase-step the character already thinks in. */
+    weapon: 'void_reaper',
     stats: {
       health: 88, healthPerLevel: 25, regen: 0.8, regenPerLevel: 0.16,
       damage: 15.5, damagePerLevel: 3.1, moveSpeed: 9.2, armor: -6, crit: 0.12, jumps: 2,
@@ -170,6 +184,8 @@ export const CHARACTERS = [
     color: 0x4a5d73, accent: 0xf97316, visor: 0x8fd0ff,
     desc: 'Walks slowly toward the problem behind a very large plate of metal. Trades reach and speed for the ability to simply not die.',
     lore: 'Issued one shield and one instruction: hold.',
+    /* The ramp is the whole weapon, and holding a beam on one target for three seconds is a thing exactly one character in the descent can afford to do. Everyone else has to move. */
+    weapon: 'photon_lance',
     stats: {
       health: 200, healthPerLevel: 56, regen: 1.6, regenPerLevel: 0.32,
       damage: 10.5, damagePerLevel: 2.1, moveSpeed: 6.9, armor: 16, crit: 0.01, jumps: 1,
@@ -212,6 +228,8 @@ export const CHARACTERS = [
     color: 0xdde5ef, accent: 0x49f7e6, visor: 0x85fff0,
     desc: 'Thrusters where the armour should be. Thin, brittle and a little short on punch — and the only thing in the descent that never has to touch the floor.',
     lore: 'The airframe was salvage. The pilot did not ask what from.',
+    /* Arcing charges that lock on where they land. A bombardier does not aim, it drops — and an arc thrown from thirty metres up is the shape this weapon was already built around. */
+    weapon: 'seeker_launcher',
     stats: {
       health: 84, healthPerLevel: 24, regen: 0.9, regenPerLevel: 0.18,
       damage: 10.8, damagePerLevel: 2.15, moveSpeed: 8.6, armor: -10, crit: 0.03, jumps: 2,
@@ -268,6 +286,8 @@ export const CHARACTERS = [
     color: 0x191e26, accent: 0x00ffa6, visor: 0x7ffff0,
     desc: 'A silhouette with almost nothing in it — matte black plate that gives the light back to nobody, wrapped in the discharge it never quite contains. The fastest and hardest-hitting thing in the descent. Paints a crowd with a spear, then travels through it; every dash that lands on paint is a dash you did not spend.',
     lore: 'Armour is weight. Weight is time. Time is the only thing that kills you.',
+    /* The spear. Reach, no reserve, and a sweep to answer being surrounded — the one weapon whose weakness is exactly the weakness the character's dash is built to escape. */
+    weapon: 'splitting_lance',
     stats: {
       health: 76, healthPerLevel: 21, regen: 0.8, regenPerLevel: 0.16,
       damage: 17.5, damagePerLevel: 3.5, moveSpeed: 9.8, armor: -8, crit: 0.06, jumps: 1,
@@ -324,6 +344,8 @@ export const CHARACTERS = [
     color: 0x5a473e, accent: 0xc94a4a, visor: 0xffd9b0,
     desc: 'A straw hat, a robe, and no armour worth the name. Owns exactly one thing and throws it at everything — the hat that comes back, the hat that finds the next body, and the hat you left in a field to walk back to later.',
     lore: 'He was told to leave the hat. He left everything else.',
+    /* It chains. A weapon that jumps from body to body belongs to the one character whose every ability is about the thing that comes back to him. */
+    weapon: 'arc_emitter',
     stats: {
       health: 104, healthPerLevel: 30, regen: 1.0, regenPerLevel: 0.2,
       damage: 13.2, damagePerLevel: 2.65, moveSpeed: 8.5, armor: 3, crit: 0.04, jumps: 1,

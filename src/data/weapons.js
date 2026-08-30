@@ -21,7 +21,10 @@
  *   critChanceToDamage: n                  crit chance an item grants is read
  *                                          as n× that much crit damage instead
  * and `primary.activeReload: { time, window, cooldown }`, which takes the fire
- * button away after each shot until the reload bar is answered.
+ * button away after each shot until the reload bar is answered. Nothing carries
+ * it since the Meridian Longrifle was retired — it is left in because the
+ * machinery is a dozen lines in `Combat` and the next precision weapon will
+ * want it.
  *
  * `primary.magazine: { size, time }` is the other kind: a round is spent on
  * every shot, and when the last one goes the weapon stops for `time` seconds
@@ -43,8 +46,6 @@ export const WEAPONS = [
     tag: 'Balanced · Hitscan',
     color: 0xc8d2e4,
     model: 'pistol',
-    unlocked: true,
-    echoCost: 0,
     desc: 'Standard issue. Reliable, accurate, and forgiving — every proc coefficient in the game was balanced against this thing.',
     displayStats: { Damage: '100%', 'Fire Rate': '5.9/s', Range: 'Long', Proc: '1.0' },
     primary: {
@@ -73,55 +74,12 @@ export const WEAPONS = [
 
   /* ------------------------------------------------------------------ */
   {
-    id: 'scattergun',
-    name: 'Breach Scattergun',
-    icon: '🔩',
-    tag: 'Close Range · Burst',
-    color: 0xd88a4a,
-    model: 'shotgun',
-    unlocked: false,
-    echoCost: 250,
-    desc: 'Ten pellets of persuasion. Devastating at point blank, embarrassing at range. Pairs beautifully with anything that procs on hit.',
-    displayStats: { Damage: '10 × 44%', 'Fire Rate': '1.4/s', Range: 'Short', Proc: '0.4' },
-    primary: {
-      name: 'Buckshot', key: 'M1', icon: '⁘', hold: true,
-      anim: 'pump',
-      desc: 'Fire 10 pellets for 44% damage each.',
-      cooldown: 0.72, scalesWithAttackSpeed: true,
-      fire(ctx) {
-        for (let i = 0; i < 10; i++) {
-          ctx.hitscan({
-            damage: ctx.dmg * 0.44, proc: 0.4, range: 42, color: 0xffc07a,
-            tracer: i % 2 === 0, spread: 0.075, falloff: { start: 14, end: 40, min: 0.42 },
-          });
-        }
-        ctx.recoil(3.4); ctx.shake(0.2);
-      },
-    },
-    secondary: {
-      name: 'Concussive Blast', key: 'Q', icon: '💨',
-      anim: 'pump',
-      desc: 'Blast a shockwave for 380% damage, launching enemies away — and you backwards.',
-      cooldown: 5.0,
-      fire(ctx) {
-        ctx.cone({ damage: ctx.dmg * 3.8, proc: 1.0, range: 16, angle: 0.9, knockback: 26, color: 0xffa050 });
-        ctx.impulse(ctx.dir.clone().multiplyScalar(-16).setY(7));
-        ctx.recoil(6); ctx.shake(0.5);
-        ctx.fx.explosion(ctx.origin.clone().addScaledVector(ctx.dir, 5), 9, 0xffa050, 1);
-      },
-    },
-  },
-
-  /* ------------------------------------------------------------------ */
-  {
     id: 'arc_emitter',
     name: 'Arc Emitter',
     icon: '⚡',
     tag: 'Chaining · Crowd Control',
     color: 0x6fd0ff,
     model: 'rifle',
-    unlocked: false,
-    echoCost: 400,
     desc: 'Fires an ionised tether that leaps between targets. Damage falls off with each jump, but the chain never asks permission.',
     displayStats: { Damage: '95% ×4', 'Fire Rate': '2.8/s', Range: 'Medium', Proc: '0.6' },
     primary: {
@@ -152,57 +110,12 @@ export const WEAPONS = [
 
   /* ------------------------------------------------------------------ */
   {
-    id: 'rivet_driver',
-    name: 'Rivet Driver',
-    icon: '📌',
-    tag: 'Sustained · Piercing',
-    color: 0xb9c4d8,
-    model: 'smg',
-    unlocked: false,
-    echoCost: 550,
-    desc: 'An industrial fastener with the safety removed. Low damage per rivet, absurd fire rate, and it goes through the first thing it hits.',
-    displayStats: { Damage: '42%', 'Fire Rate': '13/s', Range: 'Medium', Proc: '0.25' },
-    primary: {
-      name: 'Rivet', key: 'M1', icon: '│', hold: true,
-      anim: 'shoot',
-      desc: 'Drive a rivet for 42% damage that pierces 2 enemies.',
-      cooldown: 0.077, scalesWithAttackSpeed: true,
-      fire(ctx) {
-        ctx.spawnBullet({
-          speed: 145, damage: ctx.dmg * 0.42, proc: 0.25, radius: 0.13, life: 1.1,
-          color: 0xe4ecff, pierce: 2, spread: 0.022, trail: 0.5, gravity: -2,
-        });
-        ctx.recoil(0.26);
-      },
-    },
-    secondary: {
-      name: 'Harpoon', key: 'Q', icon: '🪝',
-      anim: 'thrust',
-      desc: 'Fire a barbed line for 420% damage, then winch the target all the way in — it is dragged to your feet over 0.9s and chilled when it lands.',
-      cooldown: 4.0,
-      fire(ctx) {
-        ctx.spawnBullet({
-          speed: 78, damage: ctx.dmg * 4.2, proc: 1.0, radius: 0.3, life: 1.6, color: 0x7ad4ff,
-          trail: 1, pierce: 0, chill: 3,
-          // The winch, not a shove: `reel` runs the target in on a line for its
-          // whole duration. Heavy things resist it, bosses barely move.
-          harpoon: { time: 0.9, speed: 34, color: 0x7ad4ff },
-        });
-        ctx.recoil(1.6);
-      },
-    },
-  },
-
-  /* ------------------------------------------------------------------ */
-  {
     id: 'seeker_launcher',
     name: 'Seeker Launcher',
     icon: '🚀',
     tag: 'Explosive · Area',
     color: 0x8fbf6a,
     model: 'launcher',
-    unlocked: false,
-    echoCost: 700,
     desc: 'Fires arcing charges that lock onto whatever is unlucky enough to be near the impact point. Clears rooms; also clears you if you are careless.',
     displayStats: { Damage: '260% AoE', 'Fire Rate': '1.2/s', Range: 'Medium', Proc: '1.0' },
     primary: {
@@ -244,8 +157,6 @@ export const WEAPONS = [
     tag: 'Beam · Ramping',
     color: 0xff7ad4,
     model: 'beam',
-    unlocked: false,
-    echoCost: 850,
     desc: 'A continuous coherent beam that heats up the longer it stays on a target — up to triple damage. Rewards commitment and punishes flinching. The ramp is what a boss is armoured against: against one it is worth barely a third as much.',
     displayStats: { Damage: '58%/tick →170%', 'Tick Rate': '11/s', Magazine: '30 · 2s', 'vs Boss': 'ramp ×0.3', Proc: '0.15' },
     /* The ramp is the weapon, and a boss is the one target that lets it sit at
@@ -311,8 +222,6 @@ export const WEAPONS = [
     tag: 'Piercing · Lifesteal',
     color: 0xa15bff,
     model: 'voidblade',
-    unlocked: false,
-    echoCost: 1000,
     desc: 'A blade folded out of a collapsed star. Every swing feeds you a little of what it takes. Requires getting uncomfortably close.',
     displayStats: { Damage: '245% arc + 130% wave', 'Swing Rate': '2.2/s', Range: 'Melee → 26m', Proc: '1.0' },
     primary: {
@@ -354,8 +263,6 @@ export const WEAPONS = [
     tag: 'Melee · Shockwave · Mobility',
     color: 0xffb347,
     model: 'gauntlet',
-    unlocked: false,
-    echoCost: 800,
     desc: 'Two demolition drivers worn on the hands. Each punch fires a compression charge a few metres out in front of the knuckles, and the same charge, pointed downward, will put you on a rooftop.',
     lore: 'Rated for load-bearing walls. Nobody wrote down what else.',
     displayStats: { Damage: '210% wave', 'Punch Rate': '2.9/s', Range: '9m cone', Proc: '0.8' },
@@ -387,57 +294,44 @@ export const WEAPONS = [
 
   /* ------------------------------------------------------------------ */
   {
-    id: 'meridian_longrifle',
-    name: 'Meridian Longrifle',
-    icon: '🎯',
-    tag: 'Precision · Scoped',
-    color: 0xff6a4d,
-    model: 'sniper',
-    unlocked: false,
-    echoCost: 950,
-    desc: 'A bolt gun with a real optic on it. Behind the glass every body in the arena shows the one plate it never got seated properly — put a round through that and the hit is critical, guaranteed. It never rolls a crit of its own, so everything that would have bought you the dice buys you the multiplier instead.',
-    lore: 'Issued with one round chambered and a note: make it count.',
-    displayStats: { Damage: '900%', Crit: 'Earned, never rolled', Reload: 'Timed', Proc: '1.0' },
-    /* The trade the whole weapon is built on.
-       Handing a sniper random crits would make the seam pointless — you would
-       hit it and sometimes get nothing extra, or miss it and get the crit
-       anyway. Turning the chance off makes the seam the only source of a
-       critical hit, and converting the stat keeps every crit-chance item in
-       the pool worth picking up. */
-    randomCrits: false,
-    critChanceToDamage: 2.5,
-    scope: { fov: 15, distance: 0.28, sensitivity: 0.4 },
+    id: 'splitting_lance',
+    name: 'Splitting Lance',
+    icon: '🔻',
+    tag: 'Reach · Melee · Piercing',
+    color: 0x00ffa6,
+    model: 'spear',
+    desc: 'A long haft and a head of contained discharge. Every thrust goes through whatever it starts on and keeps going, which is the only reason a weapon with this little reserve is worth carrying at all.',
+    displayStats: { Damage: '150% ×3 pierce', 'Fire Rate': '2.6/s', Range: 'Reach', Proc: '0.7' },
     primary: {
-      name: 'Bolt Round', key: 'M1', icon: '⌖',
-      anim: 'shoot',
-      desc: 'A round for 900% damage that goes through two bodies — double into a seam. Then work the bolt: click as the marker crosses the mark to chamber instantly, miss it or let it run off the end and the action jams for 3s.',
-      cooldown: 0.2, scalesWithAttackSpeed: true,
-      activeReload: { time: 1.25, window: 0.14, cooldown: 3.0 },
+      name: 'Lance Thrust', key: 'M1', icon: '↑', hold: true,
+      anim: 'thrust',
+      desc: 'Drive the head through the line for 150%, piercing three.',
+      cooldown: 0.38, scalesWithAttackSpeed: true,
       fire(ctx) {
         ctx.hitscan({
-          damage: ctx.dmg * 9.0, proc: 1.0, range: 320, color: 0xffb08a,
-          tracer: true, thick: 0.07, pierce: 2, weakPoint: true, knockback: 8,
+          damage: ctx.dmg * 1.5, proc: 0.7, range: 4.6, thick: 0.42,
+          color: 0x00ffa6, pierce: 3, beam: 0.07, spread: 0,
         });
-        ctx.recoil(6); ctx.shake(0.4);
+        ctx.recoil(1.1);
       },
     },
     secondary: {
-      name: 'Sidearm Revolver', key: 'Q', icon: '🔘',
-      anim: 'shoot',
-      desc: 'Swing out a heavy revolver for 260% damage. Finish something with it and it holsters free; leave the target standing and it is gone for 10s.',
-      cooldown: 10,
+      name: 'Vault Cut', key: 'Q', icon: '⤢',
+      anim: 'slash',
+      /* The spear is a reach weapon with no answer to being surrounded, so the
+         secondary is the answer: it clears the ring you are standing in and
+         puts you somewhere else while it does. */
+      desc: 'Sweep the haft through everything within 6m for 380%, and ride the turn a short way out of the crowd.',
+      cooldown: 6.0,
       fire(ctx) {
-        const hit = ctx.hitscan({
-          damage: ctx.dmg * 2.6, proc: 1.0, range: 90, color: 0xffd58a,
-          tracer: true, thick: 0.05, weakPoint: true, knockback: 10,
+        // A full turn of the haft — `angle: PI` is every direction at once,
+        // which is what "the ring you are standing in" has to mean.
+        ctx.melee({
+          damage: ctx.dmg * 3.8, proc: 0.9, range: 6, angle: Math.PI,
+          color: 0x00ffa6, tilt: 0.15,
         });
-        ctx.recoil(3.4); ctx.shake(0.24);
-        // The kill is the reload. A revolver that cleans up costs nothing,
-        // which is what makes it a finisher rather than a second primary.
-        if (hit?.dead) {
-          ctx.refundSecondary();
-          ctx.toast('CHAMBER CLEARED', '#ff6a4d');
-        }
+        ctx.dash({ speed: 26, duration: 0.22, iframes: 0.14, color: 0x00ffa6 });
+        ctx.recoil(2.4); ctx.shake(0.22);
       },
     },
   },
@@ -445,5 +339,4 @@ export const WEAPONS = [
 
 export const WEAPONS_BY_ID = Object.fromEntries(WEAPONS.map((w) => [w.id, w]));
 export const DEFAULT_WEAPON = 'mk4_sidearm';
-export const DEFAULT_UNLOCKED_WEAPONS = WEAPONS.filter((w) => w.unlocked).map((w) => w.id);
 export function weaponById(id) { return WEAPONS_BY_ID[id] || WEAPONS_BY_ID[DEFAULT_WEAPON]; }

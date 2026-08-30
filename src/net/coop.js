@@ -98,7 +98,8 @@ export class Coop {
 
   _selfProfile() {
     const d = this.game.profile.data;
-    return { character: d.equippedCharacter, weapon: d.equippedWeapon };
+    // A weapon is not chosen any more, so it is whatever the character carries.
+    return { character: d.equippedCharacter, weapon: characterById(d.equippedCharacter).weapon };
   }
 
   /** Tells the lobby what you are bringing, so the roster cards stay honest. */

@@ -3,7 +3,7 @@
 A 3D action roguelike in the vein of *Risk of Rain 2*. Kill things, take their gold, spend it
 on chests, and try to out-scale a difficulty curve that never stops climbing. When the run
 ends — and it will — you are paid in **Echoes**, a currency that permanently widens the item
-pool and unlocks new weapons for every run after.
+pool and buys new characters for every run after.
 
 Built with [three.js](https://threejs.org/) and plain ES modules. **No build step, no
 bundler, no external assets** — every character, weapon and prop is assembled from
@@ -251,9 +251,9 @@ The host's machine owns the world, so if they leave, the session ends for everyo
 
 ## Content
 
-**7 characters.** A character sets your stats and all three signature abilities; weapons stay
-independent, so the character decides how you move and commit while the weapon decides how
-you shoot.
+**7 characters.** A character sets your stats, all three signature abilities *and* the weapon
+it carries — so picking one decides how you move, how you commit and how you shoot, in a
+single choice.
 
 | Character | Identity | Utility (Shift) | Special (R) | Ultimate (F) |
 | --- | --- | --- | --- | --- |
@@ -416,22 +416,32 @@ tier is unlocked yet" fallback cannot drop below, so an expensive chest can neve
 hand back a white item. **Fortune Clover** rerolls every rarity roll and keeps the better
 result.
 
-**9 weapons**, one starting and eight unlockable, each with a distinct primary and secondary.
-Most are deliberately tuned to near-identical single-target DPS (~64–84 at base damage) so
-the choice is about *how* you fight, not which is strongest; the Longrifle is the one that
-deliberately steps outside that, because what it trades is not damage:
+**7 weapons**, one bound to each character, each with a distinct primary and secondary.
+They are deliberately tuned to near-identical single-target DPS (~64–84 at base damage) so no
+character is simply out-gunned by another; what differs is *how* each one fights.
 
-| Weapon | Identity | Secondary |
+**A weapon is not a choice — it is part of who a character is.** Weapons used to be a second
+list you unlocked and picked from, which meant any character could be handed any gun and none
+of the nine said anything about whoever was holding it. Each character now carries exactly one,
+and the pair is the unit of identity:
+
+| Character | Weapon | Why that one |
 | --- | --- | --- |
-| MK-4 Sidearm | Balanced hitscan, full 1.0 proc coefficient | Focused Shot — chargeable piercing round |
-| Breach Scattergun | 10 pellets, brutal up close | Concussive Blast — knockback, and a self-launch |
-| Arc Emitter | Chains through 3 extra targets | Overload Sphere — drifting orb that zaps an area |
-| Rivet Driver | 13/s, pierces 2 | Harpoon — **winches** a target all the way in over 0.9s |
-| Seeker Launcher | Homing explosive arcs | Cluster Barrage — 9 mortars on your aim point |
-| Photon Lance | Beam that ramps to 3× on a held target — but only 1.6× on a boss. 30-round cell | Prism Burst — discharge stored heat |
-| Void Reaper | Flat horizontal slash that **throws the cut** as a crescent wave | Blink Slash — phase 14m along your line of sight, cutting the path |
-| Siege Gauntlets | Punches a 9m compression wave out of the knuckles | Jet Boost — ride the blast straight up |
-| Meridian Longrifle | Scoped bolt gun. Never rolls a crit — earns them off a visible seam | Sidearm Revolver — free to holster if it finishes the job |
+| Vanguard | MK-4 Sidearm | Standard issue for the standard soldier — the weapon the others are measured against, on the character the others are tuned against |
+| Unloader | Siege Gauntlets | A cargo handler does not carry a gun. The punch *is* the weapon, and it is the only thing that keeps up with the grapple |
+| Wraith | Void Reaper | Thin armour needs a weapon that pays some of it back, and Blink Slash is the same phase-step the character already thinks in |
+| Bulwark | Photon Lance | The ramp needs three seconds on one target, and Bulwark is the only frame in the descent that can afford to stand still that long |
+| Halcyon | Seeker Launcher | A bombardier does not aim, it drops — and an arc thrown from thirty metres up is the shape this weapon was already built around |
+| Dasher | **Splitting Lance** | Reach, almost no reserve, and a sweep to answer being surrounded: its one weakness is exactly what his dash exists to escape |
+| Chain | Arc Emitter | It chains. A weapon that jumps body to body belongs to the character whose every ability is about the thing that comes back |
+
+The **Splitting Lance** is new — the spear Dasher is drawn holding, and nothing in the old
+roster was one. Thrusts pierce three for 150% at 2.6/s; Vault Cut sweeps the whole ring for
+380% and rides the turn out of it.
+
+Three weapons left with nobody to carry them and were retired: the Breach Scattergun, the
+Rivet Driver and the Meridian Longrifle. Nothing is bought in the Sanctum any more either —
+buying a character buys the weapon that comes with them.
 
 **Every weapon acts its attack out.** A weapon ability names an `anim` — `slash`, `punch`,
 `thrust`, `pump`, `lob`, `beam` or `shoot` — and the rig plays it: the blade sweeps across the
@@ -459,27 +469,13 @@ seconds of nothing. Thirty ticks is a shade under three seconds held down, which
 the length of the ramp — so the weapon now reaches the top of its own curve at about the
 moment the cell runs dry, and holding the beam on one target costs you the reload instead of
 being free forever. The two seconds do not shorten with attack speed: attack speed buys
-rounds, not hands. This is a second, simpler kind of reload beside the Meridian Longrifle's
-active-reload minigame — there is no window and nothing to get right, just a hole in your
-damage the weapon's rhythm is priced around. The round count sits on the M1 slot and the
+rounds, not hands. There is no window and nothing to get right, just a hole in your damage
+the weapon's rhythm is priced around. The round count sits on the M1 slot and the
 reload bar runs without a marker.
-
-The **Rivet Driver**'s Harpoon is a winch rather than a shove. A single impulse barely moved
-anything heavy; the target is now dragged under power for 0.9s at 34 u/s, lifted just enough
-to clear kerbs on the way, with heavy enemies resisting in proportion to their knockback
-resistance rather than ignoring the line entirely.
 
 The **Siege Gauntlets** have no muzzle: the reach *is* the ability. Each punch resolves a 9m
 cone with three upright crescents marching away from the fist, and the secondary fires both
 gauntlets at the floor — straight up, jumps refunded, with a 260% blast under you.
-
-The **Meridian Longrifle** is the only weapon that takes the dice away. Right mouse puts you
-behind real glass: the camera collapses onto the eye, the field of view narrows to fifteen
-degrees, the body stops drawing and the HUD draws a lens with a reticle in it. Behind that
-glass every body in the arena — husk, elite or boss — shows the one plate it never got seated
-properly, drawn as a red box somewhere on its surface. Put a round through the box and the
-hit is critical, guaranteed; the seam is depth-tested like anything else, so one on the far
-side of a target is a reason to move rather than a free shot through its back.
 
 It never rolls a crit of its own. That is what makes the seam mean anything — a weapon that
 sometimes crits anyway turns aiming into a suggestion — and it is why every point of crit
@@ -641,8 +637,8 @@ src/
     items.js          81 item descriptors
     pets.js           the four pet species
     itemArt.js        procedural icon recipes, one per item
-    characters.js     4 playable characters and their abilities
-    weapons.js        8 weapon descriptors
+    characters.js     7 playable characters, their abilities and their weapon
+    weapons.js        7 weapon descriptors, one per character
     enemies.js        bestiary, 6 bosses, elite affixes
   world/
     arena.js          procedural arena, structures, scattering, collider grid
@@ -710,7 +706,7 @@ Collecting one raises a card
 showing the name, rarity, category and what the item does *at its new stack count*, so a
 second copy reads as the upgrade it is rather than repeating the first pickup's numbers.
 
-**Proc coefficients.** Every hit carries one. The sidearm's is 1.0; a Rivet Driver nail is
+**Proc coefficients.** Every hit carries one. The sidearm's is 1.0; a fast repeating hit is
 0.25; explosion splash is 0. On-hit items scale their trigger chance by it, so a 13/s weapon
 does not trivially out-proc a 1.4/s one.
 
