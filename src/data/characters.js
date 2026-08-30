@@ -209,7 +209,7 @@ export const CHARACTERS = [
     build: 'halcyon',
     unlocked: false,
     echoCost: 900,
-    color: 0xb9c3d2, accent: 0x49f7e6, visor: 0x85fff0,
+    color: 0xdde5ef, accent: 0x49f7e6, visor: 0x85fff0,
     desc: 'Thrusters where the armour should be. Thin, brittle and a little short on punch — and the only thing in the descent that never has to touch the floor.',
     lore: 'The airframe was salvage. The pilot did not ask what from.',
     stats: {

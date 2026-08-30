@@ -500,8 +500,11 @@ seconds. It is a finisher, not a second primary.
 behaviours, plus **4 elite affixes** — Blazing, Glacial, Overcharged, Voidtouched — that
 appear once the ramp gets going and bring their own mechanics.
 
-Each arena has its own shortlist of guardians and draws from it at random, so the same place
-can hand you a different fight and the fight always suits the place. The six:
+Each arena owns **two** guardians and draws from them at random, and the two places in a tier
+never share one — so a stage number offers four possible fights, two of which are on the table
+depending on which of the pair you landed in. Once you have looped, the ordering stops meaning
+anything and the whole roster is on the table everywhere, which is the point of refusing the
+ending. The six:
 
 | Boss | The problem it sets |
 | --- | --- |
@@ -547,9 +550,29 @@ or quantises into shelves.
 | Void Terrace | 176 | 5 | Wide plates you break line of sight behind |
 | Ember Depths | 166 | 5 | Short-wavelength ridging and deep clefts; nowhere to hold a line |
 
-**The order is different every run.** Stage one is one of the two calm green themes; after
-that a stage is drawn at random from everything deep enough to have appeared, with the
-shallowest themes dropping out again as you descend and no theme ever running back to back.
+**Stages come in tiers of exactly two.** Stage one is the forest or the swamp, stage two is
+one of the next pair, and so on; past the fourth tier the stage number wraps, which is what a
+loop is. A stage number always offers the same choice of two places, and which of the two you
+get is the only thing that varies between runs at that depth — so you know the shape of what
+is coming and not which one, and no theme ever runs back to back.
+
+| Stage | The two places |
+| --- | --- |
+| 1, 5, 9 … | Verdant Hollow · Sunken Mire |
+| 2, 6, 10 … | Shattered Spires · Tidal Shelf |
+| 3, 7, 11 … | Ossuary Flats · Frozen Shelf |
+| 4, 8, 12 … | Ashfall Basin · Ember Depths |
+
+This replaced a sliding window — a theme was eligible if its depth was within four of the
+stage — which sounded like a descent and behaved like a jumble: stage three drew from *five*
+themes with the opening forest and swamp still in the bag, stage five drew from all nine, and
+a player three stages in had usually seen the same two green arenas three times and nothing
+else.
+
+The **Void Terrace** is not on the way down at all. It joins every tier's pool the moment you
+have stood in front of the rift and descended anyway, so it is the one place you cannot reach
+on a first clear.
+
 The host draws and sends the result in the stage packet, so a co-op party always lands in the
 same place — including someone who joined halfway through.
 
@@ -715,6 +738,72 @@ buffs, internal cooldowns, timers and FX — item code never touches the game ob
 and a throwing hook is caught and logged rather than killing the frame.
 
 ### Adding a character
+
+**One character is not procedural.** Halcyon is an authored mesh — modelled elsewhere, shipped
+as glTF in `assets/models/`, and rigged at load time by `entities/authoredRig.js`. It arrives
+the way exported art usually does: one welded shell of 33k triangles, no skeleton, no
+animation, a single flat grey material. Three jobs stand between that and a playable body, and
+that module does all three: it fits a skeleton to the mesh *measured from its own geometry*
+(horizontal slabs clustered in x/z, which is the only way to find an arm in a shell that also
+contains six wing blades passing through the same heights), skins every vertex to it with
+inverse-distance falloff weights, and paints it by region into the character's palette.
+
+The skeleton it fits is not arbitrary. `characterRig.js` animates whatever it finds under
+`model.userData` — `torso`, `armL.userData.lower`, `legR.userData.ankle` — and never asks what
+those objects *are*. So the bones are given exactly that shape, and the whole existing
+animation system (gait blending, aim tracking, the six attack poses, the weapon tracking the
+crosshair) drives an authored mesh without one line of it changing.
+
+The subtle part is the bind pose. Skinning cares about the difference between a bone's current
+transform and its bind transform, and the rig writes *absolute* rotations — it settles an idle
+arm on `rotation.z = ±0.9` because a procedural arm is built pointing straight down and needs
+swinging out. This mesh's arms are already sculpted hanging down and out, so binding them at
+zero adds that 0.9 on top and the character stands like a scarecrow. They are bound *at* the
+rig's idle values instead, which makes the sculpted pose the idle pose exactly and every
+animation deviate from what the artist drew rather than from a T-pose the mesh has never been
+in. That in turn means a child bone's offset has to be expressed in its parent's rotated
+frame, or the elbow lands somewhere the elbow is not.
+
+Meshes are loaded once at boot, before the menu opens, because `buildPlayerModel` is called
+synchronously from three places and threading promises through all of them to accommodate a
+file load would be the tail wagging the dog. A file that fails to arrive simply leaves that
+character on its procedural body.
+
+**The characters are made of something.** Every part of every body used to be a bare colour
+at a uniform roughness, which is the single reason they read as moulded plastic however good
+the proportions underneath were — a flat surface tells you nothing about what it is made of,
+so a steel pauldron, a rubber joint and a linen sleeve all came back as "smooth thing,
+tinted". The note at the top of `world/textures.js` had said so since the world got its own
+materials on day one; the characters simply never got theirs.
+
+They now carry six procedural surfaces — panelled plate, fine tech panel, woven cloth,
+plaited straw, joint rubber, rope and leather — each with a matching roughness map, which is
+the half that actually does the work: a body where the shoulder plate is polished, the joint
+under it is matte and the cloth between them drinks light reads as three materials before you
+have registered a single shape. The maps are painted *neutral*, so one straw texture dresses a
+hat of any colour and the character's own palette still supplies every hue.
+
+Two details make it work rather than merely exist. They are projected **triplanar in object
+space**: these bodies are assembled from primitives at wildly different sizes — a torso lathe
+and a rivet both carry a 0..1 UV square — so a UV-mapped detail map would put as many seams on
+the rivet as on the chest, and projecting by position instead fixes texel density in *metres*.
+Object space rather than the world space the scenery uses, because a character walks, and a
+world-projected texture would swim across it like it was being held under a running tap. And
+each map is **normalised to a fixed mean**: a detail map multiplies, so every seam and speck of
+grime can only take light away, and enough of them quietly drag a character two stops darker
+than the palette says. Measured, the maps now shift mean luminance by 0.3%.
+
+**Proportions first, geometry second.** The measure that decides whether a figure reads as a
+character or as a toy is *heads tall*, and nothing else comes close: an early pass built these
+at 4.7 heads with the legs at 40% of height, which is bobblehead, and no amount of smoothing
+rescued it. They are laid out at about 7 heads now with the legs just over half the height —
+close to the concept sheets — and the torso is lathed from a profile with hips, a waist pinch,
+a ribcage and a chest flare instead of being one cylinder from belt to collar. There is a neck,
+too; a figure with no neck has nowhere for the head to attach, so it reads as placed on top.
+Every piece of a character's own hardware is quoted off `P.w`, `P.torso` or a limb radius
+rather than in metres, because anything given an absolute size stops fitting the moment the
+proportions move — the shield became a door and the wing became a hang-glider exactly once
+before this rule existed.
 
 **How round anything is lives in one table.** `SEG` in `entities/models.js` names segment
 counts by what the part *is* — `SEG.torso`, `SEG.limb`, `SEG.tiny` — rather than by number,

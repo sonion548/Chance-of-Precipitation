@@ -190,7 +190,7 @@ export class Director {
    * belongs on the Flats. A theme with no shortlist falls back to the roster.
    */
   bossForStage() {
-    const list = bossesForTheme(this.game.arena?.theme);
+    const list = bossesForTheme(this.game.arena?.theme, !!this.game.run?.looped);
     const pool = list ? list.map((id) => BOSSES.find((b) => b.id === id)).filter(Boolean) : BOSSES;
     return this.game.rng.pick(pool.length ? pool : BOSSES);
   }
