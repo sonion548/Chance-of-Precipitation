@@ -86,12 +86,24 @@ export class Arena {
     this.rng = new RNG(this.seed);
     this.decorRng = new RNG((this.seed ^ 0x9e3779b9) >>> 0);
     this.stage = stage;
-    // The sanctum forces its own theme rather than taking a turn in the
-    // rotation, and brings its own (much smaller) radius with it.
-    // The world's owner decides which place this is; everyone else is told.
+    /* The sanctum forces its own theme rather than taking a turn in the
+     * rotation, and brings its own (much smaller) radius with it.
+     * The world's owner decides which place this is; everyone else is told.
+     *
+     * Theme selection draws from its own stream, and must never touch
+     * `this.rng`. That RNG is the terrain: `_initLandform` takes the five phase
+     * offsets that decide where every hill is out of it, immediately below.
+     * Selection used to draw from it directly, and because a host *picks* a
+     * theme while a client is *told* one — so the client short-circuits and
+     * never draws — the two ended up at different positions in the same
+     * sequence. Same seed, different hills. That is the whole of the co-op bug
+     * where a joiner sees chests hanging in the air and enemies buried to the
+     * chest: the chest was placed at the host's ground height and the joiner's
+     * ground was somewhere else. */
+    const themeRng = new RNG((this.seed ^ 0x5bf03635) >>> 0);
     this.theme = opts.theme
       || (opts.themeId && THEMES_BY_ID[opts.themeId])
-      || themeForStage(stage, this.rng, opts.avoidTheme);
+      || themeForStage(stage, themeRng, opts.avoidTheme, !!opts.looped);
     this.radius = this.theme.arenaRadius ?? WORLD.arenaRadius;
     this.group = new THREE.Group();
     this._initLandform();
@@ -284,6 +296,17 @@ export class Arena {
       h ^= Math.round(v * 100) | 0;
       h = Math.imul(h, 0x01000193);
     };
+    /* The landform first. The hash used to cover only the colliders — the
+       things standing *on* the ground — so two arenas could agree on every
+       crate and rock while disagreeing about the shape of the floor under
+       them, and the receipt would happily say they matched. */
+    const L = this._land;
+    if (L) {
+      mix(L.amplitude); mix(L.scale); mix(L.detail);
+      mix(L.ridged); mix(L.bowl); mix(L.terrace);
+      mix(L.p0); mix(L.p1); mix(L.p2); mix(L.p3); mix(L.p4);
+    }
+    mix(this.radius);
     mix(this.colliders.length);
     for (const c of this.colliders) {
       mix(c.min.x); mix(c.min.y); mix(c.min.z);

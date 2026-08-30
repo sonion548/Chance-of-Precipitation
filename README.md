@@ -500,8 +500,11 @@ seconds. It is a finisher, not a second primary.
 behaviours, plus **4 elite affixes** — Blazing, Glacial, Overcharged, Voidtouched — that
 appear once the ramp gets going and bring their own mechanics.
 
-Each arena has its own shortlist of guardians and draws from it at random, so the same place
-can hand you a different fight and the fight always suits the place. The six:
+Each arena owns **two** guardians and draws from them at random, and the two places in a tier
+never share one — so a stage number offers four possible fights, two of which are on the table
+depending on which of the pair you landed in. Once you have looped, the ordering stops meaning
+anything and the whole roster is on the table everywhere, which is the point of refusing the
+ending. The six:
 
 | Boss | The problem it sets |
 | --- | --- |
@@ -547,9 +550,29 @@ or quantises into shelves.
 | Void Terrace | 176 | 5 | Wide plates you break line of sight behind |
 | Ember Depths | 166 | 5 | Short-wavelength ridging and deep clefts; nowhere to hold a line |
 
-**The order is different every run.** Stage one is one of the two calm green themes; after
-that a stage is drawn at random from everything deep enough to have appeared, with the
-shallowest themes dropping out again as you descend and no theme ever running back to back.
+**Stages come in tiers of exactly two.** Stage one is the forest or the swamp, stage two is
+one of the next pair, and so on; past the fourth tier the stage number wraps, which is what a
+loop is. A stage number always offers the same choice of two places, and which of the two you
+get is the only thing that varies between runs at that depth — so you know the shape of what
+is coming and not which one, and no theme ever runs back to back.
+
+| Stage | The two places |
+| --- | --- |
+| 1, 5, 9 … | Verdant Hollow · Sunken Mire |
+| 2, 6, 10 … | Shattered Spires · Tidal Shelf |
+| 3, 7, 11 … | Ossuary Flats · Frozen Shelf |
+| 4, 8, 12 … | Ashfall Basin · Ember Depths |
+
+This replaced a sliding window — a theme was eligible if its depth was within four of the
+stage — which sounded like a descent and behaved like a jumble: stage three drew from *five*
+themes with the opening forest and swamp still in the bag, stage five drew from all nine, and
+a player three stages in had usually seen the same two green arenas three times and nothing
+else.
+
+The **Void Terrace** is not on the way down at all. It joins every tier's pool the moment you
+have stood in front of the rift and descended anyway, so it is the one place you cannot reach
+on a first clear.
+
 The host draws and sends the result in the stage packet, so a co-op party always lands in the
 same place — including someone who joined halfway through.
 

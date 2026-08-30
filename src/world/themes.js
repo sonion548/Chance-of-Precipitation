@@ -27,7 +27,7 @@
 export const THEMES = [
   {
     id: 'hollow', name: 'Verdant Hollow',
-    depth: 1,
+    tier: 1,
     bosses: ['thornmaw', 'colossus'],
     arenaRadius: 148,
     // Rolling and forgiving: long wavelengths, no ridging, a gentle lift toward
@@ -71,8 +71,8 @@ export const THEMES = [
   },
   {
     id: 'mire', name: 'Sunken Mire',
-    depth: 1,
-    bosses: ['thornmaw', 'choir'],
+    tier: 1,
+    bosses: ['choir', 'leviathan'],
     arenaRadius: 158,
     // Shallow terraced water: broad flat pans separated by low banks, draining
     // toward the middle. Almost nothing to hide behind, and what there is grows.
@@ -115,7 +115,7 @@ export const THEMES = [
   },
   {
     id: 'spire', name: 'Shattered Spires',
-    depth: 3,
+    tier: 2,
     bosses: ['fulgurant', 'harbinger'],
     arenaRadius: 168,
     // The most vertical ground in the game: tall narrow plates with real drops
@@ -156,7 +156,7 @@ export const THEMES = [
   },
   {
     id: 'ossuary', name: 'Ossuary Flats',
-    depth: 4,
+    tier: 3,
     bosses: ['choir', 'colossus'],
     arenaRadius: 172,
     // Almost flat, and deliberately: the widest sightlines in the game, so the
@@ -198,7 +198,7 @@ export const THEMES = [
   },
   {
     id: 'tidal', name: 'Tidal Shelf',
-    depth: 2,
+    tier: 2,
     bosses: ['leviathan', 'choir'],
     arenaRadius: 162,
     // Terraced: flat wet shelves with about a metre of drop between them,
@@ -241,7 +241,7 @@ export const THEMES = [
   },
   {
     id: 'frozen', name: 'Frozen Shelf',
-    depth: 3,
+    tier: 3,
     bosses: ['fulgurant', 'leviathan'],
     arenaRadius: 170,
     // The biggest, smoothest relief in the game: long drifts you run over
@@ -283,7 +283,7 @@ export const THEMES = [
   },
   {
     id: 'ashfall', name: 'Ashfall Basin',
-    depth: 4,
+    tier: 4,
     bosses: ['colossus', 'thornmaw'],
     arenaRadius: 155,
     // Named a basin, so it is one: the ground falls away from the middle into a
@@ -324,8 +324,10 @@ export const THEMES = [
   },
   {
     id: 'void', name: 'Void Terrace',
-    depth: 5,
-    bosses: ['harbinger', 'fulgurant'],
+    // No tier: the Void Terrace is not on the way down. It only opens once
+    // you have stood in front of the rift and descended anyway.
+    loopOnly: true,
+    bosses: ['harbinger', 'thornmaw'],
     arenaRadius: 176,
     // Terraces, as advertised — wide plates at a metre and three quarters,
     // the tallest steps in the game, walled in at the edge.
@@ -364,8 +366,8 @@ export const THEMES = [
   },
   {
     id: 'ember', name: 'Ember Depths',
-    depth: 5,
-    bosses: ['colossus', 'harbinger'],
+    tier: 4,
+    bosses: ['harbinger', 'fulgurant'],
     arenaRadius: 166,
     // The worst footing of the descent: short-wavelength ridging, deep clefts,
     // and nowhere flat enough to hold a line for long.
@@ -453,47 +455,63 @@ export const THEMES_BY_ID = Object.fromEntries(THEMES.map((t) => [t.id, t]));
 /**
  * Which arena a stage is.
  *
- * It used to be `THEMES[(stage - 1) % THEMES.length]` — a fixed rotation, so
- * every run was the same six places in the same order and by the third run you
- * knew what stage four looked like before you got there. Now it is drawn at
- * random from the themes deep enough to appear, which is most of what makes one
- * descent different from the next.
+ * Stages come in **tiers of exactly two**. Stage one is the forest or the swamp,
+ * stage two is one of the next pair, and so on; past the last tier the stage
+ * number wraps, which is what a loop is. So a stage number always offers the
+ * same choice of two places, and which of the two you get is the only thing
+ * that varies between runs at that depth.
  *
- * A theme is only eligible once you are deep enough for it, and drops out again
- * once you are well past it, so the descent still darkens even though the order
- * is not fixed. Stage one draws from the two calm green themes — the opening
- * minutes are the tutorial, and they should look like one.
+ * This replaced a sliding eligibility window — a theme was in the pool if its
+ * depth was within four of the stage — which sounded like a descent and behaved
+ * like a jumble. The window meant stage three drew from *five* themes with the
+ * opening forest and swamp still in the bag, and stage five drew from all nine,
+ * so a player three stages in had usually seen the same two green arenas three
+ * times and nothing else. Two per tier makes the descent legible: you know the
+ * shape of what is coming and not which one.
+ *
+ * A theme marked `loopOnly` is not on the way down at all. It joins every
+ * tier's pool the moment you have refused the ending and descended past the
+ * rift, so it is the one place you cannot reach on a first clear.
  *
  * The *host* draws, and sends the result in the stage packet, so this is only
- * ever called on the machine that owns the world. Deriving it from the stage
- * seed instead would have been reproducible right up until somebody joined a
- * run in progress, at which point their idea of "the previous stage" and the
- * host's would differ and the party would be standing in two different places.
+ * ever called on the machine that owns the world — and never from the arena's
+ * own RNG, which belongs to the terrain (see `Arena`'s constructor).
  */
-export function themeForStage(stage, rng = null, avoidId = null) {
-  if (!rng) return THEMES[(stage - 1) % THEMES.length];
+export const THEME_TIERS = Math.max(...THEMES.map((t) => t.tier ?? 0));
 
-  let pool = THEMES.filter((t) => {
-    const depth = t.depth ?? 1;
-    if (depth > stage) return false;
-    // Shallow themes stop appearing once you are well past them, so the
-    // descent still darkens even though the order is not fixed.
-    return depth >= stage - 4;
-  });
-  // Never the same place twice in a row. With a pool of three or four that
-  // happens about a quarter of the time otherwise, and back-to-back identical
-  // stages are the one thing that makes a random order feel *less* varied than
-  // a fixed one.
+/** The two places a given stage number can be. */
+export function themesForStage(stage, looped = false) {
+  const tier = ((Math.max(1, stage) - 1) % THEME_TIERS) + 1;
+  const pool = THEMES.filter((t) => t.tier === tier);
+  if (looped) pool.push(...THEMES.filter((t) => t.loopOnly));
+  return pool.length ? pool : THEMES;
+}
+
+export function themeForStage(stage, rng = null, avoidId = null, looped = false) {
+  let pool = themesForStage(stage, looped);
+  if (!rng) return pool[0];
+
+  // Never the same place twice running. With a pool of two that is otherwise a
+  // coin flip away every single descent, and back-to-back identical stages are
+  // the one thing that makes a random order feel *less* varied than a fixed one.
   if (avoidId && pool.length > 1) {
     const trimmed = pool.filter((t) => t.id !== avoidId);
     if (trimmed.length) pool = trimmed;
   }
-  if (!pool.length) pool = THEMES;
   return pool[Math.floor(rng.next() * pool.length)];
 }
 
-/** The bosses a stage can call. Falls back to the whole roster. */
-export function bossesForTheme(theme) {
+/**
+ * The bosses a stage can call.
+ *
+ * Each theme owns two, and the two themes in a tier never share one — so a
+ * stage number offers four possible guardians, two of which you will see
+ * depending on which of the pair you landed in. Once you have looped, the
+ * ordering stops meaning anything and the whole roster is on the table
+ * everywhere, which is the point of refusing the ending.
+ */
+export function bossesForTheme(theme, looped = false) {
+  if (looped) return null;
   return theme?.bosses?.length ? theme.bosses : null;
 }
 

@@ -125,6 +125,11 @@ export class Game {
       // Shrine of Ruin: more bosses at the beacon, more boss loot for everyone.
       bossCountBonus: 0,
       bossItemBonus: 0,
+      /* Set the first time you stand in front of the rift and descend anyway.
+         From then on the descent has no order left to respect: every stage can
+         be any of its tier's places plus the Void Terrace, and any guardian can
+         be waiting. Refusing the ending is what opens the roster. */
+      looped: false,
     };
 
     this.director = new Director(this, mode.mult, mode.spawnMult ?? 1);
@@ -223,6 +228,7 @@ export class Game {
       theme: final ? finalTheme() : null,
       themeId: layout?.theme ?? null,
       avoidTheme: previousTheme,
+      looped: !!this.run?.looped,
     });
     this.stageThemeId = this.arena.theme.id;
     this.engine.setTheme(this.arena.theme);
@@ -358,6 +364,7 @@ export class Game {
       th: this.arena.terrainHash(),
       bosses: this.run.bossCountBonus | 0,
       bossItems: this.run.bossItemBonus | 0,
+      looped: this.run.looped ? 1 : 0,
       chests: this.chests.map((c) => ({
         k: c.kind, x: c.position.x, y: c.position.y, z: c.position.z,
         cost: c.cost, uses: c.uses, o: c.opened ? 1 : 0,
@@ -383,6 +390,7 @@ export class Game {
     this.run.stage = m.stage;
     if (typeof m.bosses === 'number') this.run.bossCountBonus = m.bosses;
     if (typeof m.bossItems === 'number') this.run.bossItemBonus = m.bossItems;
+    if (typeof m.looped === 'number') this.run.looped = !!m.looped;
     this.enemies.clear();
     this.projectiles.clear();
     this.pickups.clear();
@@ -627,6 +635,9 @@ export class Game {
 
   advanceStage() {
     const p = this.player;
+    // Descending while the rift is open is the refusal. Read it before the
+    // stage tears down and takes the portal with it.
+    if (this.portal) this.run.looped = true;
     this.run.stage++;
     this.run.stagesCleared++;
     this.director.onStageCleared();
