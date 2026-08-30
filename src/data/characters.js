@@ -265,7 +265,7 @@ export const CHARACTERS = [
     build: 'dasher',
     unlocked: false,
     echoCost: 850,
-    color: 0x0b0d11, accent: 0x00ffa6, visor: 0x7ffff0,
+    color: 0x191e26, accent: 0x00ffa6, visor: 0x7ffff0,
     desc: 'A silhouette with almost nothing in it — matte black plate that gives the light back to nobody, wrapped in the discharge it never quite contains. The fastest and hardest-hitting thing in the descent. Paints a crowd with a spear, then travels through it; every dash that lands on paint is a dash you did not spend.',
     lore: 'Armour is weight. Weight is time. Time is the only thing that kills you.',
     stats: {
