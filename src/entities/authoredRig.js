@@ -464,11 +464,217 @@ const UNLOADER_RIG = {
   },
 };
 
-const RIGS = { halcyon: HALCYON_RIG, dasher: DASHER_RIG, unloader: UNLOADER_RIG };
+/**
+ * Sniper: a cloak, a rifle held across the body, and the most surgery any
+ * authored mesh has needed.
+ *
+ * The body is easy — a hooded figure in plate over a bodysuit, measured the same
+ * way as the others. The rifle is not. It arrived welded to its owner in two
+ * places and misaligned in a third:
+ *
+ *   • the scope's eyepiece runs into the shoulder, so scope and shoulder are one
+ *     surface — see `detach`;
+ *   • the scope is cocked 15° off the bore, up and to the right, which reads as
+ *     a broken optic from any angle you can see both from;
+ *   • the barrel and the receiver, mercifully, are dead straight already: the
+ *     bore fits a line to within 7 mm over its whole length, which is what makes
+ *     that line trustworthy enough to align everything else to.
+ *
+ * The bore is the frame the whole weapon is described in. Measured off the mesh
+ * by walking the barrel in slices and least-squares fitting its centres, it runs
+ * from the muzzle back through the receiver to the butt at the shoulder, and
+ * every number below is either a point on it or an offset from it.
+ */
+const BORE = {
+  // A point on the bore, and the direction it points, in recentred model space.
+  at: [0.6521, 0.9287, 0.6108],
+  dir: [0.7406, -0.4671, 0.4831],
+};
+
+const SNIPER_RIG = {
+  // The body stands at x = −0.10, z = −0.20 of its own file's origin.
+  recentre: [0.10, 0, 0.20],
+  hipY: 0.95,
+  bones: [
+    { name: 'pelvis', parent: null,     head: [0, 0.95, -0.02], tail: [0, 1.05, -0.02] },
+    { name: 'torso',  parent: 'pelvis', head: [0, 0.95, -0.02], tail: [0, 1.45, 0.00] },
+    { name: 'head',   parent: 'torso',  head: [0, 1.58, 0.00],  tail: [0, 1.88, 0.00] },
+
+    /* The rifle is carried across the body, so both hands end up near the
+       centreline with the elbows out — the forearms run *inward*, which is the
+       opposite of every other authored mesh here and the reason these were
+       measured off the bore rather than off the arm. `armR` is the trigger hand
+       and it is the one at −X, as it is on every mesh so far. */
+    { name: 'armR',      parent: 'torso', head: [-0.21, 1.42, -0.04], tail: [-0.30, 1.20, 0.02],
+      bind: ARM_BIND_R },
+    { name: 'armRlower', parent: 'armR',  head: [-0.30, 1.20, 0.02],  tail: [-0.06, 1.30, 0.15],
+      bind: ELBOW_BIND_R },
+    { name: 'armL',      parent: 'torso', head: [0.21, 1.42, -0.04],  tail: [0.27, 1.19, 0.10],
+      bind: ARM_BIND_L },
+    { name: 'armLlower', parent: 'armL',  head: [0.27, 1.19, 0.10],   tail: [0.19, 1.15, 0.31],
+      bind: ELBOW_BIND_L },
+
+    // A wide, staggered shooting stance: left foot forward, right foot back.
+    { name: 'legL',       parent: 'pelvis',    head: [-0.16, 0.95, -0.02], tail: [-0.24, 0.55, 0.00] },
+    { name: 'legLlower',  parent: 'legL',      head: [-0.24, 0.55, 0.00],  tail: [-0.30, 0.15, -0.02] },
+    { name: 'legLankle',  parent: 'legLlower', head: [-0.30, 0.15, -0.02], tail: [-0.32, 0.03, 0.06] },
+    { name: 'legR',       parent: 'pelvis',    head: [0.16, 0.95, -0.02],  tail: [0.20, 0.55, -0.04] },
+    { name: 'legRlower',  parent: 'legR',      head: [0.20, 0.55, -0.04],  tail: [0.25, 0.15, -0.10] },
+    { name: 'legRankle',  parent: 'legRlower', head: [0.25, 0.15, -0.10],  tail: [0.30, 0.03, -0.04] },
+
+    /* The cloak: a three-link chain off the back of the chest, following the
+       line the cloth hangs along. Chained rather than rigid so it can trail —
+       see `swayCape`. */
+    { name: 'capeA', parent: 'torso', head: [0, 1.44, -0.14],     tail: [-0.06, 1.10, -0.24] },
+    { name: 'capeB', parent: 'capeA', head: [-0.06, 1.10, -0.24], tail: [-0.10, 0.70, -0.30] },
+    { name: 'capeC', parent: 'capeB', head: [-0.10, 0.70, -0.30], tail: [-0.12, 0.24, -0.30] },
+  ],
+  // Nothing grows off this one's back but cloth, which has its own claim.
+  wing: { minY: 99, behind: -99, outward: 99, bone: 'torso' },
+  /* The cloak reaches the floor and hangs past both hips, so it cannot be
+     claimed by "outboard" the way a wing is — the legs are outboard too. What
+     separates it is that it is *behind*: the body's own back never passes
+     z = −0.14, and the cloak starts there and goes back to −0.37. */
+  cape: {
+    bones: ['capeA', 'capeB', 'capeC'],
+    test: (x, y, z) => z < -0.14 && y > 0.06 && y < 1.56,
+  },
+  /**
+   * The scope, cut free of the shoulder and set square on the bore.
+   *
+   * `from` is the axis the scope was modelled on, fitted the same way the bore
+   * was: ring centres taken in slices down the tube, then a line through them.
+   * Rotating that onto the bore is the entire alignment — 15.2°, most of it
+   * pitch — and `move` is the last centimetre, squaring the tube up over the
+   * barrel instead of sitting a little left of it.
+   */
+  detach: [{
+    test: (x, y, z) => {
+      const [t, u, r] = boreFrame(x, y, z);
+      if (t < -0.92 || t > -0.52) return false;
+      return Math.hypot(u - (0.1603 * t + 0.2545), r - (0.2198 * t + 0.1543)) < 0.085;
+    },
+    seal: false,
+    from: [0.6592, -0.3139, 0.6833],
+    to: BORE.dir,
+    pivot: [0.1754, 1.3880, 0.2951],
+    move: [-0.0077, -0.0125, -0.0003],
+  }],
+  /**
+   * The rifle, from the butt in the shoulder to the muzzle.
+   *
+   * A fat capsule by the standards of the other two — it has to swallow a scope
+   * standing 12 cm proud of the bore — and it starts at the butt rather than
+   * below a fist, because this weapon is held in two hands with its back end
+   * behind both of them. The seam therefore falls at the hands, which is where
+   * a rifle's seam belongs, and the grip-end blend does the rest.
+   */
+  weapon: {
+    grip: [-0.3111, 1.5359, 0.0179],
+    muzzle: [0.8300, 0.8170, 0.7270],
+    radius: 0.115, from: 0.0,
+    also: (x, y, z) => scopeCylinder(x, y, z),
+    // The brake, and nothing else: a sniper is not a lamp.
+    lit: 0.962,
+    casing: 4, emitter: 5,
+  },
+  /* 0 plate · 1 cloak · 2 visor · 3 bodysuit · 4 rifle · 5 muzzle · 6 trim */
+  region(cx, cy, cz) {
+    const ax = Math.abs(cx);
+    // The slit. Wide and shallow, set back under the brow of the hood.
+    if (ellipsoid(cx, cy, cz, [0, 1.715, 0.02], [0.105, 0.032, 0.15])) return 2;
+    // The mark on the brow, which is the only gold above the waist.
+    if (ellipsoid(cx, cy, cz, [0, 1.778, 0.0], [0.07, 0.032, 0.14])) return 6;
+    /* Hood and cloak. The hood is everything above the collar; the cloak is
+       everything behind the body's own back, which never passes z = −0.13. */
+    if (cy > 1.58) return 1;
+    if (cz < -0.13 && cy > 0.06) return 1;
+    // Belt.
+    if (cy > 0.95 && cy < 1.04 && ax < 0.26) return 6;
+    // Plate: pauldrons and chest rig, thigh and knee guards, boots.
+    if (cy > 1.16 && cy < 1.58 && ax > 0.10) return 0;
+    if (cy > 1.04 && cy < 1.36 && ax < 0.26) return 0;
+    if (cy > 0.28 && cy < 0.76 && ax > 0.09) return 0;
+    if (cy < 0.18) return 0;
+    return 3;
+  },
+  materials(char, weapon) {
+    const S = characterSurfaces();
+    return [
+      // Desert plate: the armour, and the only warm thing on the silhouette.
+      makeCharacterMaterial(S.plate, {
+        color: 0xbca77c, roughness: 0.62, metalness: 0.3, scale: 5.4,
+      }),
+      /* The cloak. Lit, faintly — the sheet draws it as a colour that carries
+         across an arena, and cloth this dark otherwise reads as a hole. */
+      makeCharacterMaterial(S.cloth, {
+        color: char.color, emissive: char.color, emissiveIntensity: 0.18,
+        roughness: 0.82, metalness: 0.04, scale: 4.2, side: THREE.DoubleSide,
+      }),
+      new THREE.MeshStandardMaterial({
+        color: char.visor, emissive: char.visor, emissiveIntensity: 2.6,
+        roughness: 0.16, metalness: 0.6,
+      }),
+      // The suit under the plate: matte, dark, and deliberately unremarkable.
+      makeCharacterMaterial(S.tech, {
+        color: 0x232830, roughness: 0.7, metalness: 0.35, scale: 6.4,
+      }),
+      // The rifle: furniture in the same sand as the plate, over dark metal.
+      makeCharacterMaterial(S.tech, {
+        color: 0x9a8a66, roughness: 0.5, metalness: 0.55, scale: 7.0,
+      }),
+      // The brake, in the colour of what comes out of it.
+      new THREE.MeshStandardMaterial({
+        color: weapon.color, emissive: weapon.color, emissiveIntensity: 1.5,
+        roughness: 0.24, metalness: 0.6,
+      }),
+      // Brow mark and belt: brass, and the only warm metal on him.
+      makeCharacterMaterial(S.tech, {
+        color: char.accent, emissive: char.accent, emissiveIntensity: 0.4,
+        roughness: 0.4, metalness: 0.7, scale: 7.4,
+      }),
+    ];
+  },
+};
+
+/**
+ * A point in the bore's own frame: along it, above it, right of it.
+ *
+ * Declared out here rather than inside the spec because the scope's test needs
+ * it before the spec object exists, and because it is the frame every number in
+ * SNIPER_RIG was measured in — the rifle is diagonal across the body in all
+ * three axes, so nothing about it is expressible in model space without this.
+ */
+const _boreUp = new THREE.Vector3();
+const _boreRight = new THREE.Vector3();
+const _boreAt = new THREE.Vector3().fromArray(BORE.at);
+const _boreDir = new THREE.Vector3().fromArray(BORE.dir);
+_boreUp.set(0, 1, 0).addScaledVector(_boreDir, -_boreDir.y).normalize();
+_boreRight.crossVectors(_boreDir, _boreUp).normalize();
+const _borePoint = new THREE.Vector3();
+function boreFrame(x, y, z) {
+  _borePoint.set(x, y, z).sub(_boreAt);
+  return [_borePoint.dot(_boreDir), _borePoint.dot(_boreUp), _borePoint.dot(_boreRight)];
+}
+
+/**
+ * The scope, as it is *after* `detach` has put it right: a cylinder 12.5 cm
+ * above the bore and dead parallel to it. Before the surgery this shape would
+ * describe nothing; afterwards it is exact, which is the point of doing the
+ * surgery first and asking questions second.
+ */
+const SCOPE_HEIGHT = 0.125;
+function scopeCylinder(x, y, z) {
+  const [t, u, r] = boreFrame(x, y, z);
+  return t > -1.03 && t < -0.52 && Math.hypot(u - SCOPE_HEIGHT, r) < 0.085;
+}
+
+const RIGS = { halcyon: HALCYON_RIG, dasher: DASHER_RIG, unloader: UNLOADER_RIG, sniper: SNIPER_RIG };
 const SOURCES = {
   halcyon: './assets/models/halcyon.glb',
   dasher: './assets/models/dasher.glb',
   unloader: './assets/models/unloader.glb',
+  sniper: './assets/models/sniper.glb',
 };
 
 /**
@@ -482,6 +688,184 @@ const WEAPON_BONE = 'weapon';
 const FORWARD = new THREE.Vector3(0, 0, 1);
 /** How much of a mesh weapon's length is blended back into the hand. */
 const WEAPON_BLEND = 0.1;
+
+/* ------------------------------------------------------------------ detach */
+/**
+ * Cuts a piece of the shell free of the body it was modelled into, and puts it
+ * back where it belongs.
+ *
+ * `strip` below removes something the character should not be carrying. This is
+ * the other repair: something the character *should* be carrying that the
+ * sculpt has welded to them. Sniper's scope is the case it was written for —
+ * its eyepiece runs into the shoulder, so the scope and the shoulder are one
+ * surface, and it is cocked fifteen degrees off the bore into the bargain.
+ * Nothing downstream can fix either: a mesh weapon is skinned to the mount and
+ * aimed, and a scope welded to a shoulder would drag the shoulder with it.
+ *
+ * Three things happen, in this order, and each is needed by the next.
+ *
+ *   1. Every triangle is assigned to the piece or to the body by majority of
+ *      its corners, so the cut runs along a line of edges rather than through
+ *      triangles.
+ *   2. The vertices both sides share — the seam, the ring where the scope
+ *      passes into the shoulder — are duplicated, and the piece's triangles are
+ *      pointed at the copies. That is the whole of "separate": until now the two
+ *      were one surface because they were the same vertices.
+ *   3. Both rings are collapsed onto the seam's centroid. Each side is now an
+ *      open surface with a hole in it, and collapsing its boundary turns the
+ *      ring of triangles around that hole into a fan — a cap. The body closes
+ *      over where the scope used to emerge, the scope closes over its own back
+ *      end, and neither is a window into the other any more.
+ *
+ * Then the piece — and only the piece, which is why this cannot be two separate
+ * passes over positions — is rotated onto the axis it should have been on and
+ * nudged into place. The seam's two copies sit on the same point until this
+ * moment and are told apart by identity, not by where they are.
+ */
+function detachGeometry(geometry, piece) {
+  const pos = geometry.attributes.position;
+  const index = geometry.index.array;
+  const n = pos.count;
+
+  /* Welded first. The exporter splits a vertex wherever the UVs seam, so one
+     point of the surface can be several entries in the buffer; cutting between
+     two halves of the same point would open a crack down the middle of a face
+     rather than around the scope. */
+  const group = new Int32Array(n);
+  const byKey = new Map();
+  for (let i = 0; i < n; i++) {
+    const key = `${Math.round(pos.getX(i) * 1e5)},${Math.round(pos.getY(i) * 1e5)},${Math.round(pos.getZ(i) * 1e5)}`;
+    let g = byKey.get(key);
+    if (g === undefined) { g = i; byKey.set(key, i); }
+    group[i] = g;
+  }
+
+  const isPiece = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    isPiece[i] = piece.test(pos.getX(i), pos.getY(i), pos.getZ(i)) ? 1 : 0;
+  }
+  const triPiece = new Uint8Array(index.length / 3);
+  const usedByPiece = new Set();
+  const usedByBody = new Set();
+  for (let t = 0; t < index.length; t += 3) {
+    const a = index[t], b = index[t + 1], c = index[t + 2];
+    const mine = isPiece[a] + isPiece[b] + isPiece[c] >= 2;
+    triPiece[t / 3] = mine ? 1 : 0;
+    const used = mine ? usedByPiece : usedByBody;
+    used.add(group[a]); used.add(group[b]); used.add(group[c]);
+  }
+  const seam = new Set([...usedByPiece].filter((g) => usedByBody.has(g)));
+
+  // Duplicate the seam, and hand the copies to the piece.
+  const attrs = Object.values(geometry.attributes);
+  const copyOf = new Int32Array(n).fill(-1);
+  const extra = [];
+  for (let i = 0; i < n; i++) {
+    if (!seam.has(group[i])) continue;
+    copyOf[i] = n + extra.length;
+    extra.push(i);
+  }
+  if (extra.length) {
+    for (const attr of attrs) {
+      const size = attr.itemSize;
+      const grown = new attr.array.constructor((n + extra.length) * size);
+      grown.set(attr.array.subarray(0, n * size));
+      extra.forEach((src, k) => {
+        for (let c = 0; c < size; c++) grown[(n + k) * size + c] = attr.array[src * size + c];
+      });
+      attr.array = grown;
+      attr.count = n + extra.length;
+      attr.needsUpdate = true;
+    }
+    for (let t = 0; t < index.length; t += 3) {
+      if (!triPiece[t / 3]) continue;
+      for (let k = 0; k < 3; k++) {
+        const c = copyOf[index[t + k]];
+        if (c >= 0) index[t + k] = c;
+      }
+    }
+  }
+
+  /* Cap both sides: the ring of triangles around each hole becomes a fan.
+   *
+   * Per *loop*, not per seam. A tube passing through a surface can meet it in
+   * more than one closed curve — this one meets the shoulder in three — and
+   * collapsing every loop onto one shared centroid does not cap them, it sews
+   * them together through the middle of the character and leaves a spike
+   * standing where the three meet. Each loop is found by walking the seam's own
+   * edges and is collapsed onto its own centre. */
+  const p = geometry.attributes.position;
+  const seamEdges = piece.seal === false ? null : new Map();
+  if (seamEdges) {
+    for (const g of seam) seamEdges.set(g, []);
+    for (let t = 0; t < index.length; t += 3) {
+      for (let k = 0; k < 3; k++) {
+        const a = group[index[t + k]], b = group[index[t + (k + 1) % 3]];
+        if (a === b || !seam.has(a) || !seam.has(b)) continue;
+        seamEdges.get(a).push(b);
+      }
+    }
+    const loopOf = new Map();
+    let loops = 0;
+    for (const start of seam) {
+      if (loopOf.has(start)) continue;
+      const stack = [start];
+      loopOf.set(start, loops);
+      while (stack.length) {
+        const g = stack.pop();
+        for (const nx of seamEdges.get(g)) {
+          if (loopOf.has(nx)) continue;
+          loopOf.set(nx, loops);
+          stack.push(nx);
+        }
+      }
+      loops++;
+    }
+    const sum = Array.from({ length: loops }, () => [0, 0, 0, 0]);
+    for (const g of seam) {
+      const acc = sum[loopOf.get(g)];
+      acc[0] += p.getX(g); acc[1] += p.getY(g); acc[2] += p.getZ(g); acc[3]++;
+    }
+    for (let i = 0; i < n; i++) {
+      if (!seam.has(group[i])) continue;
+      const acc = sum[loopOf.get(group[i])];
+      const cx = acc[0] / acc[3], cy = acc[1] / acc[3], cz = acc[2] / acc[3];
+      p.setXYZ(i, cx, cy, cz);
+      if (copyOf[i] >= 0) p.setXYZ(copyOf[i], cx, cy, cz);
+    }
+  }
+
+  // Now move the piece, which is every vertex the piece's triangles still use.
+  const moving = new Uint8Array(p.count);
+  for (let t = 0; t < index.length; t += 3) {
+    if (!triPiece[t / 3]) continue;
+    moving[index[t]] = 1; moving[index[t + 1]] = 1; moving[index[t + 2]] = 1;
+  }
+  const q = new THREE.Quaternion();
+  if (piece.from && piece.to) {
+    q.setFromUnitVectors(
+      new THREE.Vector3().fromArray(piece.from).normalize(),
+      new THREE.Vector3().fromArray(piece.to).normalize(),
+    );
+  }
+  const pivot = new THREE.Vector3().fromArray(piece.pivot ?? [0, 0, 0]);
+  const move = new THREE.Vector3().fromArray(piece.move ?? [0, 0, 0]);
+  const nrm = geometry.attributes.normal;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    if (!moving[i]) continue;
+    v.fromBufferAttribute(p, i).sub(pivot).applyQuaternion(q).add(pivot).add(move);
+    p.setXYZ(i, v.x, v.y, v.z);
+    if (nrm) {
+      v.fromBufferAttribute(nrm, i).applyQuaternion(q);
+      nrm.setXYZ(i, v.x, v.y, v.z);
+    }
+  }
+  p.needsUpdate = true;
+  if (nrm) nrm.needsUpdate = true;
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+}
 
 /* ------------------------------------------------------------------ strip */
 /**
@@ -761,13 +1145,19 @@ function weaponAxis(weapon) {
   const _r = new THREE.Vector3();
 
   return {
-    grip: weapon.grip, dir, length, holds: radius > 0,
+    grip: weapon.grip, dir, length, holds: radius > 0 || !!weapon.also,
     /** How far along the axis, as a fraction of its length. */
     along(x, y, z) {
       return ((x - grip.x) * dir.x + (y - grip.y) * dir.y + (z - grip.z) * dir.z) / length;
     },
     /** Is this point part of the weapon rather than the body? */
     test(x, y, z) {
+      /* `also` is for the part of a weapon that does not fit around its own
+         bore. A scope stands 12 cm proud of the barrel, and a capsule fat
+         enough to reach it is fat enough to swallow both forearms and half the
+         chest plate on the way past — so it is claimed by a second, tighter
+         shape of its own instead. */
+      if (weapon.also?.(x, y, z)) return true;
       if (radius <= 0) return false;
       _r.set(x - grip.x, y - grip.y, z - grip.z);
       const t = _r.dot(dir);
@@ -916,6 +1306,10 @@ function publishRigContract(g, byName, spec, char, visorMaterial) {
   muzzle.position.set(0, 0, weaponMount.userData.axisLength ?? 0.9);
   weaponMount.add(muzzle);
 
+  /* The carry the mesh was sculpted in, kept so `poseWeapon` can put the weapon
+     back in it whenever there is nothing to aim at. */
+  const mountRest = spec.weapon ? weaponMount.quaternion.clone() : null;
+
   const capeBones = (spec.cape?.bones || []).map((n) => byName.get(n)).filter(Boolean);
 
   g.userData = {
@@ -935,7 +1329,8 @@ function publishRigContract(g, byName, spec, char, visorMaterial) {
        there to drive a *separate* model out of the hand, and applied to a bone
        it would tear the blade off the fist holding it. */
     bodyWeapon: !!spec.weapon,
-    mountIsGeometry: !!spec.weapon?.radius,
+    mountIsGeometry: !!(spec.weapon?.radius || spec.weapon?.also),
+    mountRest,
     muzzle,
   };
 }
@@ -961,8 +1356,10 @@ export async function preloadAuthoredModels() {
       const spec = RIGS[build];
       const geo = mesh.geometry.clone();
       geo.translate(spec.recentre[0], spec.recentre[1], spec.recentre[2]);
-      // Anything the sculptor sent that the character should not be carrying
-      // comes off here, once, on the geometry every instance shares.
+      /* Surgery, once, on the geometry every instance shares. Detach first:
+         it is the one that changes the vertex count, and a strip region is
+         written against a mesh that has already been put right. */
+      if (spec.detach) for (const piece of spec.detach) detachGeometry(geo, piece);
       if (spec.strip) stripGeometry(geo, spec.strip);
       if (!geo.index) {
         // Skinning wants an indexed buffer to reorder into material groups.

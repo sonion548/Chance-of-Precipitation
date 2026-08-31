@@ -63,6 +63,26 @@ New symbols the next update will find in `authoredRig.js`: `stripGeometry`, `wea
 `ELBOW_BIND_*` constants. `graph/graph.html` and `graph/community_summary.txt` were not
 regenerated and still describe the graph as it stood at `269beeaa`.
 
+### Third hand-applied delta (Sniper, and surgery on a welded mesh)
+
+Same convention, same reason — graphify is a uv tool on the author's machine and is not
+installed in the environment this change was made in — and again **no nodes or edges were
+written in by hand**: the new symbols all live in files the AST extractor will re-read.
+
+Every file this change touched was already flagged for re-extraction in
+`graph/manifest.json` — by the two deltas above, which cleared the hashes on
+`characterRig.js`, `combat.js`, `remotePlayer.js`, `characters.js`, `weapons.js`, `README.md`
+and `PROJECTSTATE.md` and never had an entry for `authoredRig.js` at all — so the manifest
+needs no further edit and has none. `tools/rigview.html`, `tools/modelview.html` and
+`assets/models/*.glb` are likewise absent from it: they all postdate the graph.
+
+New symbols the next update will find: `detachGeometry`, `scopeCylinder`, `boreFrame`,
+`SNIPER_RIG`, `BORE`, `SCOPE_HEIGHT` in `authoredRig.js`; `Combat._tickKillOrder` and the
+`rangeCard` / `killOrder` context helpers in `combat.js`; the `sniper` character and the
+restored `meridian_longrifle` in the data modules. `graph/graph.html` and
+`graph/community_summary.txt` were not regenerated and still describe the graph as it stood at
+`269beeaa`.
+
 ### Where the graph stands against the source
 The graph was built from a working tree this repository did not contain at the
 time: one carrying `src/core/audio.js`, `src/core/settings.js`, `src/ui/chat.js`,

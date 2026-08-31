@@ -790,9 +790,14 @@ function poseWeapon(ud, rig, dt, s) {
     mount.position.y = ud.mountBaseY + reach * 0.18;
   }
 
-  // Local offsets, in the weapon's own frame: a natural cant, muzzle rise from
-  // recoil, walking sway, and the barrel dropping when the weapon is stowed.
-  const lower = 1 - rig.ready;
+  /* Local offsets, in the weapon's own frame: a natural cant, muzzle rise from
+     recoil, walking sway, and the barrel dropping when the weapon is stowed.
+
+     A mesh weapon does not drop: it goes back to the carry it was sculpted in,
+     which `mountRest` holds — see the slerp at the bottom. Applying the stow
+     droop as well would take a rifle held across the chest and point it at its
+     owner's boot. */
+  const lower = ud.mountRest ? 0 : 1 - rig.ready;
   // Sway is walk-driven: standing still, the barrel must not drift off the
   // crosshair at all, or precise shots feel like the game is lying to you.
   const sway = (1 - rig.ready * 0.7) * clamp01(rig.stride * 1.4);
@@ -832,6 +837,17 @@ function poseWeapon(ud, rig, dt, s) {
   }
 
   mount.quaternion.copy(_parentQuat).multiply(_aimQuat);
+
+  /* Stowed, a mesh weapon sits exactly where it was sculpted.
+   *
+   * A procedural weapon can be pointed anywhere because it is a separate model
+   * in a hand that goes with it. A weapon skinned into the body is different:
+   * the sculptor drew a carry — a rifle across the chest, a blade hanging at
+   * the hip — and the hands are drawn around it. `mountRest` is that carry, and
+   * `ready` is the blend to it, so the weapon comes up to the crosshair when
+   * there is something to shoot and goes back to the pose the art intended when
+   * there is not. */
+  if (ud.mountRest) mount.quaternion.slerp(ud.mountRest, 1 - rig.ready);
 }
 
 /* ----------------------------------------------------------------- death */

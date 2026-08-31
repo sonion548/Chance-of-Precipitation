@@ -55,21 +55,28 @@ across the head and chest.
 
 ## Content
 
-- **7 characters** — Vanguard (baseline), **Unloader** (grapple + momentum punch, the
+- **8 characters** — Vanguard (baseline), **Unloader** (grapple + momentum punch, the
   Loader-alike), Wraith (glass cannon, blink), Bulwark (tank, shield charge + bastion),
   **Halcyon** (flies; low health, negative armour, slightly softer damage, impact bombs),
   **Dasher** (marking spear on two charges + a look-directed piercing dash that refunds
   itself on a marked hit; the thinnest frame in the game, and the hardest hitting — matte
   black plate carried entirely by an additive aura), **Chain** (straw hat and robe; one hat,
-  thrown three different ways). A character sets base stats plus utility, special and
+  thrown three different ways), **Sniper** (a bolt gun that never rolls a crit and goes
+  looking for one instead — the seam behind the glass — plus a cloak to leave with, a range
+  card that strips armour off a circle of ground, and an ultimate that is just the rifle at
+  four times the rate with the aiming taken out). A character sets base stats plus utility,
+  special and
   ultimate, and names the one weapon it carries — weapons are not a separate choice.
-- **Three of them are authored meshes** — Halcyon, Dasher and Unloader ship as glTF and are
+- **Four of them are authored meshes** — Halcyon, Dasher, Unloader and Sniper ship as glTF and are
   skeletoned, skinned and painted at load time by `entities/authoredRig.js`; the rest are
   built from primitives by `entities/models.js`. An authored mesh also *carries* its weapon:
   the geometry was sculpted into its hand, so it is skinned to the weapon mount and aimed
   there rather than having a procedural weapon model attached. See "Adding a character" in the
   README, and `tools/rigview.html` / `tools/modelview.html` for the two pages every
-  measurement in that module was taken with.
+  measurement in that module was taken with. A spec can also repair a mesh at load time:
+  `strip` takes off geometry the character should not have (Unloader's cargo hook), and
+  `detach` cuts a piece free of the body it was welded into and puts it back straight
+  (Sniper's scope, which was fused to his shoulder and 15° off the bore).
 - **Chain's hat** is resolved in `Combat._tickHat` rather than as a projectile, because a
   projectile flies at what it was pointed at and this one *chooses*: on every body it crosses
   it picks the next within its search radius and turns, compounding 5% a bounce. It ignores

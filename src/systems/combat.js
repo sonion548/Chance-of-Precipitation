@@ -76,6 +76,7 @@ export class Combat {
     this.ultimateCharge = ULTIMATE.startCharge;
     this._ultimateAnnounced = false;
     this._pendingSlam = null;
+    this._killOrder = null;
     this.chargeTime = 0;
     this.charging = false;
     this.heat = 0;
@@ -325,6 +326,7 @@ export class Combat {
     this._tickBastion(dt, player);
     this._tickLastStand(dt, player);
     this._tickSlam(dt, player);
+    this._tickKillOrder(dt, player);
     this._tickHat(dt, player);
 
     // ---- Primary ----
@@ -540,6 +542,43 @@ export class Combat {
     this.game.fxApi.ring(player.position, 1.5, radius, color, 0.42, 1);
     this.game.fxApi.glow(player.chestPosition, { color, size: 2.4, life: 0.2, grow: 3 });
     this.game.engine.addShake(0.12);
+  }
+
+  /**
+   * Kill Order: one round per tick, into whatever most deserves it.
+   *
+   * "Most deserves it" is the biggest health pool in range, which is what a
+   * sniper's list would actually say — a shot spent on a wisp is a shot not
+   * spent on the thing about to reach you. Every round is forced critical
+   * rather than rolled, because that is the character's whole trade: the
+   * longrifle never rolls, so an ultimate that did would be somebody else's.
+   */
+  _tickKillOrder(dt, player) {
+    const order = this._killOrder;
+    if (!order) return;
+    if (player.dead) { this._killOrder = null; return; }
+    order.timer -= dt;
+    if (order.timer > 0) return;
+    order.timer = order.interval;
+
+    const targets = this.game.enemies.nearest(player.position, order.radius, 24);
+    let best = null;
+    for (const e of targets) if (!best || e.health > best.health) best = e;
+    if (best) {
+      const from = player.muzzlePosition.clone();
+      const to = best.center.clone();
+      const dir = to.clone().sub(from).normalize();
+      this.game.fxApi.beam(from, to, order.color, 0.16, 0.06);
+      this.game.fxApi.muzzle(from, dir, order.color, 1.6);
+      this.damageEnemy(best, order.damage, {
+        proc: 1, source: 'Kill Order', hitPoint: to, crit: true,
+        knockback: 10, knockbackDir: dir,
+      });
+      this.game.fxApi.explosion(to, 1.8, order.color, 0.7);
+      player.addRecoil(2.2);
+    }
+    order.left--;
+    if (order.left <= 0) this._killOrder = null;
   }
 
   /**
@@ -1654,6 +1693,51 @@ export class Combat {
           });
         }
         game.engine.addShake(0.3);
+      },
+
+      /**
+       * Sniper: call the range on a piece of ground.
+       *
+       * The paint is `marked`, so it glows through the arena the way Dasher's
+       * does and is visible from wherever you are lying; the teeth are
+       * `sunder`, which is the same status Sunder Rounds applies and therefore
+       * already understood by `takeDamage`. Nothing new is being invented here
+       * — the ability is a spotter putting two existing labels on a group at
+       * once, which is what a spotter does.
+       */
+      rangeCard(spec) {
+        const centre = self.ctx.aimPoint.clone();
+        const radius = spec.radius ?? 16;
+        const hit = self.markEnemies(centre, radius, spec.duration ?? 12, spec.color);
+        for (const e of game.enemies.inRadius(centre, radius)) {
+          e.applyStatus('sunder', spec.duration ?? 12, {
+            armor: spec.armor ?? 45, vuln: spec.vuln ?? 0.25,
+          });
+        }
+        game.fxApi.ring(centre, 0.6, radius, spec.color, 0.8, 1.1);
+        game.ui.toast(hit ? `${hit} RANGED` : 'RANGE CALLED', '#d6a24a');
+      },
+
+      /**
+       * Sniper's ultimate: a list, worked down one round at a time.
+       *
+       * Resolved over several frames rather than all at once, because the whole
+       * read of the ability is the *rhythm* — a round leaving every quarter
+       * second, each one picking its own target — and a burst of fourteen
+       * simultaneous tracers is a firework instead of a sniper. Targets are
+       * chosen at the moment each round is fired, not up front, so a round is
+       * never spent on something already dead.
+       */
+      killOrder(spec) {
+        self._killOrder = {
+          left: spec.count ?? 12,
+          timer: 0,
+          interval: spec.interval ?? 0.28,
+          damage: spec.damage,
+          radius: spec.radius ?? 60,
+          color: spec.color ?? 0xff6a4d,
+        };
+        game.engine.addShake(0.25);
       },
 
       /** Unloader: up, then very suddenly down. Resolved over several frames. */

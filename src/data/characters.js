@@ -389,6 +389,75 @@ export const CHARACTERS = [
       },
     },
   },
+
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'sniper',
+    name: 'Sniper',
+    title: 'Overwatch',
+    icon: '🎯',
+    build: 'sniper',
+    unlocked: false,
+    echoCost: 950,
+    color: 0x1f6166, accent: 0xd6a24a, visor: 0x3fe4ff,
+    desc: 'A cloak, a bolt gun and a rule: one round, one body. Everything he owns is spent on making the first shot count and on not being where the answer lands — so the whole character is a loop of set up, fire, and be gone before anything has worked out where from.',
+    lore: 'The range card in his pocket has nine entries on it. None of them are places.',
+    /* The longrifle, and nobody else can hold it. Every other character in the
+       descent rolls for crits; this one goes and finds them, which only works
+       if the weapon that never rolls is welded to the hands that know where to
+       look. */
+    weapon: 'meridian_longrifle',
+    stats: {
+      health: 92, healthPerLevel: 26, regen: 0.9, regenPerLevel: 0.18,
+      damage: 16.5, damagePerLevel: 3.3, moveSpeed: 8.4, armor: -4, crit: 0.08, jumps: 1,
+    },
+    utility: {
+      /* The disengage, and it is not a mobility tool.
+         Nine metres is barely a roll — what the ability actually buys is three
+         seconds of not being a target, which is the only currency a body with
+         92 health and negative armour has. Cloaked he moves 40% faster and
+         takes 70% less, so it is an escape and a reposition at once, and it is
+         priced so you cannot open a fight with it. */
+      name: 'Break Contact', key: 'SHIFT', icon: '👁️', cooldown: 8, charges: 1,
+      desc: 'Slip 9m and go dark for 3s: 40% more movement speed and 70% less damage taken while nothing can see you.',
+      fire(ctx) {
+        ctx.dash({ speed: 34, duration: 0.26, iframes: 0.2, color: 0x3fe4ff });
+        ctx.addBuff('cloak', 3, 1, 1, '👁️ Break Contact');
+        ctx.fx.ring(ctx.player.position, 0.4, 4, 0x3fe4ff, 0.5, 0.7);
+      },
+    },
+    special: {
+      name: 'Range Card', key: 'R', icon: '📐', cooldown: 11,
+      anim: 'shoot',
+      /* What a spotter is for.
+         The longrifle already has one way to earn a critical hit and it is a
+         plate the size of a fist at three hundred metres. This is the other
+         way: call the range on a piece of ground and everything standing in it
+         is opened up — armour off, damage up — for long enough to work through
+         the whole group one round at a time. */
+      desc: 'Range a 16m circle at your aim point. Everything inside is marked for 12s: 45 armour stripped and 25% more damage taken from everyone.',
+      fire(ctx) {
+        ctx.rangeCard({ radius: 16, duration: 12, armor: 45, vuln: 0.25, color: 0xd6a24a });
+      },
+    },
+    ultimate: {
+      name: 'Kill Order', key: 'F', icon: '☠️',
+      anim: 'shoot',
+      /* An ultimate that is just the weapon, faster and without the aiming.
+         Sniper's whole problem is throughput — one round every second and a
+         quarter, and a reload you can fail. The order does not add a new gun;
+         it takes the two things the gun is short of, rate and certainty, and
+         removes them for four seconds. Every round is a seam hit, so every
+         point of crit damage the build has bought is spent at once. */
+      desc: 'Work down the field: fourteen rounds at 750% each, one every 0.28s, each one a guaranteed critical, put through the biggest thing still standing within 60m. Anything that dies to it hands the next round to whatever is behind it.',
+      fire(ctx) {
+        ctx.killOrder({
+          count: 14, damage: ctx.dmg * 7.5, interval: 0.28, radius: 60, color: 0xff6a4d,
+        });
+        ctx.toast('KILL ORDER', '#ff6a4d');
+      },
+    },
+  },
 ];
 
 export const CHARACTERS_BY_ID = Object.fromEntries(CHARACTERS.map((c) => [c.id, c]));
