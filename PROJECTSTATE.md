@@ -12,9 +12,10 @@ elapsed time. Runs pay out **Echoes**, a meta currency that permanently widens t
 and unlocks weapons and characters. Now also playable **co-op, up to eight**.
 
 **Stack:** three.js (vendored, r169) + plain ES modules. **No build step, no bundler, no
-external assets, no dependencies** — every model, texture, icon, sound effect and note of the
-score is generated procedurally at runtime, and the multiplayer relay is hand-written Node.
-There is not a single binary in the repository.
+dependencies** — every texture, icon, sound effect and note of the score is generated
+procedurally at runtime, and the multiplayer relay is hand-written Node. The only binaries in
+the repository are three authored character meshes under `assets/models/`; everything else,
+including every other model in the game, is built from primitives at runtime.
 
 **Run it:** `node tools/serve.js` (or double-click `play.cmd`) → http://localhost:8080. npm is
 optional — `npm start` only forwards to that command, and there are no runtime dependencies to
@@ -61,7 +62,14 @@ across the head and chest.
   itself on a marked hit; the thinnest frame in the game, and the hardest hitting — matte
   black plate carried entirely by an additive aura), **Chain** (straw hat and robe; one hat,
   thrown three different ways). A character sets base stats plus utility, special and
-  ultimate; weapons are independent.
+  ultimate, and names the one weapon it carries — weapons are not a separate choice.
+- **Three of them are authored meshes** — Halcyon, Dasher and Unloader ship as glTF and are
+  skeletoned, skinned and painted at load time by `entities/authoredRig.js`; the rest are
+  built from primitives by `entities/models.js`. An authored mesh also *carries* its weapon:
+  the geometry was sculpted into its hand, so it is skinned to the weapon mount and aimed
+  there rather than having a procedural weapon model attached. See "Adding a character" in the
+  README, and `tools/rigview.html` / `tools/modelview.html` for the two pages every
+  measurement in that module was taken with.
 - **Chain's hat** is resolved in `Combat._tickHat` rather than as a projectile, because a
   projectile flies at what it was pointed at and this one *chooses*: on every body it crosses
   it picks the next within its search radius and turns, compounding 5% a bounce. It ignores

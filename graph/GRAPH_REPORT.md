@@ -41,6 +41,28 @@ New symbols in the graph: `Arena.terrainHash`, `isTextTarget`, `FX.slash`,
 `Coop.requestStage`, `Coop.partySize`, `Coop.onBoon`, `Chest.isShrine`,
 `Player.moveDirection`, and the `tools/coop-check.js` file node.
 
+### Second hand-applied delta (authored meshes carry their weapons)
+
+graphify still lives as a uv tool on the author's machine and is not installed in the
+environment this change was made in, so the same convention as above applies — with one
+difference: **no nodes or edges were written in by hand this time.** The change is almost
+entirely inside `authoredRig.js`, whose symbols the AST extractor will pick up on its own, so
+hand-writing them would only risk disagreeing with what `graphify update .` is about to
+produce.
+
+What was done instead is the honest half of the convention: `src/entities/authoredRig.js`,
+`src/entities/characterRig.js`, `src/systems/combat.js`, `src/net/remotePlayer.js`, `README.md`
+and `PROJECTSTATE.md` are flagged for re-extraction in `graph/manifest.json` — `ast_hash` and
+`semantic_hash` cleared, `mtime` zeroed — so the next update re-reads them from disk instead of
+trusting a fingerprint taken before the change. (`authoredRig.js` has no manifest entry at all:
+it did not exist when the graph was built, and neither do `tools/rigview.html`,
+`tools/modelview.html` or `assets/models/*.glb`.)
+
+New symbols the next update will find in `authoredRig.js`: `stripGeometry`, `weaponAxis`,
+`ellipsoid`, `UNLOADER_RIG`, `WEAPON_BONE`, `WEAPON_BLEND`, and the `ARM_BIND_*` /
+`ELBOW_BIND_*` constants. `graph/graph.html` and `graph/community_summary.txt` were not
+regenerated and still describe the graph as it stood at `269beeaa`.
+
 ### Where the graph stands against the source
 The graph was built from a working tree this repository did not contain at the
 time: one carrying `src/core/audio.js`, `src/core/settings.js`, `src/ui/chat.js`,

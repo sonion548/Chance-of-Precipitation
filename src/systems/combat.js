@@ -199,11 +199,18 @@ export class Combat {
         if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach((m) => m.dispose());
       });
       mount.remove(this.weaponModel);
+      this.weaponModel = null;
     }
     this.weapon = weaponById(weaponId);
-    this.weaponModel = buildWeaponModel(this.weapon);
-    mount.add(this.weaponModel);
-    player.model.userData.muzzle = this.weaponModel.userData.muzzle;
+    /* An authored body is holding its weapon already — it was sculpted that
+       way, skinned to this same mount, and lit in this weapon's colour. Building
+       the procedural model would hang a second gun off the same fist. Its
+       muzzle, published by the rig, is the one shots come out of. */
+    if (!player.model.userData.bodyWeapon) {
+      this.weaponModel = buildWeaponModel(this.weapon);
+      mount.add(this.weaponModel);
+      player.model.userData.muzzle = this.weaponModel.userData.muzzle;
+    }
     this.primaryTimer = 0;
     this.secondaryTimer = 0;
     this.heat = 0;

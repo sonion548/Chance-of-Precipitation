@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!-- Served from the repo root so `./assets/...` inside src/ resolves the same
+     way it does for index.html. -->
+<base href="/" />
+<title>model view</title>
+<script type="importmap">
+{ "imports": {
+  "three": "/vendor/three.module.js",
+  "three/addons/loaders/GLTFLoader.js": "/vendor/GLTFLoader.js"
+} }
+</script>
+<style>body{margin:0;background:#101318}canvas{display:block}</style>
+</head>
+<body>
+<script type="module">
+/*
+ * Raw authored-mesh contact sheet, and the loop that finds a region test.
+ *
+ * `entities/authoredRig.js` describes each authored character entirely in
+ * numbers measured off its own geometry — where the joints are, which vertices
+ * are the weapon, which triangles take which material. This page is where those
+ * numbers come from: it draws the raw .glb against a 10 cm grid, and its `mark`
+ * mode takes a candidate region test as a query parameter and paints the
+ * triangles it selects, using the same centroid-and-normal the rig's
+ * `assignMaterialGroups` uses. A test that looks right here is right there.
+ *
+ *   npm start, then /tools/modelview.html?m=/assets/models/unloader.glb&grid=xy
+ *
+ *   m         path to the .glb (default unloader)
+ *   mode      form (plain grey) | mark (paint by region) | depth (colour by xyz)
+ *   cut       mark mode: a JS body over (x, y, z, nx, ny, nz) returning a region
+ *             index 0..6, or a bare expression. Region 0 stays grey.
+ *   views     comma-separated: front, back, left, right, q34, qb, top
+ *   recentre  "x,y,z" applied before anything else — pass the spec's `recentre`
+ *             so a test is written in the same space the rig will evaluate it in
+ *   grid      xy | yz — a 10 cm grid through the origin, with metre markers
+ *   zoom / ty / w / h  as in rigview.html
+ */
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const qs = new URLSearchParams(location.search);
+const url = qs.get('m') || '/assets/models/unloader.glb';
+const mode = qs.get('mode') || 'form';
+const W = +(qs.get('w') || 340), H = +(qs.get('h') || 460);
+const views = (qs.get('views') || 'front,back,left,right,q34').split(',');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W * views.length, H);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x101318);
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x2a2f38, 1.6));
+const key = new THREE.DirectionalLight(0xffffff, 2.0); key.position.set(2, 4, 3); scene.add(key);
+const fill = new THREE.DirectionalLight(0x88aaff, 0.9); fill.position.set(-3, 2, -2); scene.add(fill);
+const rim = new THREE.DirectionalLight(0xffffff, 1.2); rim.position.set(0, 2, -5); scene.add(rim);
+
+// A metre grid so positions can be read straight off the picture.
+function grid(plane) {
+  const g = new THREE.Group();
+  const m = new THREE.LineBasicMaterial({ color: 0x2a3340 });
+  const mm = new THREE.LineBasicMaterial({ color: 0x4a5a70 });
+  for (let i = -10; i <= 20; i++) {
+    const v = i * 0.1;
+    const major = i % 5 === 0;
+    const pts = plane === 'xy'
+      ? [new THREE.Vector3(-1.2, v, 0), new THREE.Vector3(1.2, v, 0), new THREE.Vector3(v, -0.2, 0), new THREE.Vector3(v, 2.0, 0)]
+      : [new THREE.Vector3(0, v, -1.2), new THREE.Vector3(0, v, 1.2), new THREE.Vector3(0, -0.2, v), new THREE.Vector3(0, 2.0, v)];
+    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts.slice(0, 2)), major ? mm : m));
+    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts.slice(2)), major ? mm : m));
+  }
+  return g;
+}
+
+const loader = new GLTFLoader();
+loader.load(url, (gltf) => {
+  let mesh = null;
+  gltf.scene.traverse((n) => { if (!mesh && n.isMesh) mesh = n; });
+  let geo = mesh.geometry.clone();
+  const rc = (qs.get('recentre') || '0,0,0').split(',').map(Number);
+  geo.translate(rc[0], rc[1], rc[2]);
+  if (!geo.index) {
+    const c = geo.attributes.position.count;
+    const idx = new Uint32Array(c); for (let i = 0; i < c; i++) idx[i] = i;
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  }
+
+  let material;
+  if (mode === 'form') {
+    material = new THREE.MeshStandardMaterial({ color: 0xb9c3d0, roughness: 0.55, metalness: 0.25, side: THREE.DoubleSide });
+  } else if (mode === 'mark') {
+    /* Per-triangle regions, computed exactly the way `assignMaterialGroups`
+       does it: centroid plus the triangle's own geometric normal. `cut` is a
+       function body over (x, y, z, nx, ny, nz) returning a region index, so a
+       test can be tried here and pasted straight into a rig spec. */
+    const src = qs.get('cut') || '0';
+    // A bare expression or a full statement body, whichever is easier to type.
+    const test = new Function('x', 'y', 'z', 'nx', 'ny', 'nz',
+      /\breturn\b/.test(src) ? src : `return (${src});`);
+    const PAL = [[0.62, 0.68, 0.76], [1, 0.16, 0.16], [0.2, 1, 0.35], [0.3, 0.55, 1],
+                 [1, 0.85, 0.1], [1, 0.3, 1], [0.1, 1, 1]];
+    const flat = geo.toNonIndexed();
+    const pos = flat.attributes.position.array;
+    const col = new Float32Array(pos.length);
+    const tally = new Map();
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+    const AB = new THREE.Vector3(), AC = new THREE.Vector3(), N = new THREE.Vector3();
+    for (let t = 0; t < pos.length / 9; t++) {
+      A.fromArray(pos, t * 9); B.fromArray(pos, t * 9 + 3); C.fromArray(pos, t * 9 + 6);
+      N.crossVectors(AB.subVectors(B, A), AC.subVectors(C, A)).normalize();
+      const cx = (A.x + B.x + C.x) / 3, cy = (A.y + B.y + C.y) / 3, cz = (A.z + B.z + C.z) / 3;
+      const r = (test(cx, cy, cz, N.x, N.y, N.z) | 0) % PAL.length;
+      tally.set(r, (tally.get(r) || 0) + 1);
+      for (let k = 0; k < 3; k++) {
+        col[t * 9 + k * 3] = PAL[r][0]; col[t * 9 + k * 3 + 1] = PAL[r][1]; col[t * 9 + k * 3 + 2] = PAL[r][2];
+      }
+    }
+    flat.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    flat.computeVertexNormals();
+    geo.dispose();
+    geo = flat;
+    console.log('region tally ' + JSON.stringify([...tally].sort()));
+    material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.2, side: THREE.DoubleSide });
+  } else if (mode === 'depth') {
+    // Colour by Z so the front/back of the shell separates.
+    const pos = geo.attributes.position.array;
+    const col = new Float32Array(pos.length);
+    for (let i = 0; i < pos.length / 3; i++) {
+      const z = pos[i * 3 + 2], x = pos[i * 3], y = pos[i * 3 + 1];
+      col[i * 3] = (z + 0.7) / 1.4; col[i * 3 + 1] = (x + 0.9) / 1.8; col[i * 3 + 2] = y / 1.9;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1, side: THREE.DoubleSide });
+  }
+
+  const obj = new THREE.Mesh(geo, material);
+  scene.add(obj);
+  const plane = qs.get('grid');
+  if (plane === 'xy' || plane === 'yz') scene.add(grid(plane));
+
+  const CAMS = {
+    front: [0, 0.95, 3.2], back: [0, 0.95, -3.2], left: [-3.2, 0.95, 0], right: [3.2, 0.95, 0],
+    q34: [2.3, 1.35, 2.3], top: [0, 4.0, 0.001], qb: [-2.3, 1.35, -2.3],
+  };
+  const aspect = W / H;
+  const half = +(qs.get('zoom') || 1.15);
+  const ty = +(qs.get('ty') || 0.95);
+  views.forEach((v, i) => {
+    const cam = new THREE.OrthographicCamera(-half * aspect, half * aspect, half, -half, 0.1, 20);
+    const eye = CAMS[v] || CAMS.front;
+    cam.position.set(eye[0], eye[1] - 0.95 + ty, eye[2]);
+    cam.lookAt(0, ty, 0);
+    renderer.setViewport(i * W, 0, W, H);
+    renderer.setScissor(i * W, 0, W, H);
+    renderer.setScissorTest(true);
+    renderer.render(scene, cam);
+  });
+  // The screenshot harness waits on this rather than on a timer.
+  document.title = 'ready';
+});
+</script>
+</body>
+</html>

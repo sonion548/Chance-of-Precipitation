@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!-- Served from the repo root so `./assets/...` inside src/ resolves the same
+     way it does for index.html. -->
+<base href="/" />
+<title>rig view</title>
+<script type="importmap">
+{ "imports": {
+  "three": "/vendor/three.module.js",
+  "three/addons/loaders/GLTFLoader.js": "/vendor/GLTFLoader.js"
+} }
+</script>
+<style>body{margin:0;background:#0d1014}canvas{display:block}</style>
+</head>
+<body>
+<script type="module">
+/*
+ * Rigged-character contact sheet.
+ *
+ * Builds a character through the *game's* own code — preloadAuthoredModels,
+ * buildAuthoredModel, createRig, updateRig — and renders it in a row of settled
+ * poses. It is the only way to see what the rig actually does to an authored
+ * mesh without starting a run, and every number in `entities/authoredRig.js`
+ * was checked against it.
+ *
+ *   npm start, then /tools/rigview.html?c=unloader
+ *
+ *   c        character id (default unloader)
+ *   poses    comma-separated, one panel each: bind, idle, run, aim, aimdown,
+ *            attack. `bind` skips the rig entirely and shows the mesh exactly
+ *            as it was sculpted — which is what `idle` has to match if the
+ *            bind rotations in the spec are right.
+ *   anim     which attack the `attack` panel plays (punch, slash, thrust, lob…)
+ *   view     front | back | left | right | q34
+ *   zoom     orthographic half-height in metres (default 1.15)
+ *   ty       what the camera looks at, in metres up (default 0.95)
+ *   yaw      turn the model, in degrees
+ *   bones=1  paint every vertex by the bone it is weighted to
+ *   stretch=1 paint every triangle by how far it is pulled out of its bind shape
+ */
+import * as THREE from 'three';
+import { preloadAuthoredModels, buildAuthoredModel } from '/src/entities/authoredRig.js';
+import { buildPlayerModel } from '/src/entities/models.js';
+import { createRig, updateRig, rigAttack } from '/src/entities/characterRig.js';
+import { characterById } from '/src/data/characters.js';
+
+const qs = new URLSearchParams(location.search);
+const id = qs.get('c') || 'unloader';
+const W = +(qs.get('w') || 380), H = +(qs.get('h') || 520);
+const poses = (qs.get('poses') || 'idle,run,aim,attack').split(',');
+const view = qs.get('view') || 'front';
+const half = +(qs.get('zoom') || 1.15);
+const ty = +(qs.get('ty') || 0.95);
+const yawDeg = +(qs.get('yaw') || 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W * poses.length, H);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1014);
+scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x30363f, 1.5));
+const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(2.5, 4, 3); scene.add(key);
+const fill = new THREE.DirectionalLight(0x7fa8ff, 0.8); fill.position.set(-3, 2, -1); scene.add(fill);
+const back = new THREE.DirectionalLight(0xffffff, 1.0); back.position.set(0, 2.5, -4); scene.add(back);
+
+const char = characterById(id);
+
+/** Replace whatever the mesh is wearing with one flat vertex-coloured material. */
+function debugMaterial(mesh) {
+  const flat = new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.65, side: THREE.DoubleSide,
+  });
+  mesh.material = Array.isArray(mesh.material) ? mesh.material.map(() => flat) : flat;
+}
+
+/**
+ * Paint every vertex by the bone it is weighted to.
+ *
+ * Answers "which bone owns this?", which is the question every region test in a
+ * rig spec is really asking. The tally printed to the console is the fastest
+ * way to notice a claim that has grabbed something it should not have — an
+ * `armRlower` down to 86 vertices means the weapon test ate the forearm.
+ */
+function paintByBone(model) {
+  const mesh = model.userData.skinnedMesh;
+  if (!mesh) return;
+  const geo = mesh.geometry;
+  const idx = geo.attributes.skinIndex.array;
+  const n = geo.attributes.position.count;
+  const col = new Float32Array(n * 3);
+  const names = mesh.skeleton.bones.map((b) => b.name);
+  const tally = new Map();
+  const c = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    const b = idx[i * 4];
+    tally.set(names[b], (tally.get(names[b]) || 0) + 1);
+    c.setHSL((b * 0.137) % 1, 0.85, 0.55);
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  debugMaterial(mesh);
+  console.log('bones ' + JSON.stringify([...tally.entries()]));
+}
+
+/**
+ * Paint every triangle by how far it has been stretched out of its bind shape.
+ * Red is torn.
+ *
+ * This is the diagnostic that actually finds a skinning seam. A fan of
+ * stretched triangles is invisible against a busy silhouette and unmistakable
+ * when the stretch itself is the colour, and the worst offender's position is
+ * printed so it can be looked up in the geometry.
+ */
+function paintByStretch(model) {
+  const mesh = model.userData.skinnedMesh;
+  if (!mesh) return;
+  const geo = mesh.geometry;
+  const n = geo.attributes.position.count;
+  const bind = [];
+  const posed = [];
+  const v = new THREE.Vector3();
+  model.updateMatrixWorld(true);
+  for (let i = 0; i < n; i++) {
+    bind.push(v.fromArray(geo.attributes.position.array, i * 3).clone());
+    posed.push(mesh.applyBoneTransform(i, v.fromArray(geo.attributes.position.array, i * 3)).clone());
+  }
+  const idx = geo.index.array;
+  const col = new Float32Array(n * 3);
+  let worst = 0, worstAt = null;
+  for (let t = 0; t < idx.length; t += 3) {
+    let ratio = 1;
+    for (let k = 0; k < 3; k++) {
+      const a = idx[t + k], b = idx[t + (k + 1) % 3];
+      const d0 = bind[a].distanceTo(bind[b]);
+      if (d0 > 1e-5) ratio = Math.max(ratio, posed[a].distanceTo(posed[b]) / d0);
+    }
+    if (ratio > worst) { worst = ratio; worstAt = bind[idx[t]].toArray().map((q) => q.toFixed(2)); }
+    // Anything at twice its bind length is as red as the scale goes.
+    const hot = Math.min(1, (ratio - 1) / 2);
+    for (let k = 0; k < 3; k++) {
+      const i = idx[t + k];
+      col[i * 3] = Math.max(col[i * 3], 0.35 + hot * 0.65);
+      col[i * 3 + 1] = Math.min(col[i * 3 + 1] || 0.4, 0.4 - hot * 0.4);
+      col[i * 3 + 2] = Math.min(col[i * 3 + 2] || 0.45, 0.45 - hot * 0.45);
+    }
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  debugMaterial(mesh);
+  console.log(`worst stretch x${worst.toFixed(2)} at ${worstAt}`);
+}
+
+/** One frame of the state descriptor `updateRig` reads. */
+function poseState(kind) {
+  const s = {
+    position: new THREE.Vector3(),
+    velocity: new THREE.Vector3(),
+    yaw: 0, pitch: 0, grounded: true, dead: false, moveSpeed: 8, speed: 0,
+    weaponUp: false, aimPoint: new THREE.Vector3(0, 1.4, 40),
+  };
+  if (kind === 'run') { s.velocity.set(0, 0, 7.6); s.speed = 7.6; }
+  if (kind === 'aim' || kind === 'attack') s.weaponUp = true;
+  if (kind === 'aimdown') { s.weaponUp = true; s.pitch = -0.7; s.aimPoint.set(0, -20, 22); }
+  return s;
+}
+
+await preloadAuthoredModels();
+
+const CAMS = {
+  front: [0, 0.95, 3.2], back: [0, 0.95, -3.2],
+  left: [-3.2, 0.95, 0], right: [3.2, 0.95, 0], q34: [2.3, 1.5, 2.3],
+};
+
+poses.forEach((kind, i) => {
+  const model = buildAuthoredModel(char) || buildPlayerModel(char);
+  model.rotation.y = yawDeg * Math.PI / 180;
+  scene.add(model);
+
+  const rig = createRig(0);
+  const s = poseState(kind);
+  if (kind !== 'bind') {
+    // Settle first: the rig damps toward its pose, so one frame shows a T-pose.
+    for (let f = 0; f < 260; f++) updateRig(model, rig, 1 / 60, s);
+    if (kind === 'attack') {
+      rigAttack(rig, qs.get('anim') || 'punch', 1);
+      // Stop at the top of the envelope rather than at the end of it.
+      for (let f = 0; f < 8; f++) updateRig(model, rig, 1 / 60, s);
+    }
+    // The joint angles the pose settled on — what a spec's `bind` has to equal
+    // for `idle` to leave an authored mesh exactly as it was sculpted.
+    const ud = model.userData;
+    console.log(`${kind} armR=[${ud.armR.rotation.toArray().slice(0, 3).map((v) => v.toFixed(3))}]`
+      + ` elbow=${ud.armR.userData.lower.rotation.x.toFixed(3)}`);
+  }
+  if (qs.get('bones') === '1') paintByBone(model);
+  if (qs.get('stretch') === '1') paintByStretch(model);
+
+  const cam = new THREE.OrthographicCamera(-half * (W / H), half * (W / H), half, -half, 0.1, 20);
+  const eye = CAMS[view] || CAMS.front;
+  cam.position.set(eye[0], eye[1] - 0.95 + ty, eye[2]);
+  cam.lookAt(0, ty, 0);
+  renderer.setViewport(i * W, 0, W, H);
+  renderer.setScissor(i * W, 0, W, H);
+  renderer.setScissorTest(true);
+  renderer.render(scene, cam);
+  scene.remove(model);
+});
+// The screenshot harness waits on this rather than on a timer.
+document.title = 'ready';
+</script>
+</body>
+</html>

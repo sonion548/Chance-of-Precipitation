@@ -114,9 +114,9 @@
     "semantic_hash": ""
   },
   "src/entities/characterRig.js": {
-    "mtime": 1787479573.8919914,
+    "mtime": 0,
     "seen": 1787482199.4654365,
-    "ast_hash": "da0c6de0cff6f699078fdf36b9193fd1",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "src/entities/enemy.js": {
@@ -186,10 +186,10 @@
     "semantic_hash": ""
   },
   "src/net/remotePlayer.js": {
-    "mtime": 1787385443.0131595,
+    "mtime": 0,
     "seen": 1787458000.7564008,
-    "ast_hash": "57d94005e12c0fa4b6277829815edc60",
-    "semantic_hash": "57d94005e12c0fa4b6277829815edc60"
+    "ast_hash": "",
+    "semantic_hash": ""
   },
   "src/net/session.js": {
     "mtime": 1787383969.4896986,
