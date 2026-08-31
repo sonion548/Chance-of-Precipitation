@@ -778,10 +778,17 @@ function poseWeapon(ud, rig, dt, s) {
       default: break;
     }
   }
-  ud.mountBaseZ ??= mount.position.z;
-  ud.mountBaseY ??= mount.position.y;
-  mount.position.z = ud.mountBaseZ + reach;
-  mount.position.y = ud.mountBaseY + reach * 0.18;
+  /* A punch or a thrust drives the weapon out of the hand — but only a weapon
+     that is a separate model, which the hand can travel with. On an authored
+     mesh the mount is a bone with the weapon skinned to it and the fist is not,
+     so translating it would slide the blade out of the fingers holding it. The
+     arm still lunges; the weapon just stays in the hand while it does. */
+  if (!ud.mountIsGeometry) {
+    ud.mountBaseZ ??= mount.position.z;
+    ud.mountBaseY ??= mount.position.y;
+    mount.position.z = ud.mountBaseZ + reach;
+    mount.position.y = ud.mountBaseY + reach * 0.18;
+  }
 
   // Local offsets, in the weapon's own frame: a natural cant, muzzle rise from
   // recoil, walking sway, and the barrel dropping when the weapon is stowed.

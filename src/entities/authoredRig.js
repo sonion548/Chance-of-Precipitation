@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { characterSurfaces, makeCharacterMaterial } from '../world/textures.js';
+import { weaponById } from '../data/weapons.js';
 
 /**
  * Authored character meshes, rigged at load time.
@@ -21,7 +22,73 @@ import { characterSurfaces, makeCharacterMaterial } from '../world/textures.js';
  * So the bones are given exactly that shape, and the entire existing animation
  * system (gait blending, aim tracking, the six attack poses, flight) drives an
  * authored mesh without a line of it changing.
+ *
+ * ---------------------------------------------------------------------------
+ * THE WEAPON IS IN THE MESH
+ *
+ * Every one of these characters was sculpted holding something, and that thing
+ * is the weapon they carry. So an authored body does not get a procedural
+ * weapon model bolted onto its wrist the way a built body does — it already has
+ * one, welded into the same shell as the fingers around it, and a second gun
+ * hanging off the same hand looks exactly as bad as it sounds.
+ *
+ * A spec therefore declares `weapon` — a grip, a muzzle and a radius around the
+ * line between them — which is three things at once:
+ *
+ *   • the vertices that are the weapon rather than the body, skinned in one
+ *     piece to a bone of their own so the whole thing swings from the grip;
+ *   • that bone, published as `userData.weaponMount`, which is the object
+ *     `poseWeapon` aims at the crosshair — so a mesh weapon tracks the aim
+ *     exactly like a held one, because as far as the rig is concerned it is;
+ *   • `userData.muzzle`, parked at the business end, which is where every shot
+ *     in the game originates.
+ *
+ * `userData.bodyWeapon` then tells `Combat.equip` and `RemotePlayer.setWeapon`
+ * to leave the mount alone. A character with no weapon in its mesh simply omits
+ * the block and gets the procedural model, as before.
+ *
+ * The one exception runs the other way. Unloader was sculpted with a cargo hook
+ * on a chain hanging off his fist, and the hook is not his weapon — it is the
+ * grapple, an ability that fires a line and reels it back in, which no lump of
+ * iron dangling at knee height is going to do. A spec can therefore also
+ * declare `strip`: geometry to take off the mesh at load time. See
+ * `stripGeometry` for why it collapses the vertices rather than deleting them.
  */
+
+/* ------------------------------------------------------------------ arm bind pose */
+/**
+ * The rotations `poseArms` settles an idle character on.
+ *
+ * Skinning does not care what pose a mesh was modelled in; it cares about the
+ * difference between a bone's current transform and its *bind* transform. The
+ * rig writes absolute rotations, so binding an arm at anything other than the
+ * rig's own idle values means an idle character is already deformed — and these
+ * were bound at values left over from an older `poseArms`, which is why both
+ * authored characters have been standing with their arms folded across their
+ * chests since the day they landed.
+ *
+ * These are read straight back off `poseArms` with `ready = 0` and
+ * `stride = 0`: the shoulder settles on `loweredR` / `loweredL`, the elbow on
+ * the bottom of its `lerp`. Bound here, the sculpted arm pose *is* the idle
+ * pose — the deformation at idle is the identity — and every animation deviates
+ * from what the sculptor drew rather than from a T-pose the mesh has never been
+ * in.
+ */
+const ARM_BIND_R = [-0.16, 0, 0.06];
+const ELBOW_BIND_R = [-0.34, 0, 0];
+const ARM_BIND_L = [-0.16, 0.04, -0.06];
+const ELBOW_BIND_L = [-0.30, 0, 0];
+
+/**
+ * Is this point inside an axis-aligned ellipsoid?
+ *
+ * The region tests are the only shape language a spec has, and a box is a poor
+ * one for anything that is meant to look rounded — see UNLOADER_RIG.region.
+ */
+function ellipsoid(x, y, z, [ox, oy, oz], [rx, ry, rz]) {
+  const dx = (x - ox) / rx, dy = (y - oy) / ry, dz = (z - oz) / rz;
+  return dx * dx + dy * dy + dz * dz < 1;
+}
 
 /* ------------------------------------------------------------------ skeleton spec */
 /**
@@ -44,16 +111,21 @@ const HALCYON_RIG = {
     { name: 'head',   parent: 'torso',  head: [0, 1.56, 0.00],   tail: [0, 1.88, 0.03] },
 
     /* `bind` is the rotation the bone is bound at, and it is not zero for the
-       arms on purpose — see the note on BIND POSE below. These are the exact
-       values `poseArms` settles an idle character on. */
-    { name: 'armL',      parent: 'torso', head: [-0.22, 1.38, 0.02], tail: [-0.305, 1.14, 0.10],
-      bind: [0.4, 0.16, -0.9] },
-    { name: 'armLlower', parent: 'armL',  head: [-0.305, 1.14, 0.10], tail: [-0.385, 0.92, 0.17],
-      bind: [-0.24, 0, 0] },
-    { name: 'armR',      parent: 'torso', head: [0.22, 1.38, 0.02],  tail: [0.305, 1.14, 0.10],
-      bind: [0.4, -0.16, 0.9] },
-    { name: 'armRlower', parent: 'armR',  head: [0.305, 1.14, 0.10], tail: [0.385, 0.92, 0.17],
-      bind: [-0.24, 0, 0] },
+       arms on purpose — see ARM_BIND_R above and the note on BIND POSE below.
+
+       `armR` is the *weapon* arm, and it is the one at −X. That is not a
+       mirroring slip: the rig braces armR when you aim, swings it on an attack
+       and aims the mount hanging off it, and every authored mesh so far was
+       sculpted holding its weapon in the hand at −X. Naming the empty hand R
+       would brace the wrong arm and leave the blade swinging loose beside it. */
+    { name: 'armR',      parent: 'torso', head: [-0.22, 1.38, 0.02], tail: [-0.305, 1.14, 0.10],
+      bind: ARM_BIND_R },
+    { name: 'armRlower', parent: 'armR',  head: [-0.305, 1.14, 0.10], tail: [-0.385, 0.92, 0.17],
+      bind: ELBOW_BIND_R },
+    { name: 'armL',      parent: 'torso', head: [0.22, 1.38, 0.02],  tail: [0.305, 1.14, 0.10],
+      bind: ARM_BIND_L },
+    { name: 'armLlower', parent: 'armL',  head: [0.305, 1.14, 0.10], tail: [0.385, 0.92, 0.17],
+      bind: ELBOW_BIND_L },
 
     { name: 'legL',       parent: 'pelvis', head: [-0.12, 0.95, 0.02], tail: [-0.145, 0.60, 0.11] },
     { name: 'legLlower',  parent: 'legL',   head: [-0.145, 0.60, 0.11], tail: [-0.145, 0.22, -0.15] },
@@ -69,6 +141,30 @@ const HALCYON_RIG = {
      this line goes to `torso` no matter which bone is geometrically nearest,
      which stops a blade sweeping past a knee from being weighted to that knee. */
   wing: { minY: 0.18, behind: -0.16, outward: 0.30, bone: 'torso' },
+  /**
+   * The cannon.
+   *
+   * A long tapered emitter carried in the weapon hand, pointing down and
+   * forward past the knee — the airframe's own gun, and until now weighted to
+   * the chest as a seventh wing, because it is outboard and long and that is
+   * all the wing test asks. It is claimed before that test for exactly this
+   * reason.
+   *
+   * Read as a sword if you look at the shape alone, so it is *lit* as a cannon:
+   * dark casing for the back half and the character's discharge colour only at
+   * the emitter. Lighting the whole length would make it a lightsaber, which is
+   * the one thing an aerial bombardier is not carrying.
+   */
+  weapon: {
+    grip: [-0.415, 0.93, 0.20],
+    muzzle: [-0.670, 0.230, 0.514],
+    /* The cannon and the forearm holding it are one continuous run of geometry
+       — there is no gap between them to find — so `from` is what separates
+       them, and it is set just below the fist. */
+    radius: 0.16, from: 0.06,
+    lit: 0.58,
+    casing: 3, emitter: 4,
+  },
   region(cx, cy, cz) {
     const wing = cy > 0.18 && (cz < -0.16 || Math.abs(cx) > 0.30) && Math.abs(cx) > 0.2;
     /* A band across the front of the head. Measured off the mesh: the skull
@@ -77,7 +173,7 @@ const HALCYON_RIG = {
     const visor = !wing && cy > 1.665 && cy < 1.755 && cz > 0.185 && Math.abs(cx) < 0.115;
     return visor ? 2 : wing ? 1 : 0;
   },
-  materials(char) {
+  materials(char, weapon) {
     const S = characterSurfaces();
     return [
       // Airframe: the white shell, panelled like every other precision frame.
@@ -92,6 +188,16 @@ const HALCYON_RIG = {
       new THREE.MeshStandardMaterial({
         color: char.visor, emissive: char.visor, emissiveIntensity: 2.4,
         roughness: 0.18, metalness: 0.7,
+      }),
+      // Cannon casing: the one dark thing on a white airframe, so the weapon
+      // reads as hardware against the body rather than as more of it.
+      makeCharacterMaterial(S.tech, {
+        color: 0x2b323d, roughness: 0.38, metalness: 0.86, scale: 7.2,
+      }),
+      // Emitter, in the colour of what comes out of it.
+      new THREE.MeshStandardMaterial({
+        color: weapon.color, emissive: weapon.color, emissiveIntensity: 1.9,
+        roughness: 0.22, metalness: 0.55,
       }),
     ];
   },
@@ -115,14 +221,15 @@ const DASHER_RIG = {
     { name: 'torso',  parent: 'pelvis', head: [0, 0.95, 0.04],  tail: [0, 1.46, 0.00] },
     { name: 'head',   parent: 'torso',  head: [0, 1.58, 0.02],  tail: [0, 1.89, 0.05] },
 
-    { name: 'armL',      parent: 'torso', head: [-0.22, 1.44, 0.02],  tail: [-0.36, 1.16, 0.04],
-      bind: [0.4, 0.16, -0.9] },
-    { name: 'armLlower', parent: 'armL',  head: [-0.36, 1.16, 0.04],  tail: [-0.42, 0.93, 0.06],
-      bind: [-0.24, 0, 0] },
-    { name: 'armR',      parent: 'torso', head: [0.22, 1.44, 0.02],   tail: [0.36, 1.16, 0.04],
-      bind: [0.4, -0.16, 0.9] },
-    { name: 'armRlower', parent: 'armR',  head: [0.36, 1.16, 0.04],   tail: [0.42, 0.93, 0.06],
-      bind: [-0.24, 0, 0] },
+    // Weapon arm at −X, empty hand at +X — see the note in HALCYON_RIG.
+    { name: 'armR',      parent: 'torso', head: [-0.22, 1.44, 0.02],  tail: [-0.36, 1.16, 0.04],
+      bind: ARM_BIND_R },
+    { name: 'armRlower', parent: 'armR',  head: [-0.36, 1.16, 0.04],  tail: [-0.42, 0.93, 0.06],
+      bind: ELBOW_BIND_R },
+    { name: 'armL',      parent: 'torso', head: [0.22, 1.44, 0.02],   tail: [0.36, 1.16, 0.04],
+      bind: ARM_BIND_L },
+    { name: 'armLlower', parent: 'armL',  head: [0.36, 1.16, 0.04],   tail: [0.42, 0.93, 0.06],
+      bind: ELBOW_BIND_L },
 
     { name: 'legL',       parent: 'pelvis',    head: [-0.12, 0.95, 0.04],  tail: [-0.27, 0.55, 0.00] },
     { name: 'legLlower',  parent: 'legL',      head: [-0.27, 0.55, 0.00],  tail: [-0.36, 0.14, -0.06] },
@@ -141,8 +248,30 @@ const DASHER_RIG = {
   // Dasher has no wings; the cape is claimed by its own region test instead.
   wing: { minY: 99, behind: -99, outward: 99, bone: 'torso' },
   cape: { bones: ['capeA', 'capeB', 'capeC'], test: (x, y, z) => x > 0.16 && z < -0.12 && y > 0.35 },
+  /**
+   * The spear.
+   *
+   * A long single-edged head carried point-down and outboard of the weapon
+   * hand — the reach weapon the character is built around, sculpted into the
+   * mesh from the start. It replaces the procedural haft that used to be bolted
+   * to the same wrist; the Splitting Lance's numbers and both of its abilities
+   * are untouched, it is only what you see that changed.
+   *
+   * Lit the way the procedural spear was lit and for the same reason: dark for
+   * the length that is haft, discharge colour for the head. A spear that glows
+   * end to end reads as a lightsaber, and the character it belongs to is
+   * defined by being almost invisible.
+   */
+  weapon: {
+    grip: [-0.42, 0.93, 0.06],
+    muzzle: [-0.686, 0.616, 0.317],
+    radius: 0.16, from: 0.10,
+    lit: 0.60,
+    casing: 4, emitter: 5,
+  },
   /* Matte black plate, and everything that is not plate is discharge.
-     0 armour · 1 cape · 2 visor · 3 lit trim (hood collar, forearm blades) */
+     0 armour · 1 cape · 2 visor · 3 lit trim (hood collar, forearm blades)
+     4 spear haft · 5 spear head */
   region(cx, cy, cz) {
     /* Every one of these thresholds is fighting the stance. Dasher is modelled
        with his feet ±0.375 apart, so "outboard" is not on its own a test for
@@ -162,7 +291,7 @@ const DASHER_RIG = {
     if (cy > 0.80 && cy < 1.12 && Math.abs(cx) > 0.33 && cz > -0.16) return 3;
     return 0;
   },
-  materials(char) {
+  materials(char, weapon) {
     const S = characterSurfaces();
     return [
       // The plate gives the light back to nobody.
@@ -182,15 +311,207 @@ const DASHER_RIG = {
         color: char.accent, emissive: char.accent, emissiveIntensity: 1.3,
         roughness: 0.34, metalness: 0.4, scale: 7.0,
       }),
+      // Haft: darker than the plate, so the weapon is a line and not a limb.
+      makeCharacterMaterial(S.tech, {
+        color: 0x0d1014, roughness: 0.4, metalness: 0.8, scale: 6.6,
+      }),
+      // Head, in the colour of what it leaves behind.
+      new THREE.MeshStandardMaterial({
+        color: weapon.color, emissive: weapon.color, emissiveIntensity: 2.1,
+        roughness: 0.2, metalness: 0.6,
+      }),
     ];
   },
 };
 
-const RIGS = { halcyon: HALCYON_RIG, dasher: DASHER_RIG };
+/**
+ * Unloader: an industrial exosuit, and the one mesh that arrived carrying
+ * something that is not its weapon.
+ *
+ * Everything about him is wider than the other two — the fists sit at
+ * x ≈ ±0.72, further out than Halcyon's wingtips, and the pauldrons are the
+ * widest thing on the body at y ≈ 1.3. The bones below were clustered out of
+ * horizontal slabs the same way, which on this mesh is easy: the arms hang
+ * clear of the torso at every height, so each slab reads as three separate runs
+ * of x and the limbs fall out of it without any of the guesswork the winged
+ * shell needed.
+ *
+ * Colour follows the reference sheet: a dark slate frame with hazard-amber
+ * armour on everything that is bolted onto it — pauldrons, the whole arm down
+ * to the wrist, and the plates over the thighs and knees — steel at the fists
+ * and the belt, and one lit band across the front of the helmet.
+ */
+const UNLOADER_RIG = {
+  // Modelled on its own centreline already, unlike the other two.
+  recentre: [0, 0, 0],
+  hipY: 0.95,
+  bones: [
+    { name: 'pelvis', parent: null,     head: [0, 0.95, -0.01], tail: [0, 1.05, -0.02] },
+    { name: 'torso',  parent: 'pelvis', head: [0, 0.95, -0.01], tail: [0, 1.46, -0.05] },
+    { name: 'head',   parent: 'torso',  head: [0, 1.60, -0.06], tail: [0, 1.88, -0.04] },
+
+    // Weapon arm at −X, empty hand at +X — see the note in HALCYON_RIG.
+    { name: 'armR',      parent: 'torso', head: [-0.34, 1.38, -0.03], tail: [-0.62, 1.10, -0.04],
+      bind: ARM_BIND_R },
+    { name: 'armRlower', parent: 'armR',  head: [-0.62, 1.10, -0.04], tail: [-0.72, 0.84, 0.03],
+      bind: ELBOW_BIND_R },
+    { name: 'armL',      parent: 'torso', head: [0.34, 1.38, -0.03],  tail: [0.62, 1.10, -0.04],
+      bind: ARM_BIND_L },
+    { name: 'armLlower', parent: 'armL',  head: [0.62, 1.10, -0.04],  tail: [0.72, 0.84, 0.03],
+      bind: ELBOW_BIND_L },
+
+    /* The stance is wide and the boots are long: the hips are ±0.17 apart, the
+       ankles ±0.40, and the sole runs from z ≈ −0.36 to +0.20. Splitting the
+       ankle off as its own bone is what lets the toe stay on the floor while
+       the shin swings over it. */
+    { name: 'legL',       parent: 'pelvis',    head: [-0.17, 0.95, -0.01], tail: [-0.31, 0.52, -0.03] },
+    { name: 'legLlower',  parent: 'legL',      head: [-0.31, 0.52, -0.03], tail: [-0.40, 0.16, -0.09] },
+    { name: 'legLankle',  parent: 'legLlower', head: [-0.40, 0.16, -0.09], tail: [-0.42, 0.03, 0.02] },
+    { name: 'legR',       parent: 'pelvis',    head: [0.17, 0.95, -0.01],  tail: [0.31, 0.52, -0.03] },
+    { name: 'legRlower',  parent: 'legR',      head: [0.31, 0.52, -0.03],  tail: [0.40, 0.16, -0.09] },
+    { name: 'legRankle',  parent: 'legRlower', head: [0.40, 0.16, -0.09],  tail: [0.42, 0.03, 0.02] },
+  ],
+  // Nothing on this suit grows off the back, so the wing claim never fires.
+  wing: { minY: 99, behind: -99, outward: 99, bone: 'torso' },
+  /**
+   * The hook, and why it goes.
+   *
+   * A cargo hook on a four-link chain, hanging off the weapon fist and reaching
+   * almost to the floor. It is a fine thing to have sculpted and a bad thing to
+   * animate: it is welded rigid, so it cannot swing, and a rigid chain bolted to
+   * a fist that punches is a bar of iron that clips through the leg it swings
+   * past. It is also not the weapon. The suit's weapon is the pair of gauntlets
+   * — the Siege Gauntlets are the fists themselves — and the hook is the
+   * grapple, which is fired, flies out on a line and is reeled back. Nothing
+   * about that ability is served by the hook being *already out*.
+   *
+   * The test is a box outboard of the boot and forward of the shin, which is
+   * the only place on the mesh the chain occupies: the boot reaches x = −0.68
+   * but never past z = +0.17, and the chain never comes inboard of x = −0.66.
+   */
+  strip: {
+    test: (x, y, z) => x < -0.62 && z > 0.18 && y < 0.90,
+    to: [-0.73, 0.86, 0.10],
+  },
+  /**
+   * No held weapon: the gauntlets are the weapon and they are the hands.
+   *
+   * The block is still declared, because the mount is what `poseWeapon` aims
+   * and the muzzle is where a shockwave leaves from. With no `test` nothing is
+   * skinned to the mount, so the fist itself does not swivel with the aim — it
+   * only decides where in front of the knuckles the charge goes off.
+   */
+  weapon: {
+    grip: [-0.72, 0.86, 0.04],
+    muzzle: [-0.72, 0.86, 0.34],
+  },
+  /* 0 frame · 1 amber plate · 2 visor · 3 steel
+   *
+   * Two of these are ellipsoids rather than boxes, and it is worth saying why:
+   * the shell is 34k triangles over a whole body, so a plane cutting across a
+   * limb leaves an edge a triangle deep and the plate reads as damage rather
+   * than as a panel. Where the shape is meant to be a rounded thing — a lamp in
+   * a helmet, a cap over a knee — a rounded test gives it a rounded edge, and
+   * the facets fall along it instead of across it. */
+  region(cx, cy, cz) {
+    const ax = Math.abs(cx);
+    /* The visor. There is none in the geometry — the helmet is one smooth
+       dome — so the face is painted on: a wide, shallow lamp across the front,
+       deep enough in z to take the whole curve of the brow. */
+    if (ellipsoid(cx, cy, cz, [0, 1.695, 0.10], [0.155, 0.048, 0.22])) return 2;
+    // Pauldrons, and the arm below them all the way to the wrist. The torso
+    // never reaches x = 0.30 above the belt, so width alone separates them.
+    if (cy > 1.24 && ax > 0.30) return 1;
+    if (cy > 0.96 && cy < 1.24 && ax > 0.40) return 1;
+    // Fists: bare metal, because they are what he hits things with.
+    if (cy > 0.62 && cy < 0.96 && ax > 0.52) return 3;
+    // Knee caps, one ellipsoid per leg, pushed forward so the back stays dark.
+    if (ellipsoid(ax, cy, cz, [0.33, 0.55, 0.10], [0.17, 0.13, 0.20])) return 1;
+    /* Thigh plates. Bounded in front as well as outboard — the same band taken
+       all the way round paints the backs of his legs, which the sheet shows as
+       dark. */
+    if (cy > 0.62 && cy < 0.90 && ax > 0.15 && ax < 0.60 && cz > 0.0) return 1;
+    // Belt.
+    if (cy > 0.97 && cy < 1.10 && ax < 0.36) return 3;
+    return 0;
+  },
+  materials(char) {
+    const S = characterSurfaces();
+    return [
+      /* The frame: heavy, dark, and barely reflective. This is the one build in
+         the game wearing the coarse damaged plate rather than the fine tech
+         panelling — the same split the built bodies make between industrial
+         equipment and a precision airframe, and Unloader is a forklift. */
+      makeCharacterMaterial(S.plate, {
+        color: char.color, roughness: 0.72, metalness: 0.34, scale: 4.4,
+      }),
+      /* Hazard amber. Lit, but only just — this is paint on a plate, not a
+         power source, and pushing the emissive any further turns a work suit
+         into a neon sign. */
+      makeCharacterMaterial(S.plate, {
+        color: char.accent, emissive: char.accent, emissiveIntensity: 0.22,
+        roughness: 0.58, metalness: 0.24, scale: 4.8,
+      }),
+      new THREE.MeshStandardMaterial({
+        color: char.visor, emissive: char.visor, emissiveIntensity: 2.2,
+        roughness: 0.2, metalness: 0.65,
+      }),
+      // Bare steel: knuckles and the belt, the two things that take the wear.
+      makeCharacterMaterial(S.tech, {
+        color: 0xaab2be, roughness: 0.38, metalness: 0.72, scale: 6.8,
+      }),
+    ];
+  },
+};
+
+const RIGS = { halcyon: HALCYON_RIG, dasher: DASHER_RIG, unloader: UNLOADER_RIG };
 const SOURCES = {
   halcyon: './assets/models/halcyon.glb',
   dasher: './assets/models/dasher.glb',
+  unloader: './assets/models/unloader.glb',
 };
+
+/**
+ * Name of the bone a mesh weapon hangs off, and the object the rig aims.
+ *
+ * It is a real bone rather than the plain Group a built body uses, because on
+ * an authored mesh the weapon is *skinned* to it — there is no separate object
+ * to parent, only a run of vertices in the same buffer as the hand.
+ */
+const WEAPON_BONE = 'weapon';
+const FORWARD = new THREE.Vector3(0, 0, 1);
+/** How much of a mesh weapon's length is blended back into the hand. */
+const WEAPON_BLEND = 0.1;
+
+/* ------------------------------------------------------------------ strip */
+/**
+ * Takes a piece off the mesh, by collapsing it rather than deleting it.
+ *
+ * The obvious way to remove geometry is to drop its triangles from the index
+ * buffer, and the obvious way is wrong here: everything these meshes are made
+ * of is one welded shell, so cutting a piece out leaves a hole where it was
+ * joined on, and a hole in a closed body is a window into the inside of it.
+ *
+ * Collapsing every vertex in the region onto a single point inside the parent
+ * limb costs nothing and closes itself. Triangles entirely inside the region
+ * become degenerate and rasterise to nothing; the ring of triangles that
+ * straddles the boundary becomes a fan from the rim to that point — which is
+ * to say, a cap — and the cap is inside the fist, where nobody will ever see
+ * it. The shell stays closed, the index buffer is untouched, and the vertex
+ * count is unchanged, so this can run once on the shared geometry at load time.
+ */
+function stripGeometry(geometry, strip) {
+  const pos = geometry.attributes.position.array;
+  for (let i = 0; i < pos.length; i += 3) {
+    if (!strip.test(pos[i], pos[i + 1], pos[i + 2])) continue;
+    pos[i] = strip.to[0];
+    pos[i + 1] = strip.to[1];
+    pos[i + 2] = strip.to[2];
+  }
+  geometry.attributes.position.needsUpdate = true;
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+}
 
 /* ------------------------------------------------------------------ skinning */
 const _a = new THREE.Vector3();
@@ -228,10 +549,32 @@ function computeSkinWeights(positions, spec, boneOrder) {
   const EPS = 1e-4;
   const wingBone = boneOrder.indexOf(spec.wing.bone);
   const capeBones = spec.cape ? spec.cape.bones.map((n) => boneOrder.indexOf(n)) : null;
+  const weaponBone = boneOrder.indexOf(WEAPON_BONE);
+  const handBone = boneOrder.indexOf('armRlower');
+  const wep = spec.weapon ? weaponAxis(spec.weapon) : null;
   const cand = [];
 
   for (let i = 0; i < n; i++) {
     const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
+
+    /* The weapon is claimed first, ahead of everything: ahead of the wing claim
+       because on a winged mesh the weapon is outboard and long, which is the
+       entire wing test, and ahead of the nearest-bone search because a spear
+       held point-down passes a knee.
+
+       Along its own length it is rigid — a blade that bends is not a blade — so
+       everything past the first tenth of the axis is the mount at full weight.
+       The tenth nearest the grip is blended back into the hand, because the
+       weapon is welded to the fingers holding it: cut hard there and the ring
+       of triangles across the join tears open the moment the aim moves. */
+    if (weaponBone >= 0 && wep?.test(x, y, z)) {
+      const w = Math.max(0, Math.min(1, wep.along(x, y, z) / WEAPON_BLEND));
+      skinIndex[i * 4] = weaponBone;
+      skinWeight[i * 4] = w;
+      skinIndex[i * 4 + 1] = handBone;
+      skinWeight[i * 4 + 1] = 1 - w;
+      continue;
+    }
 
     // A blade sweeping past the legs is still a wing, so claim it before the
     // nearest-bone search can hand it to a knee.
@@ -338,11 +681,13 @@ export function swayCape(model, rig, dt, s) {
  * everything else is the white airframe. Three groups is all the concept sheet
  * actually shows.
  */
-function assignMaterialGroups(geometry, spec, char) {
+function assignMaterialGroups(geometry, spec, char, weapon) {
   const pos = geometry.attributes.position.array;
   const index = geometry.index ? geometry.index.array : null;
   const triCount = index ? index.length / 3 : pos.length / 9;
   const region = new Uint8Array(triCount);        // 0 airframe, 1 wing, 2 visor
+  const materials = spec.materials(char, weapon);
+  const wep = spec.weapon ? weaponAxis(spec.weapon) : null;
 
   for (let t = 0; t < triCount; t++) {
     let cx = 0, cy = 0, cz = 0;
@@ -352,11 +697,20 @@ function assignMaterialGroups(geometry, spec, char) {
     }
     cx /= 3; cy /= 3; cz /= 3;
 
+    /* The weapon is painted along its own length rather than by where it is in
+       the world: how far this triangle sits from the grip toward the muzzle,
+       as a fraction. Under `lit` it is casing, past it the emitter. A test in
+       model space could not do this — the weapon hangs on a diagonal, so any
+       axis-aligned cut across it slices the barrel lengthways. */
+    if (wep?.test(cx, cy, cz)) {
+      region[t] = wep.along(cx, cy, cz) > spec.weapon.lit ? spec.weapon.emitter : spec.weapon.casing;
+      continue;
+    }
     region[t] = spec.region(cx, cy, cz);
   }
 
   // Reorder the index buffer so each region is one contiguous draw group.
-  const order = spec.materials(char).map(() => []);
+  const order = materials.map(() => []);
   for (let t = 0; t < triCount; t++) order[region[t]].push(t);
   const out = new (index && index.BYTES_PER_ELEMENT === 4 ? Uint32Array : Uint16Array)(triCount * 3);
   let w = 0;
@@ -370,7 +724,57 @@ function assignMaterialGroups(geometry, spec, char) {
   });
   geometry.setIndex(new THREE.BufferAttribute(out, 1));
 
-  return spec.materials(char);
+  return materials;
+}
+
+/* ------------------------------------------------------------------ weapon */
+/**
+ * Grip to muzzle: the line a mesh weapon is built along, and the capsule around
+ * it that decides which vertices are the weapon.
+ *
+ * Everything about a held weapon is expressed against this one axis — which
+ * part of it is lit, which way the mount is bound so the rig's aim runs down
+ * the barrel, how far out the muzzle sits, and what belongs to it at all.
+ *
+ * A capsule rather than a box, because a box is the wrong shape for the
+ * problem. Every one of these is a long thin thing leaving a fist at an angle,
+ * and no axis-aligned box describes one: wide enough to hold a blade carried
+ * diagonally, it also holds the thigh the blade passes; tight enough to miss
+ * the thigh, it slices the blade lengthways and hands half of it to the body.
+ * Measured along the weapon's own axis the test is two numbers — how far off
+ * the line, and how far down it the claim starts — and `from` is the one that
+ * earns its keep. It puts the seam *across* the weapon just below the fist,
+ * which is where a held weapon's seam belongs and is a ring of a dozen
+ * triangles, instead of running it the length of the blade's edge.
+ *
+ * `holds` is false for a character whose weapon is not a separate object at
+ * all — Unloader's gauntlets are his hands — and then all of this collapses to
+ * a mount and a muzzle, with nothing skinned to either.
+ */
+function weaponAxis(weapon) {
+  const grip = new THREE.Vector3().fromArray(weapon.grip);
+  const dir = new THREE.Vector3().fromArray(weapon.muzzle).sub(grip);
+  const length = dir.length() || 1;
+  dir.divideScalar(length);
+  const from = (weapon.from ?? 0) * length;
+  const radius = weapon.radius ?? 0;
+  const _r = new THREE.Vector3();
+
+  return {
+    grip: weapon.grip, dir, length, holds: radius > 0,
+    /** How far along the axis, as a fraction of its length. */
+    along(x, y, z) {
+      return ((x - grip.x) * dir.x + (y - grip.y) * dir.y + (z - grip.z) * dir.z) / length;
+    },
+    /** Is this point part of the weapon rather than the body? */
+    test(x, y, z) {
+      if (radius <= 0) return false;
+      _r.set(x - grip.x, y - grip.y, z - grip.z);
+      const t = _r.dot(dir);
+      if (t < from || t > length * 1.15) return false;
+      return Math.sqrt(Math.max(0, _r.lengthSq() - t * t)) < radius;
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ build */
@@ -433,6 +837,37 @@ function buildSkeleton(spec) {
     bone.userData.tail = b.tail;
     if (parent) parent.add(bone);
   }
+
+  /* The weapon mount, appended last so its index is `spec.bones.length` and the
+     nearest-bone search in `computeSkinWeights` — which walks `spec.bones` —
+     can never hand a body vertex to it.
+     Its bind rotation is the whole trick. `poseWeapon` orients the mount so
+     that its local +Z lies along the aim, so for the aim to run down the barrel
+     the weapon's own grip-to-muzzle line has to *be* the mount's +Z at bind
+     time. Rotating +Z onto that line, expressed in the forearm's frame, is
+     exactly that; the weapon then pivots about the grip and points wherever the
+     crosshair is, the same as a model held in a fist. */
+  const mount = new THREE.Bone();
+  mount.name = WEAPON_BONE;
+  byName.set(WEAPON_BONE, mount);
+  bones.push(mount);
+  if (spec.weapon) {
+    const hand = byName.get('armRlower');
+    const handRot = worldRot.get('armRlower');
+    const axis = weaponAxis(spec.weapon);
+    _v.set(
+      spec.weapon.grip[0] - hand.userData.head[0],
+      spec.weapon.grip[1] - hand.userData.head[1],
+      spec.weapon.grip[2] - hand.userData.head[2],
+    );
+    mount.position.copy(_v.applyQuaternion(_q.copy(handRot).invert()));
+    mount.quaternion.setFromUnitVectors(
+      FORWARD, _v.copy(axis.dir).applyQuaternion(_q.copy(handRot).invert()),
+    );
+    mount.userData.axisLength = axis.length;
+    hand.add(mount);
+  }
+
   return { bones, byName, root: byName.get(spec.bones[0].name) };
 }
 
@@ -462,10 +897,24 @@ function publishRigContract(g, byName, spec, char, visorMaterial) {
   const armR = arm('R');
 
   /* The weapon mount rides the right forearm exactly as it does on a built
-     body, so the gun tracks the crosshair and the hand goes with it. */
-  const weaponMount = new THREE.Group();
-  weaponMount.position.set(0.06, -0.2, 0.06);
-  byName.get('armRlower').add(weaponMount);
+     body, so the weapon tracks the crosshair. On an authored mesh it is the
+     bone the weapon is skinned to rather than a Group to hang a model on —
+     `poseWeapon` only ever sets a rotation, so it cannot tell the difference.
+
+     A spec with no `weapon` block at all gets the built body's offset, and with
+     it the procedural weapon model: an authored mesh that arrived empty-handed
+     still needs something to shoot with. */
+  const weaponMount = byName.get(WEAPON_BONE);
+  if (!spec.weapon) {
+    weaponMount.position.set(0.06, -0.2, 0.06);
+    byName.get('armRlower').add(weaponMount);
+  }
+
+  /* The muzzle: where every shot in the game starts, parked at the end of the
+     weapon's own axis. It hangs off the mount, so it swings with the aim. */
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, 0, weaponMount.userData.axisLength ?? 0.9);
+  weaponMount.add(muzzle);
 
   const capeBones = (spec.cape?.bones || []).map((n) => byName.get(n)).filter(Boolean);
 
@@ -478,6 +927,16 @@ function publishRigContract(g, byName, spec, char, visorMaterial) {
     weaponMount, gripHand: null,
     visor: visorMaterial, build: char.build, hipY: spec.hipY, hat: null,
     authored: true,
+    /* Two flags, and they are not the same question.
+       `bodyWeapon` says the mesh already carries a weapon, so nothing should be
+       attached to the mount and the muzzle below is the real one.
+       `mountIsGeometry` says the mount has vertices skinned to it, which is
+       what stops `poseWeapon` shoving it forward on a thrust — that lunge is
+       there to drive a *separate* model out of the hand, and applied to a bone
+       it would tear the blade off the fist holding it. */
+    bodyWeapon: !!spec.weapon,
+    mountIsGeometry: !!spec.weapon?.radius,
+    muzzle,
   };
 }
 
@@ -502,6 +961,9 @@ export async function preloadAuthoredModels() {
       const spec = RIGS[build];
       const geo = mesh.geometry.clone();
       geo.translate(spec.recentre[0], spec.recentre[1], spec.recentre[2]);
+      // Anything the sculptor sent that the character should not be carrying
+      // comes off here, once, on the geometry every instance shares.
+      if (spec.strip) stripGeometry(geo, spec.strip);
       if (!geo.index) {
         // Skinning wants an indexed buffer to reorder into material groups.
         const count = geo.attributes.position.count;
@@ -533,14 +995,14 @@ export function buildAuthoredModel(char) {
   const g = new THREE.Group();
   const geometry = entry.geometry.clone();
 
-  const boneOrder = spec.bones.map((b) => b.name);
+  const boneOrder = [...spec.bones.map((b) => b.name), WEAPON_BONE];
   const { skinIndex, skinWeight } = computeSkinWeights(
     geometry.attributes.position.array, spec, boneOrder,
   );
   geometry.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndex, 4));
   geometry.setAttribute('skinWeight', new THREE.BufferAttribute(skinWeight, 4));
 
-  const materials = assignMaterialGroups(geometry, spec, char);
+  const materials = assignMaterialGroups(geometry, spec, char, weaponById(char.weapon));
   const mesh = new THREE.SkinnedMesh(geometry, materials);
   mesh.castShadow = true;
   mesh.receiveShadow = true;

@@ -5,11 +5,12 @@ on chests, and try to out-scale a difficulty curve that never stops climbing. Wh
 ends — and it will — you are paid in **Echoes**, a currency that permanently widens the item
 pool and buys new characters for every run after.
 
-Built with [three.js](https://threejs.org/) and plain ES modules. **No build step, no
-bundler, no external assets** — every character, weapon and prop is assembled from
-primitives at runtime, every texture is painted onto a canvas at load, and every sound,
-including the score, is synthesised by the Web Audio API as it plays. Nothing in the
-repository is a binary.
+Built with [three.js](https://threejs.org/) and plain ES modules. **No build step and no
+bundler** — nearly every character, weapon and prop is assembled from primitives at runtime,
+every texture is painted onto a canvas at load, and every sound, including the score, is
+synthesised by the Web Audio API as it plays. The only files in the repository that are not
+source are three authored character meshes in `assets/models/`, and even those arrive as bare
+geometry: the skeleton, the skinning and the paint are all built at load time from code.
 
 ---
 
@@ -735,14 +736,15 @@ and a throwing hook is caught and logged rather than killing the frame.
 
 ### Adding a character
 
-**One character is not procedural.** Halcyon is an authored mesh — modelled elsewhere, shipped
-as glTF in `assets/models/`, and rigged at load time by `entities/authoredRig.js`. It arrives
-the way exported art usually does: one welded shell of 33k triangles, no skeleton, no
-animation, a single flat grey material. Three jobs stand between that and a playable body, and
-that module does all three: it fits a skeleton to the mesh *measured from its own geometry*
-(horizontal slabs clustered in x/z, which is the only way to find an arm in a shell that also
-contains six wing blades passing through the same heights), skins every vertex to it with
-inverse-distance falloff weights, and paints it by region into the character's palette.
+**Three characters are not procedural.** Halcyon, Dasher and Unloader are authored meshes —
+modelled elsewhere, shipped as glTF in `assets/models/`, and rigged at load time by
+`entities/authoredRig.js`. They arrive the way exported art usually does: one welded shell of
+34k triangles, no skeleton, no animation, a single flat grey material. Three jobs stand between
+that and a playable body, and that module does all three: it fits a skeleton to the mesh
+*measured from its own geometry* (horizontal slabs clustered in x/z, which is the only way to
+find an arm in a shell that also contains six wing blades passing through the same heights),
+skins every vertex to it with inverse-distance falloff weights, and paints it by region into
+the character's palette.
 
 The skeleton it fits is not arbitrary. `characterRig.js` animates whatever it finds under
 `model.userData` — `torso`, `armL.userData.lower`, `legR.userData.ankle` — and never asks what
@@ -751,19 +753,71 @@ animation system (gait blending, aim tracking, the six attack poses, the weapon 
 crosshair) drives an authored mesh without one line of it changing.
 
 The subtle part is the bind pose. Skinning cares about the difference between a bone's current
-transform and its bind transform, and the rig writes *absolute* rotations — it settles an idle
-arm on `rotation.z = ±0.9` because a procedural arm is built pointing straight down and needs
-swinging out. This mesh's arms are already sculpted hanging down and out, so binding them at
-zero adds that 0.9 on top and the character stands like a scarecrow. They are bound *at* the
-rig's idle values instead, which makes the sculpted pose the idle pose exactly and every
-animation deviate from what the artist drew rather than from a T-pose the mesh has never been
-in. That in turn means a child bone's offset has to be expressed in its parent's rotated
-frame, or the elbow lands somewhere the elbow is not.
+transform and its bind transform, and the rig writes *absolute* rotations — so a bone bound at
+anything other than the values the rig settles on is already deformed the moment the character
+stands still. The arms are therefore bound at exactly what `poseArms` produces at
+`ready = 0, stride = 0`, which makes the sculpted pose the idle pose and every animation
+deviate from what the artist drew rather than from a T-pose the mesh has never been in. Getting
+this wrong is not subtle to look at: both original meshes shipped bound at values left over
+from an older `poseArms` and spent two releases standing with their arms folded across their
+chests. Binding a bone rotated in turn means a child's offset has to be expressed in the
+parent's rotated frame, or the elbow lands somewhere the elbow is not.
+
+**The weapon is in the mesh.** Every one of these characters was sculpted holding something,
+and that thing is the weapon they carry — so an authored body does not get a procedural weapon
+model bolted onto its wrist the way a built body does. A rig spec declares `weapon` as a grip,
+a muzzle and a radius around the line between them, and that capsule is three things at once:
+the vertices that are the weapon rather than the body, skinned in one piece to a bone of their
+own; that bone, published as `userData.weaponMount`, which is the object `poseWeapon` aims at
+the crosshair, so a mesh weapon tracks the aim exactly like a held one; and `userData.muzzle`,
+parked at the business end, which is where every shot originates. `userData.bodyWeapon` then
+tells `Combat.equip` and `RemotePlayer.setWeapon` to leave the mount alone.
+
+A capsule and not a box, because a box is the wrong shape for the problem: wide enough to hold
+a blade carried diagonally it also holds the thigh the blade passes, and tight enough to miss
+the thigh it slices the blade lengthways. Measured along the weapon's own axis the test is two
+numbers — how far off the line, and how far down it the claim starts — and the second one puts
+the seam *across* the weapon just below the fist, where a held weapon's seam belongs. The last
+tenth of the axis nearest the grip is blended back into the hand, because the weapon is welded
+to the fingers holding it and a hard cut there tears open the moment the aim moves. The same
+axis decides the paint: dark casing up to `lit`, the weapon's own colour past it, so Halcyon's
+emitter and Dasher's spearhead glow at the tip and the rest reads as hardware. A weapon lit end
+to end reads as a lightsaber, which is the one thing neither of them is carrying.
+
+Two consequences fall out of that. `armR` is the *weapon* arm and on all three meshes it is the
+one at −X, because that is the hand the art puts the weapon in; naming the empty hand R braces
+the wrong arm when you aim and leaves the blade swinging loose beside it. And `poseWeapon`'s
+forward lunge on a punch or a thrust is skipped for a mesh weapon: that translation exists to
+drive a separate model out of the hand, and applied to a bone with vertices on it, it slides
+the blade out of the fingers. The arm still lunges.
+
+**Taking something off a mesh.** A spec can also declare `strip`, for geometry the character
+should not be carrying — Unloader arrived with a cargo hook on a chain hanging off his fist,
+and the hook is not his weapon, it is the grapple, an ability that fires a line and reels it
+back. Stripping is done by *collapsing* the vertices to a point inside the parent limb rather
+than by dropping triangles from the index buffer: these meshes are one welded shell, so cutting
+a piece out leaves a hole, and a hole in a closed body is a window into the inside of it.
+Collapsed, the triangles wholly inside the region become degenerate and rasterise to nothing
+while the ring straddling the boundary becomes a fan from the rim to that point — which is to
+say, a cap, and the cap is inside the fist. The shell stays closed, the index buffer is
+untouched, and the vertex count does not change, so it runs once on the geometry every instance
+shares.
 
 Meshes are loaded once at boot, before the menu opens, because `buildPlayerModel` is called
 synchronously from three places and threading promises through all of them to accommodate a
 file load would be the tail wagging the dog. A file that fails to arrive simply leaves that
 character on its procedural body.
+
+**Measuring a new one.** Two pages under `tools/` are how the numbers above were arrived at and
+are the fastest way to fit the next mesh. `tools/modelview.html` renders a raw `.glb` in an
+orthographic contact sheet with a metre grid, and its `mode=mark` takes a region test as a
+query parameter and paints the triangles it selects — the same signature a spec's `region()`
+has, so a test can be tried there and pasted straight into `authoredRig.js`.
+`tools/rigview.html` goes the other way and builds the character through the *game's* own code,
+rendering a row of settled poses (idle, run, aim, attack); `bones=1` paints each vertex by the
+bone it is weighted to and `stretch=1` paints every triangle by how far it has been pulled out
+of its bind shape, which is the diagnostic that actually finds a skinning seam. Serve the repo
+and open them: `npm start`, then `/tools/rigview.html?c=unloader`.
 
 **The characters are made of something.** Every part of every body used to be a bare colour
 at a uniform roughness, which is the single reason they read as moulded plastic however good

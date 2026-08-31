@@ -77,10 +77,13 @@ export class RemotePlayer {
         if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach((m) => m.dispose());
       });
       mount.remove(this.weaponModel);
+      this.weaponModel = null;
     }
     this.weaponId = weaponId;
     const weapon = weaponById(weaponId);
     if (!weapon) return;
+    // Same rule as `Combat.equip`: a mesh that came with a weapon keeps it.
+    if (this.model.userData.bodyWeapon) return;
     this.weaponModel = buildWeaponModel(weapon);
     mount.add(this.weaponModel);
     this.model.userData.muzzle = this.weaponModel.userData.muzzle;
