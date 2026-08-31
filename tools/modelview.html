@@ -149,12 +149,20 @@ loader.load(url, (gltf) => {
   };
   const aspect = W / H;
   const half = +(qs.get('zoom') || 1.15);
-  const ty = +(qs.get('ty') || 0.95);
+  // What the cameras look at. `ty` alone is the common case (raise the framing
+  // to the head); `target` is the full point, for looking at something the body
+  // is holding out to one side.
+  const t = (qs.get('target') || '').split(',').map(Number);
+  const at = new THREE.Vector3(
+    t.length === 3 ? t[0] : 0,
+    t.length === 3 ? t[1] : +(qs.get('ty') || 0.95),
+    t.length === 3 ? t[2] : 0,
+  );
   views.forEach((v, i) => {
     const cam = new THREE.OrthographicCamera(-half * aspect, half * aspect, half, -half, 0.1, 20);
     const eye = CAMS[v] || CAMS.front;
-    cam.position.set(eye[0], eye[1] - 0.95 + ty, eye[2]);
-    cam.lookAt(0, ty, 0);
+    cam.position.set(eye[0] + at.x, eye[1] - 0.95 + at.y, eye[2] + at.z);
+    cam.lookAt(at);
     renderer.setViewport(i * W, 0, W, H);
     renderer.setScissor(i * W, 0, W, H);
     renderer.setScissorTest(true);

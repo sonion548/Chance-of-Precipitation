@@ -736,8 +736,8 @@ and a throwing hook is caught and logged rather than killing the frame.
 
 ### Adding a character
 
-**Three characters are not procedural.** Halcyon, Dasher and Unloader are authored meshes —
-modelled elsewhere, shipped as glTF in `assets/models/`, and rigged at load time by
+**Four characters are not procedural.** Halcyon, Dasher, Unloader and Sniper are authored
+meshes — modelled elsewhere, shipped as glTF in `assets/models/`, and rigged at load time by
 `entities/authoredRig.js`. They arrive the way exported art usually does: one welded shell of
 34k triangles, no skeleton, no animation, a single flat grey material. Three jobs stand between
 that and a playable body, and that module does all three: it fits a skeleton to the mesh
@@ -791,6 +791,14 @@ forward lunge on a punch or a thrust is skipped for a mesh weapon: that translat
 drive a separate model out of the hand, and applied to a bone with vertices on it, it slides
 the blade out of the fingers. The arm still lunges.
 
+**Stowed, a mesh weapon goes back to the pose it was drawn in.** A procedural weapon can be
+pointed anywhere, because it is a separate model in a hand that travels with it. A weapon
+skinned into the body is not: the sculptor drew a carry — a rifle across the chest, a blade
+hanging at the hip — and drew the hands around it. So the mount records that carry as
+`mountRest` and `poseWeapon` blends to it by `ready`: the weapon comes up to the crosshair when
+there is something to shoot and settles back into the art when there is not. Without it the
+generic stow droop applies, which on a two-handed rifle points the barrel at its owner's boot.
+
 **Taking something off a mesh.** A spec can also declare `strip`, for geometry the character
 should not be carrying — Unloader arrived with a cargo hook on a chain hanging off his fist,
 and the hook is not his weapon, it is the grapple, an ability that fires a line and reels it
@@ -807,6 +815,25 @@ Meshes are loaded once at boot, before the menu opens, because `buildPlayerModel
 synchronously from three places and threading promises through all of them to accommodate a
 file load would be the tail wagging the dog. A file that fails to arrive simply leaves that
 character on its procedural body.
+
+**Cutting a mesh apart.** The last repair is the one Sniper needed and it runs the other way
+from `strip`: something the character *should* be carrying that the sculpt has welded to them.
+His scope's eyepiece runs into his shoulder, so scope and shoulder are one surface, and the
+scope is cocked 15° off the bore into the bargain — neither of which anything downstream can
+fix, because a mesh weapon is skinned to the mount and aimed, and a scope welded to a shoulder
+would take the shoulder with it. A spec declares `detach`, and three things happen in order:
+every triangle is assigned to the piece or the body by majority of its corners, so the cut runs
+along edges rather than through faces; the vertices both sides share are duplicated and the
+piece's triangles pointed at the copies, which is the whole of "separate"; and then the piece —
+told from the body by identity, not by position, since at that moment the two are still in the
+same place — is rotated onto the axis it should have been on.
+
+Where the cut is matters more than any of that. The scope's rear does not *end*, it blends into
+the shoulder, so a box drawn around it slices the blend and the boundary comes out as a torn
+fringe rather than a rim. Cutting instead with a cylinder around the scope's own fitted axis,
+stopping short of the shoulder, gives a boundary that is a clean ring through a tube — and the
+bore it is being aligned to is itself a least-squares fit through the barrel's cross-sections,
+straight to within 7 mm over its length, which is what makes it worth aligning to.
 
 **Measuring a new one.** Two pages under `tools/` are how the numbers above were arrived at and
 are the fastest way to fit the next mesh. `tools/modelview.html` renders a raw `.glb` in an

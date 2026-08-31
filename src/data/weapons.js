@@ -21,10 +21,9 @@
  *   critChanceToDamage: n                  crit chance an item grants is read
  *                                          as n× that much crit damage instead
  * and `primary.activeReload: { time, window, cooldown }`, which takes the fire
- * button away after each shot until the reload bar is answered. Nothing carries
- * it since the Meridian Longrifle was retired — it is left in because the
- * machinery is a dozen lines in `Combat` and the next precision weapon will
- * want it.
+ * button away after each shot until the reload bar is answered. The Meridian
+ * Longrifle is the one weapon that carries it, and the only one in the arsenal
+ * you have to answer a bar to keep firing.
  *
  * `primary.magazine: { size, time }` is the other kind: a round is spent on
  * every shot, and when the last one goes the weapon stops for `time` seconds
@@ -332,6 +331,61 @@ export const WEAPONS = [
         });
         ctx.dash({ speed: 26, duration: 0.22, iframes: 0.14, color: 0x00ffa6 });
         ctx.recoil(2.4); ctx.shake(0.22);
+      },
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'meridian_longrifle',
+    name: 'Meridian Longrifle',
+    icon: '🎯',
+    tag: 'Precision · Scoped',
+    color: 0xff6a4d,
+    model: 'sniper',
+    desc: 'A bolt gun with a real optic on it. Behind the glass every body in the arena shows the one plate it never got seated properly — put a round through that and the hit is critical, guaranteed. It never rolls a crit of its own, so everything that would have bought you the dice buys you the multiplier instead.',
+    lore: 'Issued with one round chambered and a note: make it count.',
+    displayStats: { Damage: '900%', Crit: 'Earned, never rolled', Reload: 'Timed', Proc: '1.0' },
+    /* The trade the whole weapon is built on.
+       Handing a sniper random crits would make the seam pointless — you would
+       hit it and sometimes get nothing extra, or miss it and get the crit
+       anyway. Turning the chance off makes the seam the only source of a
+       critical hit, and converting the stat keeps every crit-chance item in
+       the pool worth picking up. */
+    randomCrits: false,
+    critChanceToDamage: 2.5,
+    scope: { fov: 15, distance: 0.28, sensitivity: 0.4 },
+    primary: {
+      name: 'Bolt Round', key: 'M1', icon: '⌖',
+      anim: 'shoot',
+      desc: 'A round for 900% damage that goes through two bodies — double into a seam. Then work the bolt: click as the marker crosses the mark to chamber instantly, miss it or let it run off the end and the action jams for 3s.',
+      cooldown: 0.2, scalesWithAttackSpeed: true,
+      activeReload: { time: 1.25, window: 0.14, cooldown: 3.0 },
+      fire(ctx) {
+        ctx.hitscan({
+          damage: ctx.dmg * 9.0, proc: 1.0, range: 320, color: 0xffb08a,
+          tracer: true, thick: 0.07, pierce: 2, weakPoint: true, knockback: 8,
+        });
+        ctx.recoil(6); ctx.shake(0.4);
+      },
+    },
+    secondary: {
+      name: 'Sidearm Revolver', key: 'Q', icon: '🔘',
+      anim: 'shoot',
+      desc: 'Swing out a heavy revolver for 260% damage. Finish something with it and it holsters free; leave the target standing and it is gone for 10s.',
+      cooldown: 10,
+      fire(ctx) {
+        const hit = ctx.hitscan({
+          damage: ctx.dmg * 2.6, proc: 1.0, range: 90, color: 0xffd58a,
+          tracer: true, thick: 0.05, weakPoint: true, knockback: 10,
+        });
+        ctx.recoil(3.4); ctx.shake(0.24);
+        // The kill is the reload. A revolver that cleans up costs nothing,
+        // which is what makes it a finisher rather than a second primary.
+        if (hit?.dead) {
+          ctx.refundSecondary();
+          ctx.toast('CHAMBER CLEARED', '#ff6a4d');
+        }
       },
     },
   },

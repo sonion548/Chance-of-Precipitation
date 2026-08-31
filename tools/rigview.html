@@ -53,6 +53,10 @@ const poses = (qs.get('poses') || 'idle,run,aim,attack').split(',');
 const view = qs.get('view') || 'front';
 const half = +(qs.get('zoom') || 1.15);
 const ty = +(qs.get('ty') || 0.95);
+// `target` is the full look-at point, for framing something held out to one
+// side; `ty` alone just raises the framing.
+const _t = (qs.get('target') || '').split(',').map(Number);
+const at = new THREE.Vector3(_t.length === 3 ? _t[0] : 0, _t.length === 3 ? _t[1] : ty, _t.length === 3 ? _t[2] : 0);
 const yawDeg = +(qs.get('yaw') || 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -200,8 +204,8 @@ poses.forEach((kind, i) => {
 
   const cam = new THREE.OrthographicCamera(-half * (W / H), half * (W / H), half, -half, 0.1, 20);
   const eye = CAMS[view] || CAMS.front;
-  cam.position.set(eye[0], eye[1] - 0.95 + ty, eye[2]);
-  cam.lookAt(0, ty, 0);
+  cam.position.set(eye[0] + at.x, eye[1] - 0.95 + at.y, eye[2] + at.z);
+  cam.lookAt(at);
   renderer.setViewport(i * W, 0, W, H);
   renderer.setScissor(i * W, 0, W, H);
   renderer.setScissorTest(true);
