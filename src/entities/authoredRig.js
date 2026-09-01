@@ -247,7 +247,16 @@ const DASHER_RIG = {
   ],
   // Dasher has no wings; the cape is claimed by its own region test instead.
   wing: { minY: 99, behind: -99, outward: 99, bone: 'torso' },
-  cape: { bones: ['capeA', 'capeB', 'capeC'], test: (x, y, z) => x > 0.16 && z < -0.12 && y > 0.35 },
+  /* The same box the cloth was always claimed by, with its two live edges
+     softened. A cape test is a line drawn through a mesh and both of these run
+     close to a leg; reporting how sure it is instead of yes-or-no lets the
+     triangles that straddle it be part cloth and part thigh, which is what they
+     are. See the cape branch in `computeSkinWeights`. */
+  cape: {
+    bones: ['capeA', 'capeB', 'capeC'],
+    test: (x, y, z) => Math.max(0, Math.min(1, Math.min(
+      (x - 0.16) / 0.07, (-0.12 - z) / 0.07, (y - 0.28) / 0.14))),
+  },
   /**
    * The spear.
    *
@@ -531,13 +540,46 @@ const SNIPER_RIG = {
   ],
   // Nothing grows off this one's back but cloth, which has its own claim.
   wing: { minY: 99, behind: -99, outward: 99, bone: 'torso' },
-  /* The cloak reaches the floor and hangs past both hips, so it cannot be
-     claimed by "outboard" the way a wing is — the legs are outboard too. What
-     separates it is that it is *behind*: the body's own back never passes
-     z = −0.14, and the cloak starts there and goes back to −0.37. */
+  /**
+   * The core: from the hips to the collar, and nothing but the spine may have it.
+   *
+   * He carries the rifle across his chest, so both forearms run over his ribs
+   * and are nearer to them than the spine is. Without this the chest is skinned
+   * to the arms and swells and buckles every time they move — which is exactly
+   * what it did. An ellipse rather than a box because a ribcage is one, and
+   * because the upper arms sit at |x| ≈ 0.22 and a box wide enough to hold the
+   * chest would take them with it.
+   */
+  core: {
+    bones: ['pelvis', 'torso', 'head'],
+    test: (x, y, z) => {
+      const q = Math.hypot(x / 0.20, (z - 0.02) / 0.20);
+      return Math.max(0, Math.min(1, Math.min(
+        (1.18 - q) / 0.18, (y - 0.88) / 0.06, (1.64 - y) / 0.06)));
+    },
+  },
+  /**
+   * The cloak — all of it, which is the whole difficulty.
+   *
+   * It is not simply *behind* the way a cape is on a character who wears one
+   * hanging down their back: this one wraps, and hangs past both hips to the
+   * floor. Claiming only what is behind leaves the two front panels to the
+   * nearest bone, which is a thigh, and then half the cloak swings with the leg
+   * — the legs read as swinging enormously wide when in fact it is the cloth
+   * doing it.
+   *
+   * Two clauses, then. Anything behind the body's own back, which never passes
+   * z = −0.14. And anything outboard of the legs below the waist, where the
+   * threshold has to step out at the ankles: the boots reach |x| = 0.41 and the
+   * hem starts at 0.43, which is a 2 cm gap and the only place on the model
+   * where cloth and body come that close.
+   */
   cape: {
     bones: ['capeA', 'capeB', 'capeC'],
-    test: (x, y, z) => z < -0.14 && y > 0.06 && y < 1.56,
+    test: (x, y, z) => sniperCloak(x, y, z),
+    // It wraps, so its front panels are a long way out from the chain: what
+    // reads as a flick at the back reads as a sail at the front.
+    sway: 0.4,
   },
   /**
    * The scope, cut free of the shoulder and set square on the bore.
@@ -578,30 +620,144 @@ const SNIPER_RIG = {
     lit: 0.962,
     casing: 4, emitter: 5,
   },
-  /* 0 plate · 1 cloak · 2 visor · 3 bodysuit · 4 rifle · 5 muzzle · 6 trim */
+  /* 0 webbing · 1 cloak · 2 visor · 3 bodysuit · 4 rifle · 5 muzzle · 6 trim
+   *
+   * Almost all of the mesh is the suit. That is deliberate now: the plate is
+   * `attachments`, real geometry strapped over the top, and painting a plate
+   * onto a bare arm to stand in for one is what made him read as a man in a
+   * T-shirt. What is left for the paint is the cloth, the slit, and the two
+   * things the sculpt does model as kit — the hip pouches and the boots. */
   region(cx, cy, cz) {
-    const ax = Math.abs(cx);
     // The slit. Wide and shallow, set back under the brow of the hood.
     if (ellipsoid(cx, cy, cz, [0, 1.715, 0.02], [0.105, 0.032, 0.15])) return 2;
-    // The mark on the brow, which is the only gold above the waist.
-    if (ellipsoid(cx, cy, cz, [0, 1.778, 0.0], [0.07, 0.032, 0.14])) return 6;
-    /* Hood and cloak. The hood is everything above the collar; the cloak is
-       everything behind the body's own back, which never passes z = −0.13. */
-    if (cy > 1.58) return 1;
-    if (cz < -0.13 && cy > 0.06) return 1;
-    // Belt.
-    if (cy > 0.95 && cy < 1.04 && ax < 0.26) return 6;
-    // Plate: pauldrons and chest rig, thigh and knee guards, boots.
-    if (cy > 1.16 && cy < 1.58 && ax > 0.10) return 0;
-    if (cy > 1.04 && cy < 1.36 && ax < 0.26) return 0;
-    if (cy > 0.28 && cy < 0.76 && ax > 0.09) return 0;
-    if (cy < 0.18) return 0;
+    if (cy > 1.58) return 1;                              // hood
+    if (sniperCloak(cx, cy, cz) > 0.5) return 1;          // cloak
+    if (cy < 0.14) return 0;                              // boot leather
     return 3;
+  },
+  /**
+   * The kit, in model space, measured off the limbs it is strapped to.
+   *
+   * A scout's load-out rather than a knight's: hard plate only where a round
+   * would land — shoulders, chest, forearms, thighs, knees, shins — and webbing
+   * everywhere else. Every piece is a shell, a slab or a sleeve, and every
+   * position was read off the mesh's own cross-sections, which is why the
+   * numbers are not symmetric: he stands staggered, left foot forward, so his
+   * right leg is 4 cm further back than his left.
+   */
+  attachments(char) {
+    const S = characterSurfaces();
+    const plate = makeCharacterMaterial(S.plate, {
+      color: 0xcdb98c, roughness: 0.56, metalness: 0.32, scale: 5.4,
+    });
+    const dark = makeCharacterMaterial(S.tech, {
+      color: 0x1b2027, roughness: 0.76, metalness: 0.3, scale: 6.4,
+    });
+    const brass = makeCharacterMaterial(S.tech, {
+      color: char.accent, emissive: char.accent, emissiveIntensity: 0.35,
+      roughness: 0.4, metalness: 0.72, scale: 7.4,
+    });
+
+    /* Both shoulders get the same pauldron, mirrored: a cap over a lame, which
+       is two shapes and reads as five times that many at any distance. */
+    const pauldron = (sx) => [
+      shell(plate, [0.125, 0.08, 0.135], [sx * 0.225, 1.41, -0.02]),
+      shell(plate, [0.135, 0.055, 0.125], [sx * 0.25, 1.345, -0.02]),
+      // Upper-arm band, so the arm between pauldron and bracer is not bare.
+      sleeve(dark, [0.09, 0.09, 0.95], [sx * 0.255, 1.28, 0.0], [0.25, 0, sx * 0.32]),
+      slab(plate, [0.05, 0.10, 0.10], [sx * 0.30, 1.29, 0.02], [0, 0, sx * 0.3]),
+    ];
+    // Forearm: a sleeve of plate with a strap at each end.
+    const bracer = (from, to, r) => {
+      const mid = from.map((v, i) => (v + to[i]) / 2);
+      const len = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+      const q = new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(to[0] - from[0], to[1] - from[1], to[2] - from[2]).normalize(),
+      );
+      const e = new THREE.Euler().setFromQuaternion(q);
+      const rot = [e.x, e.y, e.z];
+      return [
+        sleeve(plate, [r, len * 0.62, 0.85], mid, rot),
+        sleeve(dark, [r * 1.04, len * 0.12, 0.9], from.map((v, i) => v + (to[i] - v) * 0.22), rot),
+        sleeve(dark, [r * 1.04, len * 0.12, 0.9], from.map((v, i) => v + (to[i] - v) * 0.78), rot),
+      ];
+    };
+    /* Thigh guard, knee cap and greave, per leg.
+    
+       `front` is the one number that matters and the one that cannot be
+       guessed: how far forward that leg's surface actually is at each of the
+       three heights. He stands staggered, so his left leg is up to 8 cm ahead
+       of his right, and a plate placed by symmetry ends up buried in one leg
+       and floating off the other. These were read off the mesh's own
+       cross-sections; each piece then stands 2 cm proud of the number. */
+    const legKit = (sx, hip, knee, ankle, front) => ({
+      thigh: [
+        shell(plate, [0.10, 0.026, 0.175],
+          [(hip[0] + knee[0]) / 2 + sx * 0.02, (hip[1] + knee[1]) / 2 + 0.04,
+            front[0] - 0.015], [1.2, 0, 0]),
+        slab(dark, [0.105, 0.028, 0.115], [(hip[0] + knee[0]) / 2, hip[1] - 0.13, front[0] - 0.07]),
+      ],
+      shin: [
+        // Knee cap, sitting on the joint so it turns with the shin.
+        shell(plate, [0.078, 0.028, 0.078], [knee[0] + sx * 0.01, knee[1] - 0.01, front[1] - 0.012],
+          [1.3, 0, 0]),
+        // Greave: a plate down the front of the shin, not a pipe the leg is
+        // inside — a sleeve reads as a tin can from every angle that matters.
+        shell(plate, [0.078, 0.026, 0.19],
+          [(knee[0] + ankle[0]) / 2 + sx * 0.005, (knee[1] + ankle[1]) / 2,
+            front[2] - 0.012], [1.4, 0, 0]),
+        slab(dark, [0.085, 0.026, 0.095], [(knee[0] + ankle[0]) / 2, knee[1] - 0.10, front[2] - 0.06]),
+      ],
+    });
+    const legL = legKit(-1, [-0.16, 0.95, -0.02], [-0.24, 0.55, 0.00], [-0.30, 0.15, -0.02],
+      [0.170, 0.120, 0.060]);
+    const legR = legKit(+1, [0.16, 0.95, -0.02], [0.20, 0.55, -0.04], [0.25, 0.15, -0.10],
+      [0.140, 0.085, -0.020]);
+
+    return [
+      { bone: 'armR', nodes: pauldron(-1) },
+      { bone: 'armL', nodes: pauldron(+1) },
+      { bone: 'armRlower', nodes: bracer([-0.28, 1.21, 0.03], [-0.10, 1.28, 0.13], 0.085) },
+      { bone: 'armLlower', nodes: bracer([0.26, 1.19, 0.12], [0.20, 1.16, 0.28], 0.085) },
+      {
+        bone: 'torso',
+        nodes: [
+          /* Chest plate: a shallow shell over the ribs, standing a centimetre
+             proud of them, with a raised sternum down the middle. It has to sit
+             forward — buried in the chest it is invisible from the one angle
+             the game actually shows a character from. */
+          shell(plate, [0.165, 0.045, 0.165], [0, 1.22, 0.235], [1.45, 0, 0]),
+          slab(plate, [0.05, 0.22, 0.04], [0, 1.26, 0.285], [0.12, 0, 0]),
+          // Bandolier over one shoulder, and the buckle that holds it.
+          slab(dark, [0.06, 0.34, 0.045], [0.09, 1.27, 0.26], [0.08, 0, 0.5]),
+          slab(brass, [0.045, 0.045, 0.03], [0.04, 1.13, 0.28]),
+          // Collar, so the chest plate has something to end against.
+          shell(dark, [0.135, 0.06, 0.115], [0, 1.44, 0.01]),
+        ],
+      },
+      {
+        bone: 'pelvis',
+        nodes: [
+          // Tassets: two hanging plates over the hips.
+          slab(plate, [0.085, 0.15, 0.13], [-0.19, 0.88, 0.10], [0, 0, -0.18]),
+          slab(plate, [0.085, 0.15, 0.13], [0.19, 0.88, 0.08], [0, 0, 0.18]),
+          slab(brass, [0.30, 0.03, 0.21], [0, 0.99, 0.08]),
+        ],
+      },
+      { bone: 'legL', nodes: legL.thigh },
+      { bone: 'legR', nodes: legR.thigh },
+      { bone: 'legLlower', nodes: legL.shin },
+      { bone: 'legRlower', nodes: legR.shin },
+      // Ankle cuffs, rounded rather than blocked: a boot top, not a brick.
+      { bone: 'legLankle', nodes: [shell(plate, [0.095, 0.035, 0.10], [-0.31, 0.11, 0.02])] },
+      { bone: 'legRankle', nodes: [shell(plate, [0.095, 0.035, 0.10], [0.26, 0.11, -0.06])] },
+    ];
   },
   materials(char, weapon) {
     const S = characterSurfaces();
     return [
-      // Desert plate: the armour, and the only warm thing on the silhouette.
+      // Webbing and boot leather: the same sand as the plate strapped over it.
       makeCharacterMaterial(S.plate, {
         color: 0xbca77c, roughness: 0.62, metalness: 0.3, scale: 5.4,
       }),
@@ -617,7 +773,7 @@ const SNIPER_RIG = {
       }),
       // The suit under the plate: matte, dark, and deliberately unremarkable.
       makeCharacterMaterial(S.tech, {
-        color: 0x232830, roughness: 0.7, metalness: 0.35, scale: 6.4,
+        color: 0x2b323c, roughness: 0.76, metalness: 0.24, scale: 6.4,
       }),
       // The rifle: furniture in the same sand as the plate, over dark metal.
       makeCharacterMaterial(S.tech, {
@@ -664,6 +820,35 @@ function boreFrame(x, y, z) {
  * surgery first and asking questions second.
  */
 const SCOPE_HEIGHT = 0.125;
+
+/**
+ * The cloak — all of it, which is the whole difficulty, and the reason it is a
+ * named function rather than two copies of the same guesswork.
+ *
+ * It is not simply *behind* the way a cape is on somebody who wears one hanging
+ * down their back: this one wraps, and hangs past both hips to the floor.
+ * Claiming only what is behind leaves the two front panels to the nearest bone,
+ * which is a thigh — and then half the cloak swings with the leg, which reads
+ * as the legs swinging enormously wide when it is the cloth doing it.
+ *
+ * Two clauses. Anything behind the body's own back, which never passes
+ * z = −0.14. And anything outboard of the legs below the waist, where the
+ * threshold has to step out at the ankles: the boots reach |x| = 0.41 and the
+ * hem starts at 0.43, a 2 cm gap and the only place on this model where cloth
+ * and body come that close.
+ *
+ * The same shape decides which vertices are cloth for the skinning and which
+ * triangles are cloth for the paint, because they are the same question.
+ */
+function sniperCloak(x, y, z) {
+  const behind = (-0.14 - z) / 0.05;
+  const beside = y < 1.12 ? (Math.abs(x) - (y < 0.24 ? 0.40 : 0.34)) / 0.05 : -1;
+  // Every edge of the shape is a ramp, the hem and the collar included: the
+  // hem passes within two centimetres of a boot and the collar of a shoulder.
+  return Math.max(0, Math.min(1, Math.max(behind, beside),
+    (y - 0.05) / 0.06, (1.58 - y) / 0.05));
+}
+
 function scopeCylinder(x, y, z) {
   const [t, u, r] = boreFrame(x, y, z);
   return t > -1.03 && t < -0.52 && Math.hypot(u - SCOPE_HEIGHT, r) < 0.085;
@@ -688,6 +873,65 @@ const WEAPON_BONE = 'weapon';
 const FORWARD = new THREE.Vector3(0, 0, 1);
 /** How much of a mesh weapon's length is blended back into the hand. */
 const WEAPON_BLEND = 0.1;
+
+/* ------------------------------------------------------------------ armour */
+/**
+ * Plate bolted onto an authored mesh, and why a rig spec builds any at all.
+ *
+ * The sculpts arrive as bodies. Halcyon's is an airframe and Unloader's is a
+ * suit, so painting them is enough — but Sniper's is a man in a cloak with bare
+ * arms and bare legs, and no amount of region painting turns that into a
+ * soldier. Painted, he read as somebody in a T-shirt and shorts, because that
+ * is what the geometry is.
+ *
+ * So a spec may declare `attachments`: procedural pieces parented to bones,
+ * built by the same kind of code every non-authored body in this game is built
+ * by. They are authored in **model space** — the same space as every other
+ * number in the spec, measured off the same mesh — and the builder moves each
+ * one into its bone's frame afterwards, which is the only way to place a knee
+ * cap by looking at where the knee is rather than by solving for a bind
+ * rotation first. Once parented they animate for free: the plate on a shin is a
+ * child of the shin.
+ */
+const _plateGeo = new THREE.SphereGeometry(1, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55);
+const _boxGeo = new THREE.BoxGeometry(1, 1, 1);
+const _tubeGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true);
+
+/**
+ * A curved shell: a dome squashed to the size given, facing **+Y** before
+ * rotation — so a plate meant to face forward wants a *positive* quarter turn
+ * about X. Negative points it backwards into the limb it is supposed to cover,
+ * which is invisible and was exactly where every plate on this character spent
+ * its first draft.
+ */
+function shell(material, [sx, sy, sz], pos, rot = [0, 0, 0]) {
+  const m = new THREE.Mesh(_plateGeo, material);
+  m.scale.set(sx, sy, sz);
+  m.position.fromArray(pos);
+  m.rotation.set(...rot);
+  m.castShadow = true;
+  return m;
+}
+
+/** A flat slab — straps, buckles, greave faces, magazine pouches. */
+function slab(material, [sx, sy, sz], pos, rot = [0, 0, 0]) {
+  const m = new THREE.Mesh(_boxGeo, material);
+  m.scale.set(sx, sy, sz);
+  m.position.fromArray(pos);
+  m.rotation.set(...rot);
+  m.castShadow = true;
+  return m;
+}
+
+/** An open sleeve around a limb: a bracer, a greave, a thigh guard. */
+function sleeve(material, [r, len, flat], pos, rot = [0, 0, 0]) {
+  const m = new THREE.Mesh(_tubeGeo, material);
+  m.scale.set(r, len, r * (flat ?? 1));
+  m.position.fromArray(pos);
+  m.rotation.set(...rot);
+  m.castShadow = true;
+  return m;
+}
 
 /* ------------------------------------------------------------------ detach */
 /**
@@ -933,30 +1177,63 @@ function computeSkinWeights(positions, spec, boneOrder) {
   const EPS = 1e-4;
   const wingBone = boneOrder.indexOf(spec.wing.bone);
   const capeBones = spec.cape ? spec.cape.bones.map((n) => boneOrder.indexOf(n)) : null;
+  // The chain's vertical reach: the top of its first link to the end of its last.
+  const capeTop = capeBones ? spec.bones[capeBones[0]].head[1] : 0;
+  const capeSpan = capeBones
+    ? Math.max(1e-3, capeTop - spec.bones[capeBones[capeBones.length - 1]].tail[1])
+    : 1;
+  /** Which two links of the chain a piece of cloth at this height belongs to. */
+  const capeLink = (y) => {
+    const at = Math.max(0, Math.min(capeBones.length - 1,
+      ((capeTop - y) / capeSpan) * (capeBones.length - 1)));
+    const lo = Math.min(capeBones.length - 2, Math.floor(at));
+    const f = Math.max(0, Math.min(1, at - lo));
+    return [capeBones[lo], 1 - f, capeBones[lo + 1], f];
+  };
   const weaponBone = boneOrder.indexOf(WEAPON_BONE);
   const handBone = boneOrder.indexOf('armRlower');
   const wep = spec.weapon ? weaponAxis(spec.weapon) : null;
+  const coreSet = new Set((spec.core?.bones ?? [])
+    .map((b) => spec.bones.findIndex((q) => q.name === b)));
   const cand = [];
 
   for (let i = 0; i < n; i++) {
     const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
 
-    /* The weapon is claimed first, ahead of everything: ahead of the wing claim
-       because on a winged mesh the weapon is outboard and long, which is the
-       entire wing test, and ahead of the nearest-bone search because a spear
-       held point-down passes a knee.
-
-       Along its own length it is rigid — a blade that bends is not a blade — so
-       everything past the first tenth of the axis is the mount at full weight.
-       The tenth nearest the grip is blended back into the hand, because the
-       weapon is welded to the fingers holding it: cut hard there and the ring
-       of triangles across the join tears open the moment the aim moves. */
-    if (weaponBone >= 0 && wep?.test(x, y, z)) {
-      const w = Math.max(0, Math.min(1, wep.along(x, y, z) / WEAPON_BLEND));
-      skinIndex[i * 4] = weaponBone;
-      skinWeight[i * 4] = w;
-      skinIndex[i * 4 + 1] = handBone;
-      skinWeight[i * 4 + 1] = 1 - w;
+    /* Two things get claimed ahead of the nearest-bone search, and both of
+       them can be claimed *partly*.
+    
+       The weapon goes first: ahead of the wing claim because on a winged mesh
+       it is outboard and long, which is the entire wing test, and ahead of the
+       search because a spear held point-down passes a knee. Along its own
+       length it is rigid — a blade that bends is not a blade — so everything
+       past the first tenth of the axis is the mount at full weight, and the
+       tenth nearest the grip ramps down into whatever is holding it.
+    
+       Cloth is claimed for the same reason a wing is: the hem of a cape hangs
+       beside a thigh, and nearest-bone would sew it to the leg and make the
+       cape kick when he walks.
+    
+       Both share the same partial handling, because both draw a line through a
+       mesh that has a limb on the other side of it. A hard line puts one corner
+       of a triangle on a swinging cloak and the other two on a walking leg,
+       which is a spike across the screen; reporting how *sure* the test is and
+       sharing the last centimetres either side of it does not. */
+    let claim = null;
+    let share = 0;
+    const wShare = weaponBone >= 0 && wep
+      ? wep.test(x, y, z) * Math.max(0, Math.min(1, wep.along(x, y, z) / WEAPON_BLEND))
+      : 0;
+    if (wShare > 0) {
+      claim = [weaponBone, 1, weaponBone, 0];
+      share = wShare;
+    } else if (capeBones) {
+      const cloth = Number(spec.cape.test(x, y, z));
+      if (cloth > 0) { claim = capeLink(y); share = cloth; }
+    }
+    if (share >= 0.999) {
+      skinIndex[i * 4] = claim[0]; skinWeight[i * 4] = claim[1];
+      skinIndex[i * 4 + 1] = claim[2]; skinWeight[i * 4 + 1] = claim[3];
       continue;
     }
 
@@ -973,43 +1250,63 @@ function computeSkinWeights(positions, spec, boneOrder) {
 
     /* Cloth is claimed too, and for the same reason as a wing: the hem of a
        cape hangs beside a thigh, so nearest-bone would sew it to the leg and
-       the cape would kick when he walks. Inside the chain the weights are
-       blended between neighbouring links rather than snapped to the closest —
-       a cape that switches bone abruptly creases in a hard line across itself,
-       which is exactly what cloth does not do. */
-    if (capeBones && spec.cape.test(x, y, z)) {
-      let best = 0, bestD = Infinity;
-      const d = capeBones.map((bi, k) => {
-        const bone = spec.bones[bi];
-        const dist = distToSegment(x, y, z, bone.head, bone.tail);
-        if (dist < bestD) { bestD = dist; best = k; }
-        return dist;
-      });
-      let total = 0;
-      const w = d.map((dist) => {
-        const v = 1 / Math.pow(Math.max(dist, EPS), 2.0);
-        total += v; return v;
-      });
-      for (let k = 0; k < Math.min(4, capeBones.length); k++) {
-        skinIndex[i * 4 + k] = capeBones[k];
-        skinWeight[i * 4 + k] = w[k] / total;
-      }
-      void best;
+       the cape would kick when he walks.
+    
+       Inside the chain the weight is blended by *height*, not by distance to
+       the links. Distance is the obvious rule and it is wrong for anything that
+       wraps: Sniper's cloak comes round both hips, so its front panels are half
+       a metre from a chain that runs down his spine and end up with three
+       near-equal weights — three links pulling one vertex three ways, which
+       tears the cloth into spikes the moment he runs. Height is what cloth
+       actually obeys. The top of the cape moves with the shoulders, the hem
+       lags furthest behind, and how far round the body a given piece hangs does
+       not come into it. */
+    const cloth = capeBones ? Number(spec.cape.test(x, y, z)) : 0;
+    if (cloth >= 0.999) {
+      const [a, wa, b, wb] = capeLink(y);
+      skinIndex[i * 4] = a; skinWeight[i * 4] = wa;
+      skinIndex[i * 4 + 1] = b; skinWeight[i * 4 + 1] = wb;
       continue;
     }
 
+    /* Inside the core, only the spine competes.
+     *
+     * Nearest-bone is a good rule everywhere a limb is the nearest thing to its
+     * own surface, and a bad one the moment a limb crosses the body. Sniper
+     * carries his rifle across his chest, so both forearms run over his ribs and
+     * are genuinely closer to them than the spine is — nearest-bone hands the
+     * chest to the arms, and the torso then swells and buckles every time they
+     * move. It is the same story for a hood: the head bone is nearer the top of
+     * the chest than the pelvis is.
+     *
+     * So a spec can fence off its core. Inside it the arms and legs are not
+     * candidates at all and the ribcage belongs to the spine, which is what a
+     * ribcage is. */
+    const coreness = spec.core ? Number(spec.core.test(x, y, z)) : 0;
     cand.length = 0;
     for (let b = 0; b < spec.bones.length; b++) {
       const bone = spec.bones[b];
       const d = distToSegment(x, y, z, bone.head, bone.tail);
-      cand.push([b, 1 / Math.pow(Math.max(d, EPS), POWER)]);
+      /* A limb's pull is turned down inside the core rather than switched off
+         at its surface: switched off, the ribs one millimetre inside the fence
+         belong to the spine and the ribs one millimetre outside belong to an
+         arm, and the triangle spanning the two is a spike. */
+      const fence = coreness > 0 && !coreSet.has(b) ? 1 - coreness : 1;
+      cand.push([b, fence * (1 / Math.pow(Math.max(d, EPS), POWER))]);
     }
     cand.sort((p, q) => q[1] - p[1]);
+    const take = Math.min(share > 0 ? 2 : 4, cand.length);
     let total = 0;
-    for (let k = 0; k < 4; k++) total += cand[k][1];
-    for (let k = 0; k < 4; k++) {
+    for (let k = 0; k < take; k++) total += cand[k][1];
+    for (let k = 0; k < take; k++) {
       skinIndex[i * 4 + k] = cand[k][0];
-      skinWeight[i * 4 + k] = cand[k][1] / total;
+      skinWeight[i * 4 + k] = (cand[k][1] / total) * (1 - share);
+    }
+    if (share > 0) {
+      skinIndex[i * 4 + take] = claim[0];
+      skinWeight[i * 4 + take] = claim[1] * share;
+      skinIndex[i * 4 + take + 1] = claim[2];
+      skinWeight[i * 4 + take + 1] = claim[3] * share;
     }
   }
   return { skinIndex, skinWeight };
@@ -1031,6 +1328,13 @@ function computeSkinWeights(positions, spec, boneOrder) {
 export function swayCape(model, rig, dt, s) {
   const bones = model.userData?.capeBones;
   if (!bones || !bones.length) return;
+  /* How hard this particular cloth swings.
+     A cape hanging off one shoulder can throw itself around; a cloak that wraps
+     both hips cannot, because its front panels are half a metre out from the
+     chain driving them and a rotation that reads as a flick at the back reads
+     as a sail at the front. One number per spec, rather than a second set of
+     constants. */
+  const gain = model.userData.capeSway ?? 1;
 
   const speed = s.speed ?? Math.hypot(s.velocity.x, s.velocity.z);
   const stride = Math.min(1, speed / Math.max(1, s.moveSpeed || 8));
@@ -1047,10 +1351,10 @@ export function swayCape(model, rig, dt, s) {
   const flutter = Math.sin(st.phase) * (0.03 + stride * 0.07);
   bones.forEach((bone, i) => {
     // Each link inherits a little less, so the motion accumulates outward.
-    const f = 0.55 + i * 0.28;
+    const f = (0.55 + i * 0.28) * gain;
     bone.rotation.x = st.lift * f + flutter * f;
     bone.rotation.y = st.swing * f * 0.8;
-    bone.rotation.z = Math.sin(st.phase * 0.7 + i) * 0.05 * (0.4 + stride);
+    bone.rotation.z = Math.sin(st.phase * 0.7 + i) * 0.05 * (0.4 + stride) * gain;
   });
 }
 
@@ -1150,19 +1454,28 @@ function weaponAxis(weapon) {
     along(x, y, z) {
       return ((x - grip.x) * dir.x + (y - grip.y) * dir.y + (z - grip.z) * dir.z) / length;
     },
-    /** Is this point part of the weapon rather than the body? */
+    /**
+     * How much of this point is weapon rather than body — 1 well inside the
+     * capsule, 0 outside it, and a ramp across the last two centimetres.
+     *
+     * Not a yes-or-no, because the capsule's surface runs through the hands
+     * holding the thing. Cut hard there and one corner of a triangle rides the
+     * rifle while the other two ride a forearm, which is a spike drawn across
+     * the screen every time the weapon comes up.
+     */
     test(x, y, z) {
       /* `also` is for the part of a weapon that does not fit around its own
          bore. A scope stands 12 cm proud of the barrel, and a capsule fat
          enough to reach it is fat enough to swallow both forearms and half the
          chest plate on the way past — so it is claimed by a second, tighter
          shape of its own instead. */
-      if (weapon.also?.(x, y, z)) return true;
-      if (radius <= 0) return false;
+      if (weapon.also?.(x, y, z)) return 1;
+      if (radius <= 0) return 0;
       _r.set(x - grip.x, y - grip.y, z - grip.z);
       const t = _r.dot(dir);
-      if (t < from || t > length * 1.15) return false;
-      return Math.sqrt(Math.max(0, _r.lengthSq() - t * t)) < radius;
+      if (t < from || t > length * 1.15) return 0;
+      const perp = Math.sqrt(Math.max(0, _r.lengthSq() - t * t));
+      return Math.max(0, Math.min(1, (radius - perp) / 0.025));
     },
   };
 }
@@ -1311,9 +1624,10 @@ function publishRigContract(g, byName, spec, char, visorMaterial) {
   const mountRest = spec.weapon ? weaponMount.quaternion.clone() : null;
 
   const capeBones = (spec.cape?.bones || []).map((n) => byName.get(n)).filter(Boolean);
+  const capeSway = spec.cape?.sway ?? 1;
 
   g.userData = {
-    capeBones,
+    capeBones, capeSway,
     torso, torsoBaseY: torso.position.y, head: byName.get('head'),
     armL: arm('L'), armR,
     legL: leg('L', -1), legR: leg('R', 1),
@@ -1426,5 +1740,86 @@ export function buildAuthoredModel(char) {
 
   publishRigContract(g, byName, spec, char, materials[2]);
   g.userData.skinnedMesh = mesh;
+  attachArmour(g, byName, spec, char);
   return g;
+}
+
+const _boneInverse = new THREE.Matrix4();
+
+/**
+ * Hangs a spec's `attachments` off the bones they belong to.
+ *
+ * Each piece is built in model space and moved into its bone's frame here, by
+ * the inverse of that bone's *bind* world matrix — which is exactly what the
+ * bone's `matrixWorld` holds at this moment, because the skeleton has just been
+ * bound and nothing has posed it yet. Author in the space you measured in, and
+ * let one matrix do the rest.
+ *
+ * Sibling meshes sharing a material are then merged per bone. Ten plates and
+ * six straps is thirty draw calls a body otherwise, and there can be eight
+ * bodies.
+ */
+function attachArmour(g, byName, spec, char) {
+  if (!spec.attachments) return;
+  for (const piece of spec.attachments(char)) {
+    const bone = byName.get(piece.bone);
+    if (!bone) continue;
+    const holder = new THREE.Group();
+    for (const node of piece.nodes) holder.add(node);
+    holder.applyMatrix4(_boneInverse.copy(bone.matrixWorld).invert());
+    mergeSiblings(holder);
+    bone.add(holder);
+  }
+}
+
+/**
+ * Collapses a group's mesh children into one mesh per material.
+ *
+ * `models.js` has `mergeStaticMeshes` for the same job on procedural bodies, but
+ * it walks a whole tree and protects anything referenced from `userData`, and
+ * this module cannot import it without the two files importing each other. The
+ * job here is one flat group of primitives, which is the easy half of it.
+ */
+function mergeSiblings(group) {
+  const byMaterial = new Map();
+  for (const child of group.children) {
+    if (!child.isMesh) continue;
+    const list = byMaterial.get(child.material) || [];
+    list.push(child);
+    byMaterial.set(child.material, list);
+  }
+  for (const [material, meshes] of byMaterial) {
+    if (meshes.length < 2) continue;
+    const parts = meshes.map((m) => {
+      m.updateMatrix();
+      return m.geometry.clone().applyMatrix4(m.matrix);
+    });
+    const merged = mergeGeometryList(parts);
+    for (const part of parts) part.dispose();
+    if (!merged) continue;
+    for (const m of meshes) group.remove(m);
+    const mesh = new THREE.Mesh(merged, material);
+    mesh.castShadow = true;
+    group.add(mesh);
+  }
+}
+
+/** Concatenates position/normal/uv buffers. Everything here is non-indexed. */
+function mergeGeometryList(list) {
+  const flat = list.map((geo) => (geo.index ? geo.toNonIndexed() : geo));
+  const total = flat.reduce((n, geo) => n + geo.attributes.position.count, 0);
+  const out = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    if (!flat.every((geo) => geo.attributes[name])) continue;
+    const size = flat[0].attributes[name].itemSize;
+    const arr = new Float32Array(total * size);
+    let at = 0;
+    for (const geo of flat) {
+      arr.set(geo.attributes[name].array, at);
+      at += geo.attributes[name].count * size;
+    }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, size));
+  }
+  flat.forEach((geo, i) => { if (geo !== list[i]) geo.dispose(); });
+  return out.attributes.position ? out : null;
 }
