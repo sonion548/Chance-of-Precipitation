@@ -200,6 +200,13 @@ poses.forEach((kind, i) => {
       + ` elbow=${ud.armR.userData.lower.rotation.x.toFixed(3)}`);
   }
   if (qs.get('bones') === '1') paintByBone(model);
+  /* `armour=1` lights up everything that is *not* the authored mesh — the
+     procedural plate a spec bolts on. Placing those by eye against a dark suit
+     is guesswork; against a colour nothing else on the body has, it is not. */
+  if (qs.get('armour') === '1') {
+    const hot = new THREE.MeshStandardMaterial({ color: 0xff2fbf, roughness: 0.4 });
+    model.traverse((n) => { if (n.isMesh && n !== model.userData.skinnedMesh) n.material = hot; });
+  }
   if (qs.get('stretch') === '1') paintByStretch(model);
 
   const cam = new THREE.OrthographicCamera(-half * (W / H), half * (W / H), half, -half, 0.1, 20);

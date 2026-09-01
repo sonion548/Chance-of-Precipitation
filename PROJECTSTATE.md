@@ -76,7 +76,12 @@ across the head and chest.
   measurement in that module was taken with. A spec can also repair a mesh at load time:
   `strip` takes off geometry the character should not have (Unloader's cargo hook), and
   `detach` cuts a piece free of the body it was welded into and puts it back straight
-  (Sniper's scope, which was fused to his shoulder and 15° off the bore).
+  (Sniper's scope, which was fused to his shoulder and 15° off the bore), and `attachments`
+  bolts procedural plate onto a sculpt that arrived without any (Sniper's, who is a man in a
+  cloak with bare arms). Skinning has three rules a wrap-around cloak and a rifle held across
+  the chest forced out: a `core` the limbs may not reach into, cloth weighted down its chain
+  by height rather than by distance, and every claim a confidence with a shared margin rather
+  than a hard line.
 - **Chain's hat** is resolved in `Combat._tickHat` rather than as a projectile, because a
   projectile flies at what it was pointed at and this one *chooses*: on every body it crosses
   it picks the next within its search radius and turns, compounding 5% a bounce. It ignores

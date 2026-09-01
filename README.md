@@ -816,6 +816,49 @@ synchronously from three places and threading promises through all of them to ac
 file load would be the tail wagging the dog. A file that fails to arrive simply leaves that
 character on its procedural body.
 
+**Where a limb may not reach.** Nearest-bone is a good rule everywhere a limb is
+the nearest thing to its own surface and a bad one the moment a limb crosses the body.
+Sniper carries his rifle across his chest, so both forearms run over his ribs and are
+genuinely closer to them than his spine is — nearest-bone hands the chest to the arms, and
+the torso then swells and buckles every time they move. A spec can therefore fence off its
+`core`: an ellipse around the ribcage inside which the arms and legs are simply not
+candidates, so the chest belongs to the spine, which is what a chest is. The fence fades out
+over its last few centimetres rather than switching off at a surface, or the ribs just inside
+it belong to the spine, the ribs just outside belong to an arm, and the triangle spanning the
+two is a spike.
+
+**Cloth hangs, it does not orbit.** A cape is weighted along its chain by *height*, not by
+distance to the links. Distance is the obvious rule and it is wrong for anything that wraps:
+Sniper's cloak comes round both hips, so its front panels are half a metre from a chain that
+runs down his spine and end up with three near-equal weights — three links pulling one vertex
+three ways, which tears the cloth into spikes the moment he runs. Height is what cloth
+actually obeys: the top moves with the shoulders, the hem lags furthest, and how far round the
+body a piece hangs does not come into it. `cape.sway` then scales how hard that cloth throws
+itself about, because a cape off one shoulder can flick and a cloak round both hips cannot.
+
+**Every claim is a confidence, not a yes-or-no.** The cape test, the weapon capsule and the
+core all draw a line through a mesh that has a limb on the other side of it — the hem passes
+within two centimetres of a boot, the capsule's surface runs through the hands holding the
+rifle. A hard line puts one corner of a triangle on a swinging cloak and the other two on a
+walking leg, which is a spike drawn across the screen. So each test reports how *sure* it is
+and the last centimetres either side are shared between both answers. The one place the ramp
+must stay narrow is the weapon: a blade that bends is not a blade, so the capsule blends over
+25 mm and no more.
+
+**Armour a mesh did not come with.** Halcyon's sculpt is an airframe and Unloader's is a suit,
+so painting them is enough. Sniper's is a man in a cloak with bare arms and bare legs — painted,
+he read as somebody in a T-shirt and shorts, because that is what the geometry is. A spec may
+therefore declare `attachments`: procedural plate parented to bones and built by the same kind
+of code every non-authored body in this game is built by. They are authored in **model space**,
+the same space as every other number in the spec, and the builder moves each one into its
+bone's frame by the inverse of that bone's bind world matrix — which is the only way to place a
+knee cap by looking at where the knee is rather than by solving for a bind rotation first. Once
+parented they animate for free: the plate on a shin is a child of the shin. Two things worth
+knowing before placing any: a shell faces **+Y** before rotation, so a plate meant to face
+forward wants a *positive* quarter turn about X (negative buries it in the limb it is meant to
+cover), and `rigview.html?armour=1` paints every attachment magenta, which is the difference
+between placing them and guessing.
+
 **Cutting a mesh apart.** The last repair is the one Sniper needed and it runs the other way
 from `strip`: something the character *should* be carrying that the sculpt has welded to them.
 His scope's eyepiece runs into his shoulder, so scope and shoulder are one surface, and the
@@ -842,9 +885,10 @@ query parameter and paints the triangles it selects — the same signature a spe
 has, so a test can be tried there and pasted straight into `authoredRig.js`.
 `tools/rigview.html` goes the other way and builds the character through the *game's* own code,
 rendering a row of settled poses (idle, run, aim, attack); `bones=1` paints each vertex by the
-bone it is weighted to and `stretch=1` paints every triangle by how far it has been pulled out
-of its bind shape, which is the diagnostic that actually finds a skinning seam. Serve the repo
-and open them: `npm start`, then `/tools/rigview.html?c=unloader`.
+bone it is weighted to, `stretch=1` paints every triangle by how far it has been pulled out of
+its bind shape — the diagnostic that actually finds a skinning seam — and `armour=1` lights up
+the procedural plate a spec bolts on, which is the difference between placing it and guessing.
+Serve the repo and open them: `npm start`, then `/tools/rigview.html?c=unloader`.
 
 **The characters are made of something.** Every part of every body used to be a bare colour
 at a uniform roughness, which is the single reason they read as moulded plastic however good
