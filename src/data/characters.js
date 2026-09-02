@@ -60,6 +60,28 @@ export const CHARACTERS = [
       health: 115, healthPerLevel: 33, regen: 1.0, regenPerLevel: 0.2,
       damage: 12, damagePerLevel: 2.4, moveSpeed: 8.2, armor: 0, crit: 0.01, jumps: 1,
     },
+    passive: {
+      /* The baseline's passive has to be the absence of a condition.
+       *
+       * Every other one in the roster is a *situation*: be nearly dead, be high
+       * up, be moving fast, be close, be standing on your own fire. That is
+       * what makes them characters. Vanguard is the character the others are
+       * tuned against, so handing him a condition to play around would make him
+       * one of them and leave nothing at the centre for the rest to be measured
+       * from — and picking a weak condition would just make him worse.
+       *
+       * So the answer is the one thing that is true of a trooper trained on all
+       * of it and specialised in none: every button comes back sooner. No
+       * window to hit, no threshold to watch, no setup. It applies to the
+       * ultimate as well, because the meter *is* that ability's cooldown, and a
+       * passive about cooldowns that stopped at four of the five buttons would
+       * be a rule with a hole in it.
+       */
+      name: 'Standard Issue', icon: '📋',
+      desc: 'Every ability comes back 20% faster, and the ultimate meter fills 20% quicker. No condition, no window, no setup.',
+      cooldownMult: () => 0.8,
+      ultimateMult: () => 1.2,
+    },
     utility: {
       name: 'Combat Roll', key: 'SHIFT', icon: '⇢', cooldown: 3.0, charges: 1,
       desc: 'Roll a short distance with brief invulnerability.',
@@ -516,6 +538,30 @@ export const CHARACTERS = [
     stats: {
       health: 92, healthPerLevel: 26, regen: 0.9, regenPerLevel: 0.18,
       damage: 16.5, damagePerLevel: 3.3, moveSpeed: 8.4, armor: -4, crit: 0.08, jumps: 1,
+    },
+    passive: {
+      /* The exact inverse of Wraith, and deliberately so.
+       *
+       * Her blades pay four times as much at the hilt as at the tip, which is
+       * what makes a body with 88 health walk *towards* things. His rifle pays
+       * for the opposite, which is what makes a body with 92 health and
+       * negative armour refuse to. Two characters, one axis, opposite ends —
+       * and the range card, the cloak and Break Contact all suddenly read as
+       * one plan instead of three unrelated tools, because every one of them is
+       * about getting back to the distance where the passive lives.
+       *
+       * Nothing inside ten metres: a sniper with a bonus at knife range is not
+       * a sniper. It is worth its full value at sixty, which is about the width
+       * of half an arena and further than anything in the game can cross before
+       * the bolt is worked.
+       */
+      name: 'Standoff', icon: '📏',
+      desc: 'Deal up to 55% more damage the further away the target is — nothing inside 10m, everything by 60m.',
+      damageMult(player, enemy) {
+        if (!enemy) return 1;
+        const d = player.position.distanceTo(enemy.position);
+        return 1 + 0.55 * Math.max(0, Math.min(1, (d - 10) / 50));
+      },
     },
     utility: {
       /* The disengage, and it is not a mobility tool.

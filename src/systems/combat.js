@@ -129,6 +129,10 @@ export class Combat {
    */
   addUltimateCharge(amount) {
     if (!this.hasUltimate || amount <= 0 || this.game.player?.dead) return;
+    // The meter is the ultimate's cooldown, so a passive about cooldowns has
+    // to reach it too — see Vanguard's. Applied here because this is the one
+    // funnel every source of charge already goes through.
+    amount *= this.character?.passive?.ultimateMult?.(this.game.player) ?? 1;
     const before = this.ultimateCharge;
     this.ultimateCharge = Math.min(ULTIMATE.max, this.ultimateCharge + amount);
     if (before < ULTIMATE.max && this.ultimateCharge >= ULTIMATE.max && !this._ultimateAnnounced) {

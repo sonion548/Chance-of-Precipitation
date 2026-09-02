@@ -124,10 +124,19 @@ across the head and chest.
   less damage taken, no cooldown, and no attacking behind it. Holding it is the price;
   charging a cooldown as well would be billing twice for the same thing.
 - **Passives** — one per character, and hooks rather than numbers. `damageMult(player, enemy)`
-  folds in at the end of `damageEnemy` (Desperation, Executioner, Momentum), `moveMult(player)`
-  is read every frame by the movement code (Altitude), `onDamaged` fires after a hit lands
-  (Overshield), `onHatHit` rides an ability (Chain Reaction). Each is read at the moment it
-  applies, which is what lets one depend on things a stat block cannot see.
+  folds in at the end of `damageEnemy` (Desperation, Executioner, Momentum, **Standoff**),
+  `moveMult(player)` is read every frame by the movement code (Altitude), `cooldownMult` folds
+  into `stats.cooldownMult` and `ultimateMult` into `addUltimateCharge` (**Standard Issue**),
+  `onDamaged` fires after a hit lands (Overshield), `onHatHit` rides an ability (Chain
+  Reaction). Each is read at the moment it applies, which is what lets one depend on things a
+  stat block cannot see.
+- **The two ends of that design are Sniper's and Vanguard's.** **Standoff** is the exact
+  inverse of Wraith's blades — hers pay most at the hilt, his pays most at 60m — which puts
+  two characters on one axis at opposite ends and turns the range card, the cloak and Break
+  Contact into one plan. **Standard Issue** is a passive with deliberately *no* condition:
+  every other one is a situation to play around, and the character the whole roster is tuned
+  against cannot have one without stopping being the centre. It is 20% off every cooldown,
+  the ultimate meter included, because the meter is that ability's cooldown.
 - **Meridian Longrifle** is the precision option and the only weapon that takes the dice
   away. `scope` on the weapon collapses the camera onto the eye at 15° FOV, hides the body
   and draws a lens overlay; every enemy carries a red seam box (`Enemy._buildWeakPoint`) that

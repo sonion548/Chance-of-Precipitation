@@ -277,14 +277,14 @@ how you shoot, in a single choice.
 
 | Character | Identity | Passive | M1 | Q | Shift | R | F |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Vanguard | Balanced baseline — 115 HP, no sharp edges | — | Service Round | Focused Shot | Combat Roll | Overclock | Fire Mission |
+| Vanguard | Balanced baseline — 115 HP, no sharp edges | **Standard Issue** | Service Round | Focused Shot | Combat Roll | Overclock | Fire Mission |
 | Unloader | Heavy exosuit, 165 HP, slow but armoured | **Momentum** | **Punch** | **Down Slam** | Grapple Gun | Overcharged Fist | Terminal Velocity |
 | Wraith | Glass cannon — 88 HP, negative armour, double jump | **Executioner** | **Void Slashes** | **Phase** | Blink (in the air too) | Umbral Volley | Event Horizon |
 | Bulwark | 200 HP and 16 armour, walks slowly at the problem | **Overshield** | **Shotgun** | **Guard** (held) | Shield Charge | Bastion | Last Stand |
 | Halcyon | 84 HP, −10 armour, softer damage — and it **flies** | **Altitude** | **Beam** | **Missile Cluster** | Thruster Flight | Bomb Cluster | Ordnance Override |
 | Dasher | 76 HP, −8 armour, the fastest and hardest-hitting frame | **Desperation** | **Lance** (3-hit) | **Parry** | Lance Dash | Marking Spear (×2) | Skewer |
 | Chain | 104 HP wanderer in a straw hat. Owns one thing and throws it | **Chain Reaction** | **Chain Hat** | **Chain Pull** | Wanderer's Mark | Hat Toss | Unbroken Chain |
-| Sniper | 92 HP overwatch: one round, one body, then be gone | — | Bolt Round | Sidearm Revolver | Break Contact | Range Card | Kill Order |
+| Sniper | 92 HP overwatch: one round, one body, then be gone | **Standoff** | Bolt Round | Sidearm Revolver | Break Contact | Range Card | Kill Order |
 | **Diver** | 108 HP drop-suit that **never has to land** | **Firebomb** | **Scatter Shot** | **Fire Patch** (×3) | **Speed Dash** (×2) | **Dive Slam** | **Inferno** |
 
 **Passives** are the newest slot and the one that does the most work per line. Each is a
@@ -293,6 +293,8 @@ something about the *moment* rather than about the build:
 
 | Passive | What it does |
 | --- | --- |
+| Vanguard · Standard Issue | Every ability comes back 20% faster and the ultimate meter fills 20% quicker. The baseline's passive is the *absence* of a condition — see below |
+| Sniper · Standoff | Up to +55% damage with distance to the target: nothing inside 10m, everything by 60m |
 | Dasher · Desperation | Up to +85% damage as your health falls. 76 HP and −8 armour already; the passive doubles down rather than softening it |
 | Halcyon · Altitude | Up to +55% movement speed with height, full at 30m above the ground under you |
 | Bulwark · Overshield | A hit worth 12% of your health grants a barrier worth 25% of it, once every 20s. Flat reduction is worth least against exactly the hit that kills you |
@@ -300,6 +302,25 @@ something about the *moment* rather than about the build:
 | Unloader · Momentum | Up to +80% damage with speed, measured against the 30 u/s a grapple leaves you carrying |
 | Chain · Chain Reaction | Every body the thrown hat crosses takes 0.6s off all your cooldowns |
 | Diver · Firebomb | A slam landing on his own fire patches detonates them, for far more than the slam alone |
+
+Two of those are worth a paragraph each, because they are the two ends of the design.
+
+**Standoff is the exact inverse of Wraith's blades**, and deliberately: hers pay four times as
+much at the hilt as at the tip, which is what makes 88 health walk *towards* things; his pays
+for the opposite, which is what makes 92 health and negative armour refuse to. Two characters
+on one axis at opposite ends — and it is what turns the range card, the cloak and Break Contact
+from three unrelated tools into one plan, because every one of them is about getting back to
+the distance where the passive lives.
+
+**Standard Issue is a passive with no condition at all**, and that is the point rather than a
+shortcut. Every other one in the roster is a *situation*: be nearly dead, be high up, be moving
+fast, be close, be standing on your own fire. That is what makes them characters. Vanguard is
+the character the others are tuned against, so giving him a situation to play around would make
+him one of them and leave nothing at the centre for the rest to be measured from. What is left
+is the one thing true of a trooper trained on all of it and specialised in none: every button
+comes back sooner. It reaches the ultimate too, because the meter *is* that ability's cooldown,
+and a rule about cooldowns that stopped at four of the five buttons would be a rule with a hole
+in it.
 
 **Ultimates** are the one ability the game gives you for having been in a fight rather than
 for having waited. There is no cooldown: the meter beside the ability bar fills from **damage
