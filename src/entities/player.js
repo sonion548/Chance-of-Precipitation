@@ -228,7 +228,14 @@ export class Player {
       crit: rolledCrit,
       critDamage: PLAYER.baseCritDamage + acc.addCritDamage + convertedCrit,
       armor: base.armor + acc.addArmor,
-      cooldownMult: this.buffs.has('overclock') ? 0 : acc.multCooldown,
+      /* A passive may shorten every cooldown the character has. Folded in here
+         rather than at the four call sites that read it, so the utility, the
+         special, the secondary and anything written later all get it without
+         having to remember to ask. Overclock still wins outright: zero times
+         anything is zero. */
+      cooldownMult: this.buffs.has('overclock')
+        ? 0
+        : acc.multCooldown * (this.char.passive?.cooldownMult?.(this) ?? 1),
       dashCooldownMult: acc.multDashCooldown,
       maxDashCharges: 1 + acc.addDashCharges,
       maxJumps: base.jumps + acc.addJumps,
