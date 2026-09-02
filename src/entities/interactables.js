@@ -314,13 +314,20 @@ export class Chest {
     this.game.ui.toast(`Duplicating ${chosen.item.name}`, RARITY[chosen.item.rarity].color);
   }
 
+  /**
+   * The roll, and then the drop.
+   *
+   * The item is decided here and handed to the game to present. Solo, with the
+   * case-opening setting on, that means a reel; otherwise it lands on the floor
+   * immediately. Either way this method has already finished choosing, so what
+   * the player ends up with cannot depend on which of those happened.
+   */
   _grantItem() {
     const item = rollItem(this.game.rng, this.table, this.game.player.stats.luck, this.game.profile.data);
     if (!item) return;
     const spawn = this.position.clone();
     spawn.y += this.isShrine ? 2.6 : 1.4;
-    this.game.spawnItemPickup(item, spawn);
-    this.game.fx.explosion(spawn, 3, RARITY[item.rarity].hex, 0.7);
+    this.game.revealItem(item, spawn, this.label);
   }
 
   update(dt, time) {

@@ -2,3 +2,6 @@ node_modules/
 package-lock.json
 *.log
 .DS_Store
+# Feedback reports, written next to the game by tools/serve.js. Anchored to the
+# repository root: an unanchored "data/" would also match src/data/.
+/data/

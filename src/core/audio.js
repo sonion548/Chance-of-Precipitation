@@ -452,6 +452,47 @@ export class Audio {
     this._release(v, t + 0.5);
   }
 
+  /**
+   * One tile of the case reel crossing the marker.
+   *
+   * Deliberately tiny and unpitched. The reel plays dozens of these a second at
+   * the start and a handful at the end, so the *rate* is what carries the sense
+   * of slowing down — anything with a tail would smear into a drone and lose it.
+   * The throttle is below the fastest tick interval on purpose: dropping ticks
+   * would make the reel sound like it was already slowing when it was not.
+   */
+  reelTick() {
+    const v = this._voice('reelTick', { bus: 'ui', gain: 0.3, throttle: 0.012, send: 0 });
+    if (!v) return;
+    const { node, t } = v;
+    this._noiseBurst(node, { t0: t, decay: 0.022, peak: 0.5, type: 'bandpass', freq: 3200, q: 6 });
+    this._release(v, t + 0.06);
+  }
+
+  /**
+   * The reel stopping on something. Rarity is the whole point of the sound, so
+   * it drives both the chord and how long the thing rings for.
+   */
+  caseLand(rarityOrder = 0) {
+    const v = this._voice('caseLand', { gain: 0.6, throttle: 0.2, send: 0.3 });
+    if (!v) return;
+    const { node, t } = v;
+    // The reel hits its stop first — a physical clunk, the same for everything.
+    this._noiseBurst(node, { t0: t, decay: 0.12, peak: 0.55, type: 'lowpass', freq: 1400, sweepTo: 300 });
+    this._osc(node, { type: 'sine', freq: 150, to: 84, t0: t, decay: 0.26, peak: 0.5 });
+    // Then the verdict. A Common gets a bare fifth; a Legendary gets all of it.
+    const chords = [[0, 7], [0, 4, 7], [0, 4, 7, 11], [0, 4, 7, 11, 14], [0, 5, 9, 12, 16, 19]];
+    const chord = chords[Math.max(0, Math.min(chords.length - 1, rarityOrder))];
+    const root = 261.63 * (1 + rarityOrder * 0.06);
+    chord.forEach((step, i) => {
+      this._osc(node, {
+        type: 'triangle', freq: noteHz(root, step), t0: t + 0.1 + i * 0.06,
+        decay: 0.5 + rarityOrder * 0.14, peak: 0.26,
+      });
+    });
+    this._release(v, t + 1.1 + rarityOrder * 0.2);
+  }
+
   gold(position) {
     const v = this._voice('gold', { position, gain: 0.22, throttle: 0.05, send: 0.1 });
     if (!v) return;

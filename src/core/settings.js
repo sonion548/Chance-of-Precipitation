@@ -60,6 +60,10 @@ function freshSettings() {
     invertY: false,
     cameraShake: 1.0,
     damageNumbers: true,
+    /* The case-opening reveal. Off by default, and solo only — see ui/caseRoll.js
+       for why it cannot be a co-op setting: it stops the world, and the world is
+       not yours to stop when other people are standing in it. */
+    caseOpening: false,
     // Camera yaw is independent of the body; this is how hard the body snaps
     // back to the camera when you start shooting.
     turnSnap: 1.0,

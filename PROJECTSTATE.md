@@ -260,12 +260,14 @@ src/
   net/                session.js (transport), coop.js (replication), remotePlayer.js
   systems/            combat.js, inventory.js, director.js, loot.js, physics.js, fx.js
   meta/               save.js (localStorage), progression.js (Echo maths)
-  ui/                 hud.js, menus.js, chat.js
-tools/                serve.js (+ co-op relay), relay.js, check.js, coop-check.js
+  ui/                 hud.js, menus.js, chat.js, caseRoll.js
+tools/                serve.js (+ co-op relay + feedback endpoint), relay.js,
+                      feedback.js, check.js, coop-check.js
 graph/                generated knowledge graph — nothing at runtime reads it
 .vscode/              launch + task config
 play.cmd / play.sh    start the server without npm, finding Node wherever it lives
 MULTIPLAYER.md        co-op setup, incl. tunnels for machines without admin rights
+FEEDBACK.md           where player bug reports and ideas go, and how to be sent them
 ```
 
 The repository is the game: source at the root, no build step, no bundler. The one
@@ -304,6 +306,13 @@ it is, how to regenerate it, and where it disagrees with the source).
   and capped at 28; anything inaudible is never built. The score is a generative sequencer
   scheduled against the audio clock with a 0.25s lookahead — it skips the gap after a stall
   rather than firing every missed note at once.
+- **A reveal presents a roll; it never makes one.** `Chest._grantItem` rolls through
+  `systems/loot.js` and hands the answer to `game.revealItem`, which either drops it or plays
+  the case-opening reel around it (`ui/caseRoll.js`) and drops it after. The separation is the
+  point: the animation is skippable, refusable and switchable-off precisely because nothing
+  downstream of the roll can reach back into it. The reel freezes the world via
+  `game.freezeForReveal`, which is why it is solo-only — `CaseRoll.enabled` re-checks
+  `coop.active` at every drop rather than trusting the setting alone.
 - **Stage prices are frozen at stage build.** `game.stageDifficulty` is sampled once in
   `_buildStage` and is what chests and eggs are priced from; `Chest.price` / `Egg.price` then
   apply the local player's own discount on top. `cost` is the replicated stage price, `price`
@@ -544,6 +553,17 @@ brood out), all 8 weapons (damage benchmark), all 6 characters (ability displace
 vs spec), collision correctness vs brute force, a full menu→run→boss→descend→summary pass, a
 two-peer co-op pass (lobby, stage sync, damage prediction, item arbitration, revive, stage
 advance), a 10-minute leak soak, and shader-program stability.
+
+The **case-opening reveal** and the **feedback panel** were verified by driving the real page
+with Playwright: the reel measured against its marker across repeated rolls (the landing is
+jittered by up to a third of a tile, so "on the marker" is a range, not a point), skip and take
+by key and by click, the item that actually spawns matching the one the reel stopped on, and
+the run coming back unpaused with input re-enabled afterwards. That is where the reel's two
+real bugs came from — a stride that drifted because a flex tile with `min-width: auto` grows
+past its basis for a long item name, and a spin that stretched on a slow machine because it
+summed clamped frame deltas instead of reading the clock. The feedback endpoint was exercised
+with `curl`: validation, the rate limiter, the size cap, escaping in the admin page, the
+whitelist dropping unknown diagnostic keys, and a mock webhook receiving the record.
 
 **Three lessons from this project:** test harnesses lie — a "grapple does nothing" result was
 the harness holding a key for two frames and firing twice, and a scary damage number was two

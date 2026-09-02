@@ -27,6 +27,7 @@ import { rollItem } from './systems/loot.js';
 import { HUD } from './ui/hud.js';
 import { Menus } from './ui/menus.js';
 import { Chat } from './ui/chat.js';
+import { CaseRoll } from './ui/caseRoll.js';
 
 import { profile } from './meta/save.js';
 import { computeEchoes, runModeById } from './meta/progression.js';
@@ -53,6 +54,7 @@ export class Game {
     this.coop = new Coop(this);
     this.chat = new Chat(this);
     this.menus = new Menus(this);
+    this.caseRoll = new CaseRoll(this);
 
     this.state = 'menu';                // menu | running | paused | dead
     this.paused = true;
@@ -171,6 +173,9 @@ export class Game {
   }
 
   _teardownRun() {
+    // A reveal holding the world still has to let go before the world is
+    // replaced, and the item it was about to drop belongs to a run that is over.
+    this.caseRoll?.cancel();
     this.enemies?.clear();
     this.projectiles?.clear();
     this.pickups?.clear();
@@ -1038,6 +1043,23 @@ export class Game {
   }
 
   // ==================================================================== spawn helpers
+  /**
+   * Drops a rolled item into the world, optionally with the case-opening reveal
+   * in front of it.
+   *
+   * The roll has already happened by the time this is called — that separation
+   * is the point. The reveal is presentation, so it can be switched off, skipped
+   * mid-spin, or refused outright (co-op, a run ending) without any of that
+   * touching what the chest actually produced.
+   */
+  revealItem(item, position, label = 'Chest') {
+    const drop = () => {
+      this.spawnItemPickup(item, position);
+      this.fx.explosion(position, 3, RARITY[item.rarity].hex, 0.7);
+    };
+    if (!this.caseRoll?.play(item, drop, label)) drop();
+  }
+
   spawnItemPickup(item, position) {
     const entry = this.pickups.spawnItem(item, position);
     if (entry && this.coop?.isHost) this.coop.onItemDrop(entry, item.id);
@@ -1195,6 +1217,38 @@ export class Game {
     this.menus.show('pause');
   }
 
+  /**
+   * Stops the world for a modal reveal, and says whether it managed to.
+   *
+   * This is `pause()` without the pause screen and without the co-op exception:
+   * a reveal is only ever offered solo (see ui/caseRoll.js), so freezing the
+   * simulation outright is safe here in a way it never is in a lobby. The state
+   * flips *before* the pointer lock is released, because releasing it is what
+   * the unlock handler reads as "the player hit Escape" — and that would open
+   * the pause menu underneath the overlay.
+   */
+  freezeForReveal() {
+    if (this.state !== 'running' || this.coopPaused) return false;
+    this.state = 'paused';
+    this.paused = true;
+    this.input.enabled = false;
+    this.input.keys.clear();
+    this.input.exitLock();
+    return true;
+  }
+
+  /** Hands the world back after a reveal. */
+  unfreezeFromReveal() {
+    if (this.state !== 'paused') return;
+    this.state = 'running';
+    this.paused = false;
+    this.input.enabled = true;
+    // Without this the first frame back would be handed however long the player
+    // spent looking at the item, and dt is clamped but not to nothing.
+    this._lastFrame = performance.now();
+    this.input.requestLock();
+  }
+
   resume() {
     if (this.coopPaused) {
       this.coopPaused = false;
@@ -1218,6 +1272,9 @@ export class Game {
       if (e.code === 'Escape') e.target.blur();
       return;
     }
+    // A reveal is modal: it takes every key, including Escape. Letting Escape
+    // through would resume the run out from under an overlay still on screen.
+    if (this.caseRoll?.active) { this.caseRoll.onKey(e); return; }
     // While the chat box is open every key belongs to it. Its own handler stops
     // propagation, so anything arriving here is from outside the field.
     if (this.chat?.open) {
@@ -1234,6 +1291,12 @@ export class Game {
       // steps back one screen rather than resuming a run you are still tuning.
       if (this.menus.current === 'settings') {
         this.menus.show(this.menus.settingsReturn === 'pause' ? 'pause' : 'menu');
+        return;
+      }
+      // Same rule for the feedback panel: it is a layer over the menu or over a
+      // paused run, and Esc steps back to whichever one opened it.
+      if (this.menus.current === 'feedback') {
+        this.menus.show(this.menus.feedbackReturn === 'pause' ? 'pause' : 'menu');
         return;
       }
       if (this.coopPaused) this.resume();
