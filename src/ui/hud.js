@@ -34,6 +34,11 @@ export class HUD {
       brood: $('brood'),
       party: $('party'),
       abilities: $('abilities'),
+      equip: $('equip-slot'),
+      equipArt: document.querySelector('#equip-slot .eq-art'),
+      equipKey: document.querySelector('#equip-slot .eq-key'),
+      equipMask: document.querySelector('#equip-slot .eq-mask'),
+      equipNum: document.querySelector('#equip-slot .eq-num'),
       inventory: $('inventory'),
       buffs: $('buffs'),
       prompt: $('prompt'),
@@ -175,6 +180,7 @@ export class HUD {
     this._updateScope();
     this._updateReload();
     this._updateAbilities(p);
+    this._updateEquipment();
     this._updateParty();
     this._updateBrood(p);
     this._updateBuffs(p);
@@ -336,6 +342,39 @@ export class HUD {
   }
 
   /**
+   * The equipment slot.
+   *
+   * Hidden entirely until you are carrying something, because an empty box on
+   * the bar reads as a thing you have lost rather than a thing you have not
+   * found. `armed` is the recall beacon's second state — a mark is down and the
+   * press means "come back" rather than "go off" — and it is the only reason
+   * the slot needs a state beyond ready and not.
+   */
+  _updateEquipment() {
+    const inv = this.game.inventory;
+    const eq = inv?.equipment;
+    const el = this.el.equip;
+    if (!el) return;
+    if (!eq) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    // Equipment draws its own icon from the same recipes items use, so a piece
+    // of equipment looks the same on the bar as it does anywhere else.
+    if (this._equipArtId !== eq.id) {
+      this._equipArtId = eq.id;
+      this.el.equipArt.src = itemIconDataURL(eq, 72);
+    }
+    const code = settings.bindingsFor('equipment')[0];
+    this.el.equipKey.textContent = code ? codeShort(code) : 'X';
+    const total = inv.equipCooldown();
+    const left = inv.equipTimer;
+    this.el.equipMask.style.height = `${clamp01(left / Math.max(0.01, total)) * 100}%`;
+    this.el.equipNum.textContent = left > 0.25 ? left.toFixed(1) : '';
+    el.classList.toggle('ready', left <= 0);
+    el.classList.toggle('armed', !!inv.equipState?.beacon);
+    el.title = `${eq.name} — ${eq.desc}`;
+  }
+
+  /**
    * Boss health across the top of the screen.
    *
    * The lag bar behind the fill drains slowly, so a big hit reads as a visible
@@ -486,7 +525,7 @@ export class HUD {
 
     this.el.inventory.innerHTML = inv.entries().map(({ item, stacks }, i) => {
       const r = RARITY[item.rarity];
-      const desc = itemDescription(item, stacks, this.game.run).replace(/</g, '&lt;');
+      const desc = itemDescription(item, stacks, this.game.run, this.game.player).replace(/</g, '&lt;');
       return `<div class="inv-item" style="border-color:${r.color}66">
         <img class="inv-art" src="${itemIconDataURL(item, 72)}" alt="" />
         <span class="cnt" style="color:${r.color}">${stacks}</span>
@@ -647,7 +686,7 @@ export class HUD {
     el.pcName.style.color = r.color;
     el.pcRarity.textContent = `${r.name}${item.tag ? ` · ${item.tag}` : ''}`;
     el.pcRarity.style.color = r.color;
-    el.pcDesc.textContent = itemDescription(item, stacks, this.game.run);
+    el.pcDesc.textContent = itemDescription(item, stacks, this.game.run, this.game.player);
 
     if (stacks > 1) {
       el.pcStack.classList.remove('hidden');

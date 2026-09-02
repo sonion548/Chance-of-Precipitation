@@ -188,9 +188,10 @@ export class Game {
       this.player.model.parent?.remove(this.player.model);
       this.player = null;
     }
-    // `startRun` builds a fresh Combat, so anything the old one put in the
-    // scene has to come out here — nothing else holds a reference to it.
+    // `startRun` builds a fresh Combat and Inventory, so anything the old ones
+    // put in the scene has to come out here — nothing else holds a reference.
     this.combat?.clearWorldObjects();
+    this.inventory?.clearWorldObjects();
     this.arena?.dispose();
     this.arena = null;
     this.coop?._teardownRemotes();
@@ -220,6 +221,7 @@ export class Game {
        positions in an arena that is about to stop existing, so carrying them
        across a descent leaves them hanging in the air over the next one. */
     this.combat?.clearWorldObjects();
+    this.inventory?.clearWorldObjects();
     this.stageSeed = seed;
     this.stagePending = !!layout?.pending;
     this.finalStage = final;
@@ -293,12 +295,15 @@ export class Game {
 
     /* Devices.
      *
-     * Two or three a stage, drawn without replacement, so you get a couple of
-     * the four rather than one of each every time — which is what makes finding
-     * a Blood Altar worth crossing the arena for. They are placed after the
+     * Three or four a stage, drawn without replacement, so you get a handful of
+     * the five rather than one of each every time — which is what makes finding
+     * a Blood Altar worth crossing the arena for. The count went up with the
+     * fifth: an equipment pod is the only source of the only slot you cannot
+     * fill any other way, so a stage that never rolled one would be a stage
+     * where a whole system quietly did not exist. They are placed after the
      * chests and before the shrines so they land on the good open points. */
-    const deviceKinds = ['altar', 'cache', 'duplicator', 'forge'];
-    const deviceCount = Math.min(deviceKinds.length, 2 + (this.rng.next() < 0.55 ? 1 : 0)
+    const deviceKinds = ['altar', 'cache', 'duplicator', 'forge', 'equipment'];
+    const deviceCount = Math.min(deviceKinds.length, 3 + (this.rng.next() < 0.55 ? 1 : 0)
       + Math.round(extra * 0.4));
     for (let d = 0; d < deviceCount && i < points.length; d++, i++) {
       const pick = this.rng.int(0, deviceKinds.length - 1);
@@ -1309,6 +1314,9 @@ export class Game {
       // and spawns arrive in the host's snapshot instead.
       if (!this.coopClient) this.director.update(dt, player, arena);
       this.inventory.update(dt);
+      // The equipment key. Read here rather than inside Combat because
+      // equipment is not the character's — it is a thing you found.
+      if (!this.paused && this.input.actionPressed('equipment')) this.inventory.useEquipment();
     }
 
     player.update(dt, this.input, arena);

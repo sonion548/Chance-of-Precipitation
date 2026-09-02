@@ -121,6 +121,7 @@ export const ECONOMY = {
   largeChestMult: 3.1,
   legendaryChestMult: 7.5,
   duplicatorMult: 3.6,
+  equipmentPodMult: 2.2,
   shrineCostGrowth: 1.35,
   ruinShrineMult: 2.2,       // the Shrine of Ruin is priced against a Large chest
   goldOrbLifetime: 26,

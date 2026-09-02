@@ -15,6 +15,9 @@ import { hyperbolic, rollProc } from '../core/mathx.js';
 
 const pct = (v) => `${Math.round(v * 1000) / 10}%`;
 
+/** How much of the ultimate meter Crescendo Core hands back. See the item. */
+const CRESCENDO_REFUND = (s) => Math.min(0.45, hyperbolic(0.18, s));
+
 export const ITEMS = [
   /* ==========================================================
      COMMON
@@ -193,6 +196,88 @@ export const ITEMS = [
         return ctx.player.grounded ? ev.damage : ev.damage * (1 + 0.18 * s);
       },
     },
+  },
+  /* ---- niche commons: each one asks you to do something specific ---- */
+  {
+    id: 'leaden_yoke', name: 'Leaden Yoke', rarity: 'common', icon: '⚖️', tag: 'Offense',
+    unlocked: true,
+    /* The first item in the game that is worse in one direction on purpose.
+       A pool where every pickup is strictly good is a pool with no decisions in
+       it; this one is a real question for a character who lives on movement and
+       a free 16% for one who does not. */
+    desc: (s) => `Deal ${pct(0.16 * s)} more damage and move ${pct(0.07 * s)} slower.`,
+    stackText: '+16% damage, -7% movement per stack',
+    stats: (s, a) => { a.multDamage *= 1 + 0.16 * s; a.multMoveSpeed *= 1 - Math.min(0.5, 0.07 * s); },
+  },
+  {
+    id: 'chalk_line', name: 'Chalk Line', rarity: 'common', icon: '📐', tag: 'Offense',
+    unlocked: true,
+    desc: (s) => `Standing still for 1s sharpens your aim: ${pct(0.22 * s)} crit chance until you move.`,
+    stackText: '+22% held crit chance per stack',
+    stats: (s, a, run, player) => {
+      // Read live rather than through a buff, so it goes the instant you move.
+      if (player && (player._chalkHold ?? 0) >= 1) a.addCrit += 0.22 * s;
+    },
+    hooks: {
+      onTick(ctx, s, ev) {
+        const p = ctx.player;
+        const still = p.speedXZ < 0.8 && p.grounded;
+        const before = (p._chalkHold ?? 0) >= 1;
+        p._chalkHold = still ? (p._chalkHold ?? 0) + ev.dt : 0;
+        if (before !== ((p._chalkHold ?? 0) >= 1)) p.markStatsDirty();
+      },
+    },
+  },
+  {
+    id: 'dull_whetstone', name: 'Dull Whetstone', rarity: 'common', icon: '🪨', tag: 'Offense',
+    unlocked: true,
+    desc: (s) => `The first hit on any enemy deals ${pct(0.55 * s)} bonus damage.`,
+    stackText: '+55% opening damage per stack',
+    hooks: {
+      modifyDamage(ctx, s, ev) {
+        if (ev.enemy._whetted) return ev.damage;
+        ev.enemy._whetted = true;
+        ctx.fx.glow(ev.enemy.center, { color: 0xc7d0e0, size: 0.8, life: 0.25, grow: 1.4 });
+        return ev.damage * (1 + 0.55 * s);
+      },
+    },
+  },
+  {
+    id: 'coin_poultice', name: 'Coin Poultice', rarity: 'common', icon: '🩸', tag: 'Healing',
+    unlocked: true,
+    /* Healing tied to the one thing you are already doing constantly and never
+       thinking about. It is small per pickup and enormous over a stage, which
+       is the shape a Common should have — and it is the only item in the pool
+       that cares about gold for a reason other than spending it. */
+    desc: (s) => `Picking up gold heals you for ${(1.5 * s).toFixed(1)} health.`,
+    stackText: '+1.5 healing per gold pickup per stack',
+    hooks: {
+      onGold(ctx, s) { ctx.heal(1.5 * s, null, true); },
+    },
+  },
+  {
+    id: 'tin_ear', name: 'Tin Ear', rarity: 'common', icon: '🔔', tag: 'Utility',
+    unlocked: true,
+    desc: (s) => `Enemies within 7m are slowed by ${pct(Math.min(0.6, 0.13 * s))}.`,
+    stackText: '+13% slow per stack',
+    hooks: {
+      onTick(ctx, s, ev) {
+        ctx.timer('tin_ear', ev.dt, 0.4, () => {
+          for (const e of ctx.nearestEnemies(ctx.player.position, 7, 20)) {
+            e.applyStatus('chill', 0.6, { slow: Math.min(0.6, 0.13 * s) });
+          }
+        });
+      },
+    },
+  },
+  {
+    id: 'cracked_lens', name: 'Cracked Lens', rarity: 'common', icon: '🕶️', tag: 'Offense',
+    unlocked: true,
+    // The inverse of Glass Shard, and the two are meant to fight: more dice,
+    // smaller payout. Which one you want depends entirely on what else you hold.
+    desc: (s) => `Gain ${pct(0.13 * s)} critical strike chance, but critical hits deal ${pct(0.10 * s)} less damage.`,
+    stackText: '+13% crit chance, -10% crit damage per stack',
+    stats: (s, a) => { a.addCrit += 0.13 * s; a.addCritDamage -= Math.min(0.9, 0.10 * s); },
   },
   /* ==========================================================
      UNCOMMON
@@ -411,6 +496,97 @@ export const ITEMS = [
         ctx.run.marrow = 0;
         ctx.heal(ctx.player.stats.maxHealth * 0.06 * s, 'Marrow Tithe');
         ctx.grantBarrier(ctx.player.stats.maxHealth * 0.04 * s);
+      },
+    },
+  },
+  /* ---- niche uncommons ---- */
+  {
+    id: 'relay_coil', name: 'Relay Coil', rarity: 'uncommon', icon: '🔁', tag: 'Mobility',
+    unlocked: true,
+    /* The first of the charge items, and the template for all of them.
+     *
+     * A charge is not a shorter cooldown — it is the ability going off *twice
+     * before the first one is back*, which is a different and much larger
+     * purchase. So every charge item in the pool pays for it in the same
+     * currency: each use takes longer. Net across a long fight it is roughly
+     * neutral; net across the four seconds that decide whether you live, it is
+     * enormous. That is exactly the trade it should be. */
+    desc: (s) => `+${s} charge${s > 1 ? 's' : ''} of your utility ability, but each one takes ${pct(Math.pow(1.22, s) - 1)} longer to come back.`,
+    stackText: '+1 charge, +22% utility cooldown per stack',
+    stats: (s, a) => { a.addDashCharges += s; a.multDashCooldown *= Math.pow(1.22, s); },
+  },
+  {
+    id: 'tidebound_censer', name: 'Tidebound Censer', rarity: 'uncommon', icon: '🏺', tag: 'Healing',
+    unlocked: true,
+    desc: (s) => `Healing that would overflow your health bar becomes barrier instead, up to ${pct(0.25 * s)} of your maximum.`,
+    stackText: '+25% barrier cap per stack',
+    stats: (s, a) => { a.overhealToBarrier = true; a.barrierCap += 0.25 * s; },
+  },
+  {
+    id: 'thresher_bearing', name: 'Thresher Bearing', rarity: 'uncommon', icon: '⚙️', tag: 'Offense',
+    unlocked: true,
+    /* Counts per body rather than globally, so it rewards *staying on* a target
+       — which is the one thing a crowd-clearing build never does and a boss
+       build always does. Two builds, one item, opposite value. */
+    desc: (s) => `Every 8th hit on the same enemy detonates for ${pct(3.2 * s)} damage.`,
+    stackText: '+320% detonation per stack',
+    hooks: {
+      onHit(ctx, s, ev) {
+        const n = (ev.enemy._thresher ?? 0) + 1;
+        ev.enemy._thresher = n % 8;
+        if (n % 8 !== 0) return;
+        ctx.damageEnemy(ev.enemy, ctx.player.stats.damage * 3.2 * s, { proc: 0, source: 'Thresher Bearing' });
+        ctx.fx.explosion(ev.enemy.center, 2.4, 0xffcf5c, 0.7);
+      },
+    },
+  },
+  {
+    id: 'sixth_sense', name: 'Sixth Sense', rarity: 'uncommon', icon: '👁️', tag: 'Defense',
+    unlocked: true,
+    desc: (s) => `Go ${Math.max(4, 10 - 2 * (s - 1)).toFixed(0)}s without being hit and the next hit you take is ignored entirely.`,
+    stackText: '-2s to arm per stack',
+    hooks: {
+      modifyIncoming(ctx, s, ev) {
+        const arm = Math.max(4, 10 - 2 * (s - 1));
+        if (ctx.player.timeSinceDamage < arm) return ev.amount;
+        /* Reset the clock by hand.
+         *
+         * `takeDamage` returns the moment the number reaches zero, which is
+         * *before* it sets `timeSinceDamage` — so a hit this negates never
+         * counts as having been taken, the window stays armed, and the item
+         * quietly becomes total immunity. Spending the window here is what
+         * makes it a window. */
+        ctx.player.timeSinceDamage = 0;
+        ctx.fx.ring(ctx.player.position, 0.4, 3.4, 0x8fd8ff, 0.4, 0.9);
+        ctx.toast('SIXTH SENSE', '#8fd8ff');
+        return 0;
+      },
+    },
+  },
+  {
+    id: 'kiln_brand', name: 'Kiln Brand', rarity: 'uncommon', icon: '🔥', tag: 'Offense',
+    unlocked: true,
+    desc: (s) => `Hitting an enemy below 35% health sets it alight for ${pct(0.9 * s)} damage a second, for 5s.`,
+    stackText: '+90% burn per second per stack',
+    hooks: {
+      onHit(ctx, s, ev) {
+        if (ev.enemy.health / ev.enemy.maxHealth > 0.35) return;
+        ctx.applyStatus(ev.enemy, 'burn', 5, { dps: ctx.player.stats.damage * 0.9 * s });
+      },
+    },
+  },
+  {
+    id: 'grave_ledger', name: 'Grave Ledger', rarity: 'uncommon', icon: '📓', tag: 'Offense',
+    unlocked: true,
+    /* Kills close to you, specifically. A ranged build clearing a room at
+       forty metres gets nothing out of this, which is the point: it is the item
+       that pays you for standing where the dying is happening. */
+    desc: (s) => `An enemy dying within 9m of you grants ${pct(0.03 * s)} damage for 6s, stacking 10 times.`,
+    stackText: '+3% per kill per stack',
+    hooks: {
+      onKill(ctx, s, ev) {
+        if (!ev.enemy || ev.enemy.position.distanceTo(ctx.player.position) > 9) return;
+        ctx.addBuff('grave_ledger', 6, 0.03 * s, 10, '📓 Ledger', { stat: 'damage' });
       },
     },
   },
@@ -659,6 +835,109 @@ export const ITEMS = [
       },
     },
   },
+  /* ---- niche rares ---- */
+  {
+    id: 'backup_capacitor', name: 'Backup Capacitor', rarity: 'rare', icon: '🔌', tag: 'Utility',
+    unlocked: false,
+    desc: (s) => `+${s} charge${s > 1 ? 's' : ''} of your special ability, but each one takes ${pct(Math.pow(1.28, s) - 1)} longer to come back.`,
+    stackText: '+1 charge, +28% special cooldown per stack',
+    stats: (s, a) => { a.addSpecialCharges += s; a.multSpecialCooldown *= Math.pow(1.28, s); },
+  },
+  {
+    id: 'split_cell', name: 'Split Cell', rarity: 'rare', icon: '🔋', tag: 'Utility',
+    unlocked: false,
+    /* The one charge item that can find nothing to charge.
+     *
+     * A held ability has no cast to bank and a charged one resolves on release,
+     * so two of the nine characters cannot use a second-button charge at all.
+     * Rather than being a dead pickup for them, it reads what is actually in
+     * the slot and pays out attack speed instead — which is not a consolation
+     * prize, it is what "you cannot store this one, so it just runs hotter"
+     * means. */
+    desc: (s) => `+${s} charge${s > 1 ? 's' : ''} of your second ability, each taking ${pct(Math.pow(1.28, s) - 1)} longer. If it cannot be stored — a held or charged ability — gain ${pct(0.22 * s)} attack speed instead.`,
+    stackText: '+1 charge, +28% cooldown per stack',
+    stats: (s, a, run, player) => {
+      const q = player?.game?.combat?.weapon?.secondary;
+      if (q && (q.sustain || q.charge)) { a.multAttackSpeed *= 1 + 0.22 * s; return; }
+      a.addSecondaryCharges += s;
+      a.multSecondaryCooldown *= Math.pow(1.28, s);
+    },
+  },
+  {
+    id: 'tessellate_prism', name: 'Tessellate Prism', rarity: 'rare', icon: '🔺', tag: 'Utility',
+    unlocked: false,
+    desc: (s) => `Every ${Math.max(3, 6 - (s - 1)).toFixed(0)} abilities you cast, that one is handed straight back. Ultimates do not count.`,
+    stackText: '-1 casts between refunds per stack',
+    hooks: {
+      onAbility(ctx, s, ev) {
+        // The ultimate is not on a cooldown, so there is nothing to hand back.
+        if (ctx.recasting || ev.kind === 'ultimate') return;
+        const need = Math.max(3, 6 - (s - 1));
+        const run = ctx.run;
+        run.prismCount = (run.prismCount || 0) + 1;
+        if (run.prismCount < need) return;
+        run.prismCount = 0;
+        ctx.refundAbility(ev.kind);
+        ctx.fx.ring(ctx.player.position, 0.3, 2.8, 0x8fd8ff, 0.35, 0.8);
+        ctx.toast('TESSELLATE', '#8fd8ff');
+      },
+    },
+  },
+  {
+    id: 'umbilical_tether', name: 'Umbilical Tether', rarity: 'rare', icon: '🪢', tag: 'Utility',
+    unlocked: false,
+    /* Cooldowns that only run down while you are not running. The only item in
+       the pool that pays you for the seconds a fight gives you back. */
+    desc: (s) => `While standing still, all cooldowns recharge ${pct(0.7 * s)} faster.`,
+    stackText: '+70% still-standing recharge per stack',
+    hooks: {
+      onTick(ctx, s, ev) {
+        const p = ctx.player;
+        if (p.speedXZ > 1.2 || !p.grounded) return;
+        ctx.reduceCooldowns(ev.dt * 0.7 * s);
+      },
+    },
+  },
+  {
+    id: 'marrow_siphon', name: 'Marrow Siphon', rarity: 'rare', icon: '🦴', tag: 'Healing',
+    unlocked: false,
+    desc: (s) => `Killing an elite or a boss heals ${pct(0.12 * s)} of your health and grants an equal barrier.`,
+    stackText: '+12% elite-kill healing per stack',
+    hooks: {
+      onKill(ctx, s, ev) {
+        if (!ev.enemy?.elite && !ev.enemy?.boss) return;
+        const amount = ctx.player.stats.maxHealth * 0.12 * s;
+        ctx.heal(amount, 'Marrow Siphon');
+        ctx.grantBarrier(amount);
+        ctx.fx.ring(ctx.player.position, 0.4, 4, 0xefe6d2, 0.4, 0.8);
+      },
+    },
+  },
+  {
+    id: 'weeping_mask', name: 'Weeping Mask', rarity: 'rare', icon: '🎭', tag: 'Defense',
+    unlocked: false,
+    desc: (s) => `Below half health, gain ${20 * s} armor and ${pct(0.18 * s)} movement speed.`,
+    stackText: '+20 armor, +18% movement below half per stack',
+    stats: (s, a, run, player) => {
+      // `player.stats` is the *previous* frame's block while this runs, and it
+      // is an empty object on the very first recompute — so the guard is on the
+      // number existing, not just on the player.
+      const max = player?.stats?.maxHealth;
+      if (!max || player.health > max * 0.5) return;
+      a.addArmor += 20 * s;
+      a.multMoveSpeed *= 1 + 0.18 * s;
+    },
+    hooks: {
+      // Health moves constantly and the stat block is cached, so the item has
+      // to say when it crossed the line rather than being recomputed every
+      // frame for the sake of one threshold.
+      onTick(ctx) {
+        const p = ctx.player;
+        const low = p.health <= p.stats.maxHealth * 0.5;
+        if (low !== !!p._maskLow) { p._maskLow = low; p.markStatsDirty(); }
+      },
+    },
+  },
   /* ==========================================================
      EPIC
      ========================================================== */
@@ -871,6 +1150,103 @@ export const ITEMS = [
       },
     },
   },
+  /* ---- niche epics ---- */
+  {
+    id: 'overflow_manifold', name: 'Overflow Manifold', rarity: 'epic', icon: '🧊', tag: 'Offense',
+    unlocked: false,
+    /* The item that pays you for *not* pressing anything.
+       Every other cooldown item in the pool makes abilities come back faster so
+       you can spend them sooner. This one is worth the most in the hands of
+       somebody sitting on a full rack, which is a completely different way to
+       play the same character. */
+    desc: (s) => `Deal ${pct(0.22 * s)} more damage for each ability slot sitting at full charges.`,
+    stackText: '+22% per full slot per stack',
+    hooks: {
+      modifyDamage(ctx, s, ev) {
+        const c = ctx.combat;
+        if (!c) return ev.damage;
+        let full = 0;
+        if (c.utilityCharges >= c.maxUtilityCharges) full++;
+        if (c.specialCharges >= c.maxSpecialCharges) full++;
+        if (c.secondaryTimer <= 0) full++;
+        if (c.ultimateReady) full++;
+        return ev.damage * (1 + 0.22 * s * full);
+      },
+    },
+  },
+  {
+    id: 'cartographers_compass', name: "Cartographer's Compass", rarity: 'epic', icon: '🧭', tag: 'Offense',
+    unlocked: false,
+    desc: (s) => `Ground covered is stored. Your next hit spends all of it for up to ${pct(6 * s)} bonus damage at 60m travelled.`,
+    stackText: '+600% stored-distance damage per stack',
+    hooks: {
+      onTick(ctx, s, ev) {
+        const p = ctx.player;
+        if (!p.grounded && !p.flight) return;
+        ctx.run.compass = Math.min(60, (ctx.run.compass || 0) + p.speedXZ * ev.dt);
+      },
+      modifyDamage(ctx, s, ev) {
+        const banked = ctx.run.compass || 0;
+        if (banked < 4) return ev.damage;
+        ctx.run.compass = 0;
+        ctx.fx.glow(ev.enemy.center, { color: 0x46e0c0, size: 1.4, life: 0.3, grow: 2 });
+        return ev.damage * (1 + 6 * s * (banked / 60));
+      },
+    },
+  },
+  {
+    id: 'hollow_reliquary', name: 'Hollow Reliquary', rarity: 'epic', icon: '⚱️', tag: 'Offense',
+    unlocked: false,
+    desc: (s) => `Your ultimate deals ${pct(0.7 * s)} more damage, and its meter fills ${pct(0.22)} slower.`,
+    stackText: '+70% ultimate damage per stack (the meter penalty does not stack)',
+    stats: (s, a) => { a.multUltimateDamage *= 1 + 0.7 * s; a.multUltimate *= 0.78; },
+  },
+  {
+    id: 'nine_lives_filament', name: 'Nine Lives Filament', rarity: 'epic', icon: '🧵', tag: 'Defense',
+    unlocked: false,
+    /* Not a revive — a *refusal*. It leaves you on one health in the middle of
+       whatever was about to kill you, which is a second chance and emphatically
+       not a safety net. Once a stage, so it cannot be farmed. */
+    desc: (s) => `Once per stage, lethal damage leaves you on 1 health instead and grants ${(1.5 + 0.5 * s).toFixed(1)}s of invulnerability.`,
+    stackText: '+0.5s of grace per stack',
+    hooks: {
+      onFatal(ctx, s) {
+        if (ctx.run.filamentStage === ctx.run.stage) return false;
+        ctx.run.filamentStage = ctx.run.stage;
+        ctx.player.health = 1;
+        ctx.player.invulnerable = 1.5 + 0.5 * s;
+        ctx.fx.ring(ctx.player.position, 0.5, 9, 0xefe6d2, 0.7, 1);
+        ctx.toast('THE THREAD HELD', '#efe6d2');
+        return true;
+      },
+    },
+  },
+  {
+    id: 'echoing_vault', name: 'Echoing Vault', rarity: 'epic', icon: '🔊', tag: 'Utility',
+    unlocked: false,
+    desc: (s) => `Every ability you cast — the ultimate excepted — has a ${pct(Math.min(0.6, 0.22 * s))} chance to cast itself again a moment later, for free.`,
+    stackText: '+22% echo chance per stack',
+    hooks: {
+      onAbility(ctx, s, ev) {
+        /* A recast that could recast is an item with a chance of never
+           stopping. Combat refuses to re-enter, and this refuses to try.
+
+           The ultimate is excluded outright, and not for safety: it is the one
+           ability priced against a meter rather than a cooldown, so a free
+           second cast of it is worth several times a free second cast of
+           anything else. An Epic should not quietly be the best ultimate item
+           in the game. */
+        if (ctx.recasting || ev.kind === 'ultimate') return;
+        if (ctx.rng.next() > Math.min(0.6, 0.22 * s)) return;
+        const kind = ev.kind;
+        const ability = ev.ability;
+        ctx.schedule(0.35, () => {
+          ctx.recastAbility(kind, ability);
+          ctx.fx.ring(ctx.player.position, 0.3, 3.2, 0xb473ff, 0.35, 0.7);
+        });
+      },
+    },
+  },
   /* ==========================================================
      LEGENDARY
      ========================================================== */
@@ -1077,6 +1453,107 @@ export const ITEMS = [
     stackText: '-25% prices per stack, capped at 60%',
     stats: (s, a) => { a.multDamageTaken *= 1.14; a.priceMult = Math.min(0.6, 0.25 * s); },
   },
+  /* ---- the ultimate, the charge rack, and two that read the run itself ---- */
+  {
+    id: 'crescendo_core', name: 'Crescendo Core', rarity: 'legendary', icon: '🎺', tag: 'Offense',
+    unlocked: false,
+    /* The ultimate meter is the one resource in the game that is not gold,
+     * health or a cooldown — it is paid for in damage dealt, kills and blood,
+     * and until now nothing in the pool touched it. This is that item, and it
+     * does the two things that actually change how an ultimate feels: it
+     * arrives sooner, and spending it does not take you all the way back to
+     * nothing.
+     *
+     * The refund is hyperbolic *and* capped, which is two different guards for
+     * two different failures. Linear stacking would reach a full refund at six
+     * copies and turn the ultimate into a primary; the curve stops that being
+     * a cliff. But the curve alone still climbs past 59% at eight copies and
+     * heads for 100%, and a deep run with a duplicator can get there — so the
+     * ceiling is stated outright at 45%. Past it, more copies buy charge rate
+     * and nothing else, and the meter can never stop being a meter. */
+    desc: (s) => `The ultimate meter fills ${pct(0.55 * s)} faster, and spending your ultimate leaves ${pct(CRESCENDO_REFUND(s))} of it behind (up to 45%).`,
+    stackText: '+55% charge rate, +18% retained (diminishing) per stack',
+    stats: (s, a) => { a.multUltimate *= 1 + 0.55 * s; },
+    hooks: {
+      onUltimate(ctx, s) {
+        // Fires after Combat has zeroed the meter, so this is a refund rather
+        // than a discount — which is what makes it visible.
+        ctx.refundUltimate(CRESCENDO_REFUND(s));
+        ctx.fx.ring(ctx.player.position, 0.6, 7, 0xffcf5c, 0.6, 0.9);
+      },
+    },
+  },
+  {
+    id: 'perpetual_loom', name: 'Perpetual Loom', rarity: 'legendary', icon: '🕸️', tag: 'Utility',
+    unlocked: false,
+    /* The charge item that does not charge you for the charge.
+     *
+     * Every other one in the pool buys a use and pays for it in cooldown; this
+     * buys a use of *all three* and shortens them as well, which is the whole
+     * reason it is a Legendary and the reason it is the only one written that
+     * way. A second copy is deliberately worth less than the first: the charge
+     * still comes, but the cooldown reduction is hyperbolic, so four Looms is
+     * an enormous rack of abilities and not a character with no cooldowns. */
+    desc: (s) => `+${s} charge${s > 1 ? 's' : ''} of your utility, second and special abilities, and ${pct(hyperbolic(0.18, s))} off every cooldown.`,
+    stackText: '+1 charge to three slots, -18% cooldowns (diminishing) per stack',
+    stats: (s, a, run, player) => {
+      a.addDashCharges += s;
+      a.addSpecialCharges += s;
+      const q = player?.game?.combat?.weapon?.secondary;
+      // A held or charged second button cannot bank a use; it gets the
+      // cooldown instead, same rule as Split Cell.
+      if (!q || (!q.sustain && !q.charge)) a.addSecondaryCharges += s;
+      a.multCooldown *= 1 - hyperbolic(0.18, s);
+    },
+  },
+  {
+    id: 'mirror_tithe', name: 'Mirror Tithe', rarity: 'legendary', icon: '🪞', tag: 'Defense',
+    unlocked: false,
+    /* Damage taken stops being purely a loss and becomes a magazine.
+     *
+     * It pairs with Crescendo Core by accident of design and it is the good
+     * kind of accident: taking hits fills the ultimate meter, and this makes
+     * the ultimate you were paid for carry everything you were paid *with*.
+     * The cap is what stops a boss's wind-up from being worth a whole run. */
+    desc: (s) => `${pct(0.45)} of all damage you take is stored. Using your ultimate spends the store on everything within 30m, up to ${pct(14 * s)} damage. Currently holding {tithe}.`,
+    stackText: '+1400% stored damage cap per stack',
+    hooks: {
+      modifyIncoming(ctx, s, ev) {
+        ctx.run.tithe = Math.min(
+          ctx.player.stats.damage * 14 * s,
+          (ctx.run.tithe || 0) + ev.amount * 0.45,
+        );
+        return ev.amount;
+      },
+      onUltimate(ctx) {
+        const stored = ctx.run.tithe || 0;
+        if (stored <= 0) return;
+        ctx.run.tithe = 0;
+        ctx.areaDamage(ctx.player.position, 30, stored, { proc: 0, source: 'Mirror Tithe', force: 14 });
+        ctx.fx.explosion(ctx.player.position, 30, 0x8fd8ff, 1.8);
+        ctx.shake(0.8);
+        ctx.toast(`MIRROR TITHE — ${Math.round(stored)}`, '#8fd8ff');
+      },
+    },
+    dynamic: (run) => ({ tithe: Math.round(run.tithe || 0) }),
+  },
+  {
+    id: 'locust_codex', name: 'Locust Codex', rarity: 'legendary', icon: '📖', tag: 'Utility',
+    unlocked: false,
+    /* The exact opposite of the Pattern Duplicator, and the only item in the
+     * game that would rather you had one of everything than ten of one thing.
+     * It counts *distinct* items, so the duplicator adds nothing to it and a
+     * shrine you got nothing useful out of does — which turns the junk Common
+     * you were about to feed the forge into a reason not to. */
+    desc: (s) => `Every different item you carry grants ${pct(0.018 * s)} damage and ${pct(0.011 * s)} movement speed. Currently {kinds} kinds.`,
+    stackText: '+1.8% damage, +1.1% movement per kind per stack',
+    stats: (s, a, run, player) => {
+      const kinds = player?.game?.inventory?.order.length ?? 0;
+      a.multDamage *= 1 + 0.018 * s * kinds;
+      a.multMoveSpeed *= 1 + 0.011 * s * kinds;
+    },
+    dynamic: (run, player) => ({ kinds: player?.game?.inventory?.order.length ?? 0 }),
+  },
 ];
 
 export const ITEMS_BY_ID = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
@@ -1091,11 +1568,18 @@ export function itemById(id) { return ITEMS_BY_ID[id]; }
 /** Items that start unlocked without spending Echoes. */
 export const DEFAULT_UNLOCKED_ITEMS = ITEMS.filter((i) => i.unlocked).map((i) => i.id);
 
-/** Convenience for UI: description with dynamic run values substituted. */
-export function itemDescription(item, stacks = 1, run = null) {
+/**
+ * Convenience for UI: description with dynamic run values substituted.
+ *
+ * `player` is optional and is there for the handful of items whose live number
+ * is a property of what you are *carrying* rather than of the run — Locust
+ * Codex counts the kinds in your bag. Anything unresolved falls back to zero,
+ * so a card rendered outside a run (the Sanctum, the codex) still reads.
+ */
+export function itemDescription(item, stacks = 1, run = null, player = null) {
   let text = item.desc(stacks);
   if (item.dynamic && run) {
-    const vals = item.dynamic(run);
+    const vals = item.dynamic(run, player);
     for (const k in vals) text = text.replace(`{${k}}`, vals[k]);
   }
   return text.replace(/\{\w+\}/g, '0');

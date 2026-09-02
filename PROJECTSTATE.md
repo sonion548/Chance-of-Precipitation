@@ -146,8 +146,37 @@ across the head and chest.
   the item pool does not go dead. `primary.activeReload` takes the fire button away after
   each shot until the bar is answered — on the mark, chambered instantly; missed or run off
   the end, jammed for 3s.
-- **81 items** across 5 rarities. 49 unlocked on a fresh profile — 19/18/6/4/2 by tier, so a
+- **108 items** across 5 rarities. 61 unlocked on a fresh profile — 25/24/6/4/2 by tier, so a
   new account can find a Legendary. Each has a procedurally drawn icon.
+- **Twenty-seven of them are conditional rather than cumulative**, which is the point: a pool
+  of stat sticks has no decisions in it, because a second copy of a flat bonus is always worth
+  taking. The new ones ask for a behaviour first — stand still (Chalk Line, Umbilical Tether),
+  stay close (Tin Ear, Grave Ledger), keep moving (Cartographer's Compass), *stop* pressing
+  things (Overflow Manifold), be nearly dead (Weeping Mask), take the hit (Mirror Tithe), or
+  carry breadth instead of depth (Locust Codex, which counts item *kinds* and is the exact
+  inverse of the Pattern Duplicator).
+- **Charge items.** Five items sell an extra charge of an ability, and `Combat` counts charges
+  on all three slots now rather than only the utility. A charge is not a shorter cooldown — it
+  is the ability firing *twice before the first is back* — so each of them pays for it in
+  cooldown on that slot: +1 utility at +22% (Relay Coil), +1 special at +28% (Backup
+  Capacitor), +1 second button at +28% (Split Cell). `maxSecondaryCharges` refuses extras for a
+  `sustain` or `charge` ability outright, because neither has a cast to bank; Split Cell reads
+  that and pays attack speed instead, so it is never a dead pickup. **Perpetual Loom** (L) is
+  the one that grants all three *and* shortens cooldowns, which is what makes it a Legendary.
+- **Crescendo Core** (L) is the first item that touches the ultimate meter: +55% charge rate a
+  stack, and spending an ultimate leaves a hyperbolic fraction of the meter behind, hard-capped
+  at 45%. Both guards matter — the curve stops the refund being a cliff, and the cap stops a
+  deep run with a duplicator turning the ultimate into a primary.
+- **Equipment.** One slot, one item in it, fired with **X** (rebindable), bought from an
+  **Equipment Pod** — a fifth device beside the altar, cache, duplicator and forge. Nine of
+  them, from a 12s piercing lance to a 75s implosion, plus one that deals no damage at all and
+  shakes gold out of the arena. Taking a new one throws the old one away, which is the whole
+  design: items are cumulative and never a decision, equipment is a slot you *replace* and a
+  button you have to judge the moment for. Lives in `data/equipment.js` and on `Inventory`
+  rather than in `stacks`, because modelling a slot as a special case of a bag is how you end
+  up with two of something that can only be one. The pod's payout is `localPayout`: it fills
+  the presser's slot rather than dropping on the host's ground, which is the one place the
+  host-owns-payouts rule has to run the other way.
 - **4 pet species** — lizard, beetle, wisp, shell — hatched from eggs with gold. No cap on
   how many you keep; the eggs a stage puts out and the rising price are the limit.
 - **14 enemies** (7 regular, 6 stage bosses, 1 optional final boss) + 4 elite affixes. The new
@@ -539,7 +568,7 @@ events still fire, so replication can be tested end to end.
 headlessly (canvas stubbed, since nothing it draws reaches a collider) and asserts that two
 peers on one seed agree on every collider and on ground height across 400 sample points.
 
-Suites in use: all item hooks (all 81 items at 3 stacks each, in a live firefight with a
+Suites in use: all item hooks (every item at 3 stacks each, in a live firefight with a
 brood out), all 8 weapons (damage benchmark), all 6 characters (ability displacement/damage
 vs spec), collision correctness vs brute force, a full menu→run→boss→descend→summary pass, a
 two-peer co-op pass (lobby, stage sync, damage prediction, item arbitration, revive, stage

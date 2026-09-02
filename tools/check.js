@@ -79,7 +79,44 @@ for (const f of files) {
   }
 }
 
+/* ---------------------------------------------------------------- catalogues
+ *
+ * An id collision in a catalogue is valid JavaScript, silently drops the older
+ * entry out of `Object.fromEntries`, and shows up as a stack of the *wrong*
+ * item when somebody eventually picks it up. It has happened once already —
+ * two items called Counterweight, three hundred lines apart — so it is worth
+ * the twenty lines that make it impossible to do twice.
+ *
+ * Read with a regex rather than by importing: these modules pull in three.js
+ * and the DOM, and a check that needs a browser is a check nobody runs.
+ */
+const CATALOGUES = [
+  ['src/data/items.js', 'items'],
+  ['src/data/equipment.js', 'equipment'],
+  ['src/data/characters.js', 'characters'],
+  ['src/data/weapons.js', 'kits'],
+  ['src/data/enemies.js', 'enemies'],
+  ['src/data/pets.js', 'pets'],
+];
+let dupes = 0;
+for (const [rel, label] of CATALOGUES) {
+  let src;
+  try { src = await readFile(join(ROOT, rel), 'utf8'); } catch { continue; }
+  const seen = new Map();
+  const re = /^\s*id:\s*'([a-z0-9_]+)'/gm;
+  let m;
+  while ((m = re.exec(stripComments(src))) !== null) {
+    const line = src.slice(0, m.index).split('\n').length;
+    if (seen.has(m[1])) {
+      dupes++;
+      console.error(`✗ ${rel}:${line}\n  duplicate ${label} id "${m[1]}" — also at line ${seen.get(m[1])}. `
+        + 'The later entry silently replaces the earlier one.');
+    } else seen.set(m[1], line);
+  }
+}
+if (!dupes && !failed && !lintHits) console.log('✓ catalogue ids are unique.');
+
 if (failed) console.log(`\n${failed} file(s) failed to parse.`);
 else if (lintHits) console.log(`\n${files.length} modules parsed cleanly, ${lintHits} lint problem(s).`);
 else console.log(`✓ ${files.length} modules parsed cleanly, no lint problems.`);
-process.exit(failed || lintHits ? 1 : 0);
+process.exit(failed || lintHits || dupes ? 1 : 0);

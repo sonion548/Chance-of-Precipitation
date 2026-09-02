@@ -39,7 +39,19 @@ export function freshAccumulator() {
     addCrit: 0, addCritDamage: 0,
     addArmor: 0,
     multCooldown: 1,
+    /* Per-slot cooldown and charge modifiers.
+     *
+     * `multCooldown` is the blanket one every ability pays. These four are the
+     * per-slot dials the charge items trade against: an extra use of something
+     * is worth a great deal more than a shorter wait on it, so an item that
+     * hands you a charge pays for it by making each one take longer. Kept
+     * separate per slot because a charge on a 3s ability and a charge on a 20s
+     * one are not remotely the same purchase. */
     multDashCooldown: 1, addDashCharges: 0,
+    multSpecialCooldown: 1, addSpecialCharges: 0,
+    multSecondaryCooldown: 1, addSecondaryCharges: 0,
+    // How fast the ultimate meter fills, and how hard the ultimate itself hits.
+    multUltimate: 1, multUltimateDamage: 1,
     addJumps: 0,
     multGold: 1, multXp: 1,
     addPickupRadius: 0,
@@ -198,6 +210,10 @@ export class Player {
        The only cost is that he cannot attack, which is paid continuously for
        as long as he holds it — the ability has no cooldown precisely because
        holding it *is* the cooldown. */
+    /* Volatile Serum: nine seconds of hitting far harder and dying far easier.
+       Named here rather than folded through `extra.stat` because it moves three
+       numbers at once and should read on the HUD as one thing. */
+    if (this.buffs.has('serum')) { damageMult *= 1.7; atkSpeed *= 1.4; damageTakenMult *= 1.45; }
     const guard = this.buffs.get('guard');
     if (guard) { damageTakenMult *= 1 - guard.power; moveMult *= guard.extra?.move ?? 1; }
 
@@ -237,7 +253,13 @@ export class Player {
         ? 0
         : acc.multCooldown * (this.char.passive?.cooldownMult?.(this) ?? 1),
       dashCooldownMult: acc.multDashCooldown,
+      specialCooldownMult: acc.multSpecialCooldown,
+      secondaryCooldownMult: acc.multSecondaryCooldown,
       maxDashCharges: 1 + acc.addDashCharges,
+      extraSpecialCharges: acc.addSpecialCharges,
+      extraSecondaryCharges: acc.addSecondaryCharges,
+      ultimateRate: acc.multUltimate,
+      ultimateDamageMult: acc.multUltimateDamage,
       maxJumps: base.jumps + acc.addJumps,
       goldMult: acc.multGold,
       xpMult: acc.multXp,

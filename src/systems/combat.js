@@ -133,6 +133,7 @@ export class Combat {
     // to reach it too — see Vanguard's. Applied here because this is the one
     // funnel every source of charge already goes through.
     amount *= this.character?.passive?.ultimateMult?.(this.game.player) ?? 1;
+    amount *= this.game.player?.stats.ultimateRate ?? 1;
     const before = this.ultimateCharge;
     this.ultimateCharge = Math.min(ULTIMATE.max, this.ultimateCharge + amount);
     if (before < ULTIMATE.max && this.ultimateCharge >= ULTIMATE.max && !this._ultimateAnnounced) {
@@ -203,11 +204,31 @@ export class Combat {
     this.refundUtility();
   }
 
-  /** Max special charges. Ability-defined; nothing grants extras yet. */
-  get maxSpecialCharges() { return this.character?.special.charges ?? 1; }
+  /**
+   * Max special charges: the ability's own, plus anything items grant.
+   *
+   * The same shape as `maxUtilityCharges`, and worth stating why items may add
+   * to all three slots now: a charge is the only thing in the game that lets
+   * you use an ability *twice before the first one is back*, which is a
+   * different purchase from a shorter cooldown and priced separately.
+   */
+  get maxSpecialCharges() {
+    return (this.character?.special.charges ?? 1) + (this.game.player?.stats.extraSpecialCharges ?? 0);
+  }
 
-  /** Max secondary charges. Most abilities want one; Fire Patch wants three. */
-  get maxSecondaryCharges() { return this.weapon?.secondary?.charges ?? 1; }
+  /**
+   * Max secondary charges. Most abilities want one; Fire Patch wants three.
+   *
+   * An ability that is *held* or *charged* cannot use a charge pool at all —
+   * Bulwark's guard has no cast to bank and Vanguard's focused shot resolves
+   * on release — so extras are refused rather than silently counted, and the
+   * item that would have granted them pays out something else instead.
+   */
+  get maxSecondaryCharges() {
+    const q = this.weapon?.secondary;
+    if (!q || q.sustain || q.charge) return q?.charges ?? 1;
+    return (q.charges ?? 1) + (this.game.player?.stats.extraSecondaryCharges ?? 0);
+  }
 
   /**
    * Spends one use of the utility and starts its cooldown.
@@ -237,7 +258,7 @@ export class Combat {
   specialCooldown(player) {
     const sp = this.character?.special;
     if (!sp) return 0.01;
-    const base = sp.cooldown * player.stats.cooldownMult;
+    const base = sp.cooldown * player.stats.cooldownMult * (player.stats.specialCooldownMult ?? 1);
     return Math.max(0.01, sp.cooldownFor ? sp.cooldownFor(player, base) : base);
   }
 
@@ -352,7 +373,7 @@ export class Combat {
          subtracting again here regenerated three-second charges in a second
          and a half. */
       const maxSecondary = this.maxSecondaryCharges;
-      const qcd = secondary.cooldown * stats.cooldownMult;
+      const qcd = secondary.cooldown * stats.cooldownMult * (stats.secondaryCooldownMult ?? 1);
       if (maxSecondary > 1) {
         if (this.secondaryCharges < maxSecondary && this.secondaryTimer <= 0) {
           this.secondaryCharges++;
@@ -478,7 +499,10 @@ export class Combat {
 
   _fireAbility(ability, chargeRatio, isPrimary = false, kind = isPrimary ? 'primary' : 'secondary') {
     const player = this.game.player;
-    this.ctx.dmg = player.stats.damage;
+    // An ultimate reads a damage stat of its own, so an item can make the one
+    // ability you have earned hit harder without touching everything else.
+    this.ctx.dmg = player.stats.damage
+      * (kind === 'ultimate' ? (player.stats.ultimateDamageMult ?? 1) : 1);
     _origin.copy(player.muzzlePosition);
     this.ctx.origin = _origin;
     player.aimDirection(_dir);
@@ -512,13 +536,26 @@ export class Combat {
          revolver holsters free when the shot finishes something.
          A multi-charge secondary has already been billed above, and setting the
          timer here would restart its regeneration from scratch on every use. */
-      if ((ability.charges ?? 1) <= 1) {
-        this.secondaryTimer = this._secondaryRefund ? 0 : ability.cooldown * player.stats.cooldownMult;
+      if (this.maxSecondaryCharges <= 1) {
+        this.secondaryTimer = this._secondaryRefund
+          ? 0
+          : ability.cooldown * player.stats.cooldownMult * (player.stats.secondaryCooldownMult ?? 1);
       } else if (this._secondaryRefund) {
         this.secondaryCharges = Math.min(this.maxSecondaryCharges, this.secondaryCharges + 1);
       }
       this._secondaryRefund = false;
       this.game.inventory.trigger('onSecondary', { ability });
+    }
+    /* One report for every ability that is not the primary.
+     *
+     * `onSecondary` above is kept because items already use it, but an item
+     * about *abilities* should not have to name the four slots and then be
+     * wrong the moment a fifth exists. This fires for the second button, the
+     * utility, the special and the ultimate alike, and carries which one it
+     * was so an item can still care if it wants to. */
+    if (kind !== 'primary') {
+      this.game.inventory.trigger('onAbility', { kind, ability });
+      if (kind === 'ultimate') this.game.inventory.trigger('onUltimate', { ability });
     }
     if (kind === 'primary' && ability.activeReload) this._beginReload(ability.activeReload);
     if (kind === 'primary' && ability.magazine && this.ammo !== null) {
@@ -1129,6 +1166,60 @@ export class Combat {
     this.game.fxApi.ring(position, 0.8, radius, color, 0.7, 0.9);
     return count;
   }
+
+  /**
+   * Hands one use of an ability back, whatever "a use" means for that slot.
+   *
+   * A slot with charges gets a charge; a slot without gets its timer cleared.
+   * Items that refund abilities should never have to know which is which —
+   * and which it is changes with the items you are carrying, so they could not
+   * know reliably even if they tried.
+   */
+  refundAbility(kind) {
+    const player = this.game.player;
+    if (!player) return;
+    if (kind === 'utility') { this.refundUtility(); return; }
+    if (kind === 'special') {
+      this.specialCharges = Math.min(this.maxSpecialCharges, this.specialCharges + 1);
+      this.specialTimer = this.specialCharges >= this.maxSpecialCharges ? 0 : this.specialCooldown(player);
+      return;
+    }
+    if (kind === 'secondary') {
+      if (this.maxSecondaryCharges > 1) {
+        this.secondaryCharges = Math.min(this.maxSecondaryCharges, this.secondaryCharges + 1);
+      }
+      this.secondaryTimer = 0;
+      return;
+    }
+    /* Not the ultimate. It is not on a cooldown — it is bought with damage,
+       kills and blood — so "hand one use back" has no meaning there, and the
+       nearest thing it could mean is a full meter, which is not what a Rare
+       that fires every few seconds should be handing out. Anything that
+       genuinely wants to touch the meter says so through `refundUltimate` and
+       names its fraction. */
+  }
+
+  /** Puts a fraction of the ultimate meter back, capped at a full bar. */
+  refundUltimate(fraction) {
+    this.ultimateCharge = Math.min(ULTIMATE.max, this.ultimateCharge + ULTIMATE.max * fraction);
+    if (this.ultimateCharge >= ULTIMATE.max) this._ultimateAnnounced = false;
+  }
+
+  /**
+   * Casts an ability again, for nothing.
+   *
+   * Guarded against itself: a recast that could recast would be an item with a
+   * chance of firing forever, so the flag is raised for the duration of the
+   * call and every hook that fires inside it sees a recast in progress.
+   */
+  recastAbility(kind, ability) {
+    if (this._recasting || !ability || this.game.player?.dead) return;
+    this._recasting = true;
+    try { this._fireAbility(ability, 1, false, kind); }
+    finally { this._recasting = false; }
+  }
+
+  get recasting() { return !!this._recasting; }
 
   reduceCooldowns(seconds) {
     this.secondaryTimer = Math.max(0, this.secondaryTimer - seconds);

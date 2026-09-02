@@ -92,6 +92,7 @@ downstream knowing the difference. The defaults:
 | `Shift` | Utility ability (character-specific) |
 | `R` | Special ability (character-specific) |
 | `F` | **Ultimate** — no cooldown; the meter fills from damage dealt, kills and damage taken |
+| `X` | **Equipment** — the one slot that is not the character's. Long cooldown, one thing at a time |
 | Right click | Aim — pulls the camera in and narrows the field of view |
 | `Space` | Jump (double jump with Gravity Boots) |
 | `E` | Interact — chests, shrines, eggs, the Beacon, the rift |
@@ -458,23 +459,102 @@ burst straight through without noticing. The bar shows both thresholds as ticks,
 reads IMMUNE while it sheds. Every number that moves between phases lives in one table
 (`SOVEREIGN_PHASES`), so a fourth phase is a fourth row.
 
-**81 items** across five rarities — 49 available from the start, 32 unlockable. Every item
-draws its own icon procedurally from a shape library, so all 81 are distinguishable on the
+**108 items** across five rarities — 61 available from the start, 47 unlockable. Every item
+draws its own icon procedurally from a shape library, so they are distinguishable on the
 ground before you touch them, and the same art appears in the HUD, the pickup card, the
 Sanctum and the Codex:
 
 | Rarity | Total | Unlocked on a fresh profile | Chest odds | Echo cost |
 | --- | --- | --- | --- | --- |
-| Common | 19 | 19 | 74% | 40 |
-| Uncommon | 18 | 18 | 20% | 110 |
-| Rare | 17 | 6 | 4.7% | 240 |
-| Epic | 15 | 4 | 1.1% | 480 |
-| Legendary | 12 | 2 | 0.3% | 900 |
+| Common | 25 | 25 | 74% | 40 |
+| Uncommon | 24 | 24 | 20% | 110 |
+| Rare | 23 | 6 | 4.7% | 240 |
+| Epic | 20 | 4 | 1.1% | 480 |
+| Legendary | 16 | 2 | 0.3% | 900 |
+
+**Twenty-seven of those are new, and every one of them is a condition rather than a
+number.** A pool made of stat sticks has no decisions in it: a second Stim Injector is
+strictly better than no second Stim Injector, so the only question a chest asks is what it
+rolled. These ask something of you first — stand still, stay close, keep moving, hold your
+abilities, take the hit, be nearly dead — and several are worth nothing at all if you play
+the wrong way with them:
+
+| Item | Asks you to |
+| --- | --- |
+| Leaden Yoke · C | Trade 7% movement for 16% damage. The first item in the pool that is worse in one direction on purpose |
+| Chalk Line · C | Stop moving. 22% crit while you are still, gone the instant you are not |
+| Dull Whetstone · C | Open on fresh bodies — the first hit on any enemy hits 55% harder |
+| Coin Poultice · C | Nothing. It heals off gold you were picking up anyway |
+| Tin Ear · C | Be near things. Everything within 7m is slowed |
+| Cracked Lens · C | Take the inverse of a Glass Shard: more dice, smaller payout |
+| Tidebound Censer · U | Overheal. What the bar cannot take becomes barrier |
+| Thresher Bearing · U | Stay on one target — every 8th hit on the *same* enemy detonates |
+| Sixth Sense · U | Not get hit for 10s, and then be handed the next hit free |
+| Kiln Brand · U | Finish things. Anything below 35% health catches fire |
+| Grave Ledger · U | Stand where the dying is happening — kills within 9m stack damage |
+| Tessellate Prism · R | Keep casting. Every sixth ability is handed straight back |
+| Umbilical Tether · R | Stand still, and have your cooldowns run 70% faster while you do |
+| Marrow Siphon · R | Hunt elites, and be healed and shielded for it |
+| Weeping Mask · R | Be below half health, for 20 armour and 18% speed |
+| Overflow Manifold · E | *Not* press anything — 22% damage per ability slot sitting full |
+| Cartographer's Compass · E | Keep moving. Ground covered is banked and spent on your next hit |
+| Hollow Reliquary · E | Give up 22% of your ultimate's charge rate for 70% of its damage |
+| Nine Lives Filament · E | Die once a stage and get away with it, on 1 health |
+| Echoing Vault · E | Cast anything, and have it happen twice |
+| Mirror Tithe · L | Take damage — 45% of it is stored and spent by your next ultimate |
+| Locust Codex · L | Carry *breadth*. It counts kinds of item, not stacks, which is the exact opposite of the Pattern Duplicator |
 
 Every tier is reachable from the very first run — a new account can find a Legendary. The
 Sanctum widens the pool rather than gating entry to it, which is the difference between a
 progression system and a paywall made of time. And if you would rather not have the campaign
 at all, **Settings → Game** hands over every item, weapon and character in one click.
+
+### Charges, and what they cost
+
+Five of the new items sell you an **extra charge** of an ability, and they are the reason the
+combat system learned to count charges on all three slots rather than just the utility.
+
+A charge is not a shorter cooldown. It is the ability going off *twice before the first one is
+back*, which is a different and much larger purchase — so every one of them pays for it in the
+same currency: each use takes longer to come back. **Relay Coil** (U) is +1 utility charge at
++22% cooldown, **Backup Capacitor** (R) is +1 special at +28%, **Split Cell** (R) is +1 second
+button at +28%. Across a long fight the trade is roughly neutral; across the four seconds that
+decide whether you live, it is enormous, and that is exactly the deal it should be.
+
+**Split Cell** is the one that can find nothing to charge — Bulwark's guard is held and
+Vanguard's focused shot resolves on release, so neither can bank a cast. Rather than being a
+dead pickup for two of the nine, it reads what is actually in the slot and pays out attack
+speed instead. **Perpetual Loom** (L) is the one that does not charge you for the charge: +1 to
+all three slots *and* 18% off every cooldown, which is what a Legendary in this family should
+look like and why it is the only one written that way.
+
+### Equipment
+
+One slot, one thing in it, a long cooldown, and a key of its own — **`X`** by default,
+rebindable like everything else. It is bought from an **Equipment Pod**, a fifth device
+alongside the altar, the cache, the duplicator and the forge, and taking a new one throws the
+old one away.
+
+Everything about that shape is the opposite of an item. Items are passive, cumulative and
+never a decision: you take what you find, it stacks, and a run is the pile you ended up with.
+Equipment does nothing at all until you press the button, so it is the one thing in the game
+you have to *decide* about twice — once at the pod, and again every time the cooldown comes
+back and you have to judge whether this is the moment.
+
+Which is why the numbers are enormous. A 60-second cooldown that does what an item does is not
+an interesting decision; a 60-second cooldown that deletes an elite pack is.
+
+| Equipment | CD | What it does |
+| --- | --- | --- |
+| Ionic Lance | 12s | A beam down your line of sight for 1500%, piercing, stripping 40 armour off everything it crosses |
+| Volatile Serum | 28s | 9s of +70% damage and +40% attack speed — and +45% damage taken, with no way to stop it early |
+| Recall Beacon | 30s | Plant a mark; press again within 20s to return to it and heal 25%. The outbound press is free — what you buy is the trip back |
+| Field Medkit | 32s | Heal 55% at once, overflow becomes barrier, teammates get half |
+| Gravity Well | 40s | A well at your aim point that hauls everything within 15m in and grinds it for 900% |
+| Effigy of Spite | 45s | A totem that chills, burns and takes every eye in the arena off you for 14s |
+| Chrono Anchor | 50s | Every enemy within 26m stopped dead for 4.5s, taking 25% more while frozen |
+| Prospector's Charge | 55s | 45 gold out of everything within 40m, 4× from elites and bosses. No damage at all, and on a stage with four Large chests on it that is the strongest one here |
+| Collapse Charge | 75s | The longest cooldown in the game and the largest single number: 4000% in 22m |
 
 Large chests never roll Common — paying the premium guarantees at least an Uncommon, and
 Legendary chests start at Rare. Each table carries a rarity floor that the "nothing of that

@@ -26,6 +26,7 @@ export const ACTIONS = [
   { id: 'utility', name: 'Utility Ability', group: 'Combat' },
   { id: 'special', name: 'Special Ability', group: 'Combat' },
   { id: 'ultimate', name: 'Ultimate', group: 'Combat' },
+  { id: 'equipment', name: 'Equipment', group: 'Combat' },
   { id: 'interact', name: 'Interact', group: 'World' },
   { id: 'chat', name: 'Chat', group: 'World' },
 ];
@@ -42,6 +43,7 @@ export const DEFAULT_BINDINGS = {
   utility: ['ShiftLeft', 'ShiftRight'],
   special: ['KeyR'],
   ultimate: ['KeyF'],
+  equipment: ['KeyX'],
   interact: ['KeyE'],
   chat: ['Enter', 'NumpadEnter'],
 };

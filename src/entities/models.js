@@ -4065,6 +4065,48 @@ export function buildChestModel(kind) {
     return mergeStaticMeshes(g);
   }
 
+  if (kind === 'equipment') {
+    /* The equipment pod.
+     *
+     * Deliberately not a chest. A chest is a thing you buy a roll from and walk
+     * away richer; a pod is a thing you *swap* at, and the silhouette has to
+     * say so before you read the prompt — so it is a short armoured drum with
+     * one slot cut into the front and something lit sitting in it, closer to a
+     * locker than to a treasure box.
+     */
+    const shellM = mat(0x3a3330, { roughness: 0.5, metalness: 0.7 });
+    const bandM = mat(0x6a5a4a, { roughness: 0.34, metalness: 0.9 });
+    const hot = glowMat(0xff8a3d, 0.9);
+
+    const base = cyl(0.9, 1.05, 0.34, 8, bandM, 0, 0.17, 0);
+    g.add(base);
+    const drum = cyl(0.74, 0.82, 1.5, 8, shellM, 0, 1.05, 0);
+    g.add(drum);
+    // Ribs up the drum, so an eight-sided cylinder reads as machined.
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      g.add(box(0.07, 1.4, 0.1, bandM, Math.cos(a) * 0.79, 1.05, Math.sin(a) * 0.79));
+    }
+    // The slot: a recess in the front with the contents glowing out of it.
+    g.add(box(0.62, 0.72, 0.14, inner, 0, 1.12, 0.76));
+    const held = new THREE.Mesh(new THREE.OctahedronGeometry(0.24, 0), hot);
+    held.position.set(0, 1.12, 0.74);
+    g.add(held);
+    // A collar band and a cap, so it has a top rather than an opening.
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.06, 5, 16), bandM);
+    collar.rotation.x = Math.PI / 2;
+    collar.position.y = 1.78;
+    g.add(collar);
+    g.add(cyl(0.6, 0.76, 0.22, 8, shellM, 0, 1.9, 0));
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), hot);
+    lamp.position.set(0, 2.06, 0);
+    g.add(lamp);
+
+    g.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+    g.userData = { light: lamp, orb: held, glowColor: 0xff8a3d };
+    return mergeStaticMeshes(g);
+  }
+
   const s = P.s;
   const W = 1.55 * s, D = 1.02 * s, H = 0.7 * s;
 

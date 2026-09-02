@@ -5,6 +5,7 @@ import {
   buildChestModel, buildTeleporterModel, buildOrbModel, buildItemDropModel, buildEggModel, buildPortalModel,
 } from './models.js';
 import { chestCost, eggCost, rollItem } from '../systems/loot.js';
+import { EQUIPMENT } from '../data/equipment.js';
 import { petById } from '../data/pets.js';
 import { ELITE_AFFIXES } from '../data/enemies.js';
 import { audio } from '../core/audio.js';
@@ -32,6 +33,7 @@ const _v = new THREE.Vector3();
  *   cache                      free, and it wakes something up
  *   duplicator                 gold to deepen a stack you already have
  *   forge                      spend junk Commons for something better
+ *   equipment                  gold for a piece of equipment, swapping yours
  */
 const KIND_INFO = {
   chest: { label: 'Chest', table: 'chest', uses: 1 },
@@ -45,6 +47,15 @@ const KIND_INFO = {
   cache: { label: 'Cursed Cache', table: 'large', uses: 1, free: true },
   duplicator: { label: 'Pattern Duplicator', table: null, uses: 1 },
   forge: { label: 'Scrap Forge', table: 'large', uses: 2, free: true },
+  /* The pod grants its equipment straight into the slot rather than dropping
+     it on the floor.
+     A world drop would be the consistent thing to do and the wrong one: an
+     equipment pickup is a *swap*, and a swap lying in the grass means walking
+     over the thing you already have and losing it by accident. Handing it over
+     at the pod makes the trade explicit, and it sidesteps the networked
+     item-drop path, which resolves ids against the item catalogue that
+     equipment is deliberately not in. */
+  equipment: { label: 'Equipment Pod', table: null, uses: 1, localPayout: true },
 };
 
 /** Fraction of maximum health the altar asks for. */
@@ -60,6 +71,15 @@ export class Chest {
     this.opened = false;
     const info = KIND_INFO[kind] || KIND_INFO.chest;
     this.uses = info.uses;
+    /* Who resolves the payout.
+     *
+     * Everything else in this file drops an item on the ground, and the ground
+     * belongs to the host — that is what stops one chest paying out twice. A
+     * pod does not put anything on the ground: it fills a slot, and the slot
+     * belongs to whoever pressed the button. Resolving it on the host would
+     * hand a client's equipment to the host, which is precisely the bug the
+     * host-owns-payouts rule exists to prevent, running the other way. */
+    this.localPayout = !!info.localPayout;
     this.cost = info.free ? 0 : chestCost(kind, game.stageDifficulty ?? game.director.difficulty);
     this.model = buildChestModel(kind);
     this.model.position.copy(this.position);
@@ -109,6 +129,12 @@ export class Chest {
       case 'forge': {
         const n = this._commonStacks();
         return `${this.label} — ${FORGE_COST} Common items (${n} spare) for one better (${this.uses} left)`;
+      }
+      case 'equipment': {
+        const held = this.game.inventory?.equipment;
+        return held
+          ? `${this.label} — ${this.price} gold (replaces ${held.name})`
+          : `${this.label} — ${this.price} gold`;
       }
       default:
         return `${this.label} — ${this.price} gold`;
@@ -196,6 +222,9 @@ export class Chest {
     audio.chestOpen(this.position, this.kind);
     if (this.game.coopClient) {
       this._consume();
+      // The pod's payout is yours, so it happens here rather than on the host.
+      // The host is still told, because whether it is *open* is shared.
+      if (this.localPayout) this._payOut();
       this.game.coop.session.sendHost({ k: 'act', kind: 'chest', i: this.index });
       return true;
     }
@@ -209,7 +238,8 @@ export class Chest {
   resolve() {
     if (!this.interactable) return false;
     this._consume();
-    this._payOut();
+    // A local payout has already happened on the machine that asked for it.
+    if (!this.localPayout) this._payOut();
     return true;
   }
 
@@ -250,6 +280,9 @@ export class Chest {
         return;
       case 'duplicator':
         this._duplicate();
+        return;
+      case 'equipment':
+        this._grantEquipment();
         return;
       default:
         this._grantItem();
@@ -312,6 +345,29 @@ export class Chest {
     this.game.spawnItemPickup(chosen.item, spawn);
     this.game.fx.explosion(spawn, 3.2, RARITY[chosen.item.rarity].hex, 0.8);
     this.game.ui.toast(`Duplicating ${chosen.item.name}`, RARITY[chosen.item.rarity].color);
+  }
+
+  /**
+   * Hands over a piece of equipment, and says what it cost you.
+   *
+   * Never the one you are already holding — a pod that offers you your own
+   * equipment back for full price is a pod that wasted your walk.
+   */
+  _grantEquipment() {
+    const inv = this.game.inventory;
+    if (!inv) return;
+    const held = inv.equipment;
+    const pool = EQUIPMENT.filter((e) => e.id !== held?.id);
+    const pick = this.game.rng.pick(pool.length ? pool : EQUIPMENT);
+    const dropped = inv.equip(pick.id);
+    const spawn = this.position.clone();
+    spawn.y += 2.2;
+    this.game.fx.explosion(spawn, 3.2, 0xff8a3d, 0.8);
+    this.game.ui.toast(
+      dropped ? `${pick.name} — dropped ${dropped.name}` : `${pick.name} equipped — X`,
+      '#ff8a3d',
+    );
+    this.game.chat?.system(`Equipment: ${pick.name}. ${pick.desc}`, '#ff8a3d');
   }
 
   _grantItem() {
@@ -832,6 +888,7 @@ export class PickupManager {
           if (o.kind === 'gold') {
             const g = player.addGold(o.value);
             this.game.ui.goldNumber(o.mesh.position, g);
+            this.game.inventory?.trigger('onGold', { amount: g, position: o.mesh.position });
           } else {
             player.heal(o.value, 'Health Orb');
           }

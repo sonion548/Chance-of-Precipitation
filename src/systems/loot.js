@@ -93,6 +93,9 @@ export function chestCost(kind, difficulty) {
     // A duplicator is not a roll — it is a guaranteed extra stack of something
     // you have already decided you want, so it is priced above a Large chest.
     duplicator: ECONOMY.duplicatorMult,
+    // A pod is priced between a chest and a large one: what comes out is always
+    // useful, and always the only one of its kind you can carry.
+    equipment: ECONOMY.equipmentPodMult,
     // The altar, the cache and the forge are not bought with gold at all.
     altar: 0, cache: 0, forge: 0,
   }[kind] ?? 1;
