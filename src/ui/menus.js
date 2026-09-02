@@ -504,6 +504,12 @@ export class Menus {
         </div>
       </div>
       <p class="wd-desc">${esc(char.desc)}</p>
+      ${char.passive ? `<div class="wd-ability">
+        <span class="wa-key">${char.passive.icon ?? '★'}</span>
+        <div class="wa-body"><h6>${esc(char.passive.name)}
+          <span style="color:var(--dim);font-size:11px">PASSIVE</span></h6>
+          <p>${esc(char.passive.desc)}</p></div>
+      </div>` : ''}
       <div class="wd-ability">
         <span class="wa-key">SHIFT</span>
         <div class="wa-body"><h6>${esc(char.utility.name)}
@@ -519,7 +525,7 @@ export class Menus {
       ${char.ultimate ? `<div class="wd-ability ult">
         <span class="wa-key">F</span>
         <div class="wa-body"><h6>${esc(char.ultimate.name)}
-          <span style="color:var(--gold);font-size:11px">ULTIMATE · charges from kills and damage taken</span></h6>
+          <span style="color:var(--gold);font-size:11px">ULTIMATE · charges from damage dealt, kills and damage taken</span></h6>
           <p>${esc(char.ultimate.desc)}</p></div>
       </div>` : ''}`;
 
@@ -544,7 +550,7 @@ export class Menus {
       </div>
       <div class="wd-ability">
         <span class="wa-key">${w.secondary.key}</span>
-        <div class="wa-body"><h6>${esc(w.secondary.name)} <span style="color:var(--dim);font-size:11px">${w.secondary.cooldown}s</span></h6><p>${esc(w.secondary.desc)}</p></div>
+        <div class="wa-body"><h6>${esc(w.secondary.name)} <span style="color:var(--dim);font-size:11px">${w.secondary.sustain ? 'HELD · no cooldown' : `${w.secondary.cooldown}s${(w.secondary.charges ?? 1) > 1 ? ` · ${w.secondary.charges} charges` : ''}`}</span></h6><p>${esc(w.secondary.desc)}</p></div>
       </div>
 `;
 
@@ -879,7 +885,7 @@ export class Menus {
       [['moveForward', 'moveLeft', 'moveBack', 'moveRight'].map(primary).join(' '), 'Move — relative to the camera, not to the character'],
       ['Mouse', 'Look — the camera turns on its own; the body follows when it has to'],
       [bound('primary'), 'Primary attack'],
-      [bound('secondary'), 'Secondary ability (hold to charge where applicable)'],
+      [bound('secondary'), 'Second ability — press, hold, or hold to charge, depending on the character'],
       [bound('aim'), 'Aim — pulls the camera in and narrows the view'],
       [bound('utility'), 'Utility ability (character-specific)'],
       [bound('special'), 'Special ability (character-specific)'],

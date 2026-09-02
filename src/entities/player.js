@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PLAYER, CAMERA } from '../core/config.js';
-import { clamp, clamp01, damp, armorMultiplier, angleLerp, wrapAngle } from '../core/mathx.js';
+import { clamp, clamp01, damp, armorMultiplier, angleLerp } from '../core/mathx.js';
 import { audio } from '../core/audio.js';
 import { settings } from '../core/settings.js';
 import { moveWithCollision, raycastWorld, raycastBoxes } from '../systems/physics.js';
@@ -90,11 +90,18 @@ export class Player {
     this.dead = false;
 
     this.dashTime = 0;
+    // Parry: a window, not a state. Non-zero means the next thing to touch you
+    // is going to regret it — see `takeDamage`.
+    this.parryTime = 0;
+    // Overshield: what Bulwark's passive is waiting on, so it can only fire
+    // once every twenty seconds however many big hits arrive in between.
+    this.overshieldTimer = 0;
     this.dashDir = new THREE.Vector3();
     this.dashPitched = false;     // dash flies its own line, gravity suspended
     this.dashSpec = null;         // { damage, radius, onHit, hit:Set } for a piercing dash
     // Movement states driven by character abilities.
     this.grapple = null;          // { anchor, time, enemy }
+    this.diveSlam = null;         // { target, speed, onLand } — a committed drop
     this.shieldCharge = null;     // { dir, time, hit:Set }
     this.flight = null;           // { time, riseSpeed, hoverSpeed, speedMult, color }
 
@@ -186,6 +193,13 @@ export class Player {
     if (affix) { atkSpeed *= 1.15; moveMult *= 1.15; }
     const bastion = this.buffs.get('bastion');
     if (bastion) damageTakenMult *= 1 - bastion.power;
+    /* Bulwark behind his plate. Refreshed every frame the button is held, so
+       it is a posture rather than a duration.
+       The only cost is that he cannot attack, which is paid continuously for
+       as long as he holds it — the ability has no cooldown precisely because
+       holding it *is* the cooldown. */
+    const guard = this.buffs.get('guard');
+    if (guard) { damageTakenMult *= 1 - guard.power; moveMult *= guard.extra?.move ?? 1; }
 
     /* Precision weapons trade the dice for the multiplier.
      *
@@ -238,6 +252,26 @@ export class Player {
     if (prevMax !== undefined && maxHealth > prevMax) this.health += maxHealth - prevMax;
     this.health = clamp(this.health, 0, maxHealth);
     this.statsDirty = false;
+  }
+
+  /**
+   * What the character's own passive does to its movement speed, right now.
+   *
+   * Kept out of `recomputeStats` on purpose: Halcyon's altitude changes every
+   * frame he is in the air, and a stat that has to be invalidated sixty times a
+   * second is not a cached stat. The rig is handed the same number so the gait
+   * still knows what a full stride is at speed.
+   */
+  passiveMoveMult() {
+    return this.char.passive?.moveMult?.(this) ?? 1;
+  }
+
+  /** Grants a barrier worth a fraction of max health, capped at one bar. */
+  grantOvershield(fraction, label = 'OVERSHIELD', color = '#8fd0ff') {
+    const amount = this.stats.maxHealth * fraction;
+    this.barrier = Math.min(this.stats.maxHealth, this.barrier + amount);
+    this.game.fx.ring(this.position, 0.6, 3.4, 0x8fd0ff, 0.5, 0.9);
+    this.game.ui.toast(label, color);
   }
 
   // ------------------------------------------------------------------ xp / level
@@ -300,6 +334,14 @@ export class Player {
   takeDamage(amount, opts = {}) {
     if (this.dead || this.invulnerable > 0) return 0;
     if (this.dashTime > 0 && this.dashIFrames > 0) return 0;
+    // The parry window eats the hit whole and throws it back. Asked before
+    // armour, because what is reflected is the blow that was thrown, not the
+    // fraction of it your plate would have let through.
+    if (this.parryTime > 0 && !opts.dot) {
+      this.parryTime = 0;
+      this.game.combat?.onParried(amount, opts);
+      return 0;
+    }
 
     let dmg = amount * this.stats.damageTakenMult * armorMultiplier(this.stats.armor);
     dmg = this.game.inventory.modifyIncoming({ amount: dmg, source: opts.source, raw: amount });
@@ -323,6 +365,8 @@ export class Player {
     this.game.inventory.trigger('onDamaged', { amount: dmg, source: opts.source });
     // Half the ultimate meter is bought with your own health.
     this.game.combat?.noteDamageTaken(dmg);
+    // A character passive may have something to say about being hit.
+    this.char.passive?.onDamaged?.(this, dmg, amount, opts);
 
     const hpFrac = this.health / this.stats.maxHealth;
     if (hpFrac <= 0.25 && hpFrac > 0) this.game.inventory.trigger('onLowHealth', {});
@@ -340,6 +384,7 @@ export class Player {
     this.dead = true;
     this.health = 0;
     this.flight = null;
+    this.diveSlam = null;
     this.game.fx.deathBurst(this.chestPosition, 0xff4d5e, 2.2);
     this.game.engine.addShake(1.4);
     this.game.onPlayerDeath(source);
@@ -367,6 +412,8 @@ export class Player {
   }
 
   _updateTimers(dt) {
+    this.parryTime = Math.max(0, this.parryTime - dt);
+    this.overshieldTimer = Math.max(0, this.overshieldTimer - dt);
     let dirty = false;
     for (const [id, b] of this.buffs) {
       b.time -= dt;
@@ -410,7 +457,7 @@ export class Player {
       this.camPitch -= look.y * sens;
       this.camPitch = clamp(this.camPitch, CAMERA.minPitch, CAMERA.maxPitch);
     }
-    if (this.dead) { this._updateBodyFacing(dt, 0); this._updateModel(dt); return; }
+    if (this.dead) { this._updateBodyFacing(dt); this._updateModel(dt); return; }
 
     const axis = input.moveAxis();
     // Movement is camera-relative — W is always "away from the camera",
@@ -420,14 +467,19 @@ export class Player {
     // (-cos y, 0, sin y) — the negation of this is left, which is what D used to do.
     _right.set(-_fwd.z, 0, _fwd.x);
     this.moveBasis = { fwd: _fwd, right: _right, axis };
-    this._updateBodyFacing(dt, Math.hypot(axis.x, axis.y));
+    this._updateBodyFacing(dt);
 
     // --- Character movement states take over from normal locomotion ---
     if (this.dashTime > 0) { this._tickDash(dt, world); return; }
+    if (this.diveSlam) { this._tickDiveSlam(dt, world); this._updateAim(world); this._updateModel(dt); return; }
     if (this.grapple) { this._tickGrapple(dt, world); return; }
     if (this.shieldCharge) { this._tickShieldCharge(dt, world); return; }
 
-    // --- Flight: a whole different relationship with the floor ---
+    /* --- Flight: a whole different relationship with the floor ---
+       A character whose thrusters are innate is simply never without them: the
+       flight is re-armed the moment anything takes it away, so it is a property
+       of the body rather than an ability with a duration. */
+    if (this.char.infiniteFlight && !this.flight) this._startInnateFlight();
     if (this.flight) this._tickFlight(dt);
 
     // --- Horizontal acceleration ---
@@ -440,7 +492,8 @@ export class Player {
     // Flying keeps full authority over your own direction — an aircraft that
     // handles like a thrown rock is not a flying character, it is a jump.
     const flightSpeed = this.flight ? (this.flight.speedMult ?? 1) : 1;
-    const targetSpeed = this.stats.moveSpeed * flightSpeed * (wishLen > 0 ? 1 : 0);
+    const targetSpeed = this.stats.moveSpeed * flightSpeed * this.passiveMoveMult()
+      * (wishLen > 0 ? 1 : 0);
     const accel = (this.grounded || this.flight) ? 62 : 62 * PLAYER.airControl;
     this.velocity.x = damp(this.velocity.x, wish.x * targetSpeed, accel / 6, dt);
     this.velocity.z = damp(this.velocity.z, wish.z * targetSpeed, accel / 6, dt);
@@ -503,42 +556,28 @@ export class Player {
 
   /* ---------------------------------------------------------------- facing */
   /**
-   * Where the body points, which is not where the camera points.
+   * Where the body points, which is now always where the camera points.
    *
-   * Free running turns the character into its own travel direction, the way a
-   * person actually runs. Anything that involves the weapon — aiming, firing,
-   * a charged shot, a recent hit, an ability — pulls the body round to the
-   * camera, because the gun is locked to the crosshair and a torso facing
-   * ninety degrees off it looks like two models sharing a position.
+   * The body used to turn into its own travel direction whenever you were not
+   * fighting, so running left across the screen turned the character side-on
+   * and you spent most of a stage looking at an ear. Everything the character
+   * does — the weapon in the hand, every ability, the crosshair itself — is
+   * resolved along the camera's line, and a body facing ninety degrees off it
+   * is a second model sharing a position with the first.
    *
-   * `pitch` is always the camera's: the spine leans towards whatever you are
-   * looking at whether or not the hips agree.
+   * So the hips always face straight ahead and the *legs* say which way you
+   * are travelling. `characterRig` already blends a run, a backpedal and a
+   * side-step out of the velocity in the body's own frame, which is exactly
+   * the gait a person running sideways while watching something has.
+   *
+   * `pitch` is the camera's for the same reason: the spine leans towards
+   * whatever you are looking at.
    */
-  _updateBodyFacing(dt, moveAmount) {
+  _updateBodyFacing(dt) {
     this.pitch = this.camPitch;
     if (this.dead) return;
-
-    const combat = this.aiming
-      || this.game.combat?.firing || this.game.combat?.beamActive || this.game.combat?.charging
-      || this.combatTimer > 0 || this.grapple || this.shieldCharge || this.dashTime > 0;
-
-    let target = this.camYaw;
-    let rate = CAMERA.bodyTurnCombat * (settingsTurnSnap());
-    if (!combat) {
-      const speed = this.speedXZ;
-      if (moveAmount > 0.05 && speed > 1.2) {
-        target = Math.atan2(this.velocity.x, this.velocity.z);
-        rate = CAMERA.bodyTurnFree;
-      } else {
-        // Standing still: drift back towards the camera slowly, and only once
-        // the camera has swung far enough that the pose reads as wrong.
-        const off = Math.abs(wrapAngle(this.camYaw - this.yaw));
-        if (off < 1.15) return;
-        target = this.camYaw;
-        rate = 4.5;
-      }
-    }
-    this.yaw = angleLerp(this.yaw, target, 1 - Math.exp(-rate * dt));
+    const rate = CAMERA.bodyTurn * (settingsTurnSnap());
+    this.yaw = angleLerp(this.yaw, this.camYaw, 1 - Math.exp(-rate * dt));
   }
 
   /* ---------------------------------------------------------------- ability movement */
@@ -658,6 +697,22 @@ export class Player {
    * The grace window exists so taking off from the floor does not immediately
    * count as landing on it.
    */
+  /**
+   * Thrusters that were never bought and cannot run out.
+   *
+   * Deliberately quiet where `startFlight` is loud — no ring, no toast, no
+   * fuel — because this is not an ability going off, it is how the character
+   * stands up. He sinks about three metres a second with nothing held, which
+   * is what lets him touch the floor, take a fight and leave again without ever
+   * pressing anything.
+   */
+  _startInnateFlight() {
+    this.flight = {
+      time: Infinity, maxTime: Infinity, riseSpeed: 12, hoverSpeed: -3.4,
+      speedMult: 1, color: 0xff7a2a, grace: 0, endless: true, innate: true,
+    };
+  }
+
   startFlight({ duration = 6, riseSpeed = 11, hoverSpeed = -1.4, speedMult = 1.1, color = 0x7fe0ff, endless = false } = {}) {
     this.flight = { time: duration, maxTime: duration, riseSpeed, hoverSpeed, speedMult, color, grace: 0.45, endless };
     this.grounded = false;
@@ -672,8 +727,11 @@ export class Player {
     f.grace = Math.max(0, f.grace - dt);
     f.time -= dt;
     if (f.time <= 0) { this.endFlight(false); return; }
-    // Exhaust. Cheap, and it is the only thing that says "this is costing fuel".
-    if (this.game.frame % 2 === 0) {
+    /* Exhaust. Cheap, and it is the only thing that says "this is costing
+       fuel" — so innate thrusters only show it when they are actually working
+       against gravity, rather than smoking continuously for a whole run. */
+    const show = f.innate ? this.velocity.y > 1 && this.game.frame % 3 === 0 : this.game.frame % 2 === 0;
+    if (show) {
       this.game.fx.spawnParticle(
         _v2.set(this.position.x, this.position.y + 0.3, this.position.z),
         _v.set((Math.random() - 0.5) * 2.2, -4 - Math.random() * 3, (Math.random() - 0.5) * 2.2),
@@ -689,6 +747,76 @@ export class Player {
     this.flight = null;
     this.game.fx.ring(this.position, 0.3, 3, f.color, 0.35, 0.7);
     if (landed && !f.endless && f.time > 0) this.game.combat?.reduceCooldowns(f.time * 0.5);
+  }
+
+  /**
+   * A committed drop: straight at a point on the ground, fast, and it hurts
+   * when it arrives.
+   *
+   * Not a dash and not the meteor slam. A dash carries you along a direction
+   * for a fixed time; this travels to a *place*, arrives when it gets there,
+   * and cannot be steered on the way — which is what makes choosing the place
+   * the entire skill of the ability. It also cannot be interrupted, so the
+   * i-frames are honest rather than generous: you are safe because you are
+   * moving at forty metres a second, not because the ability says so.
+   *
+   * `straightDown` ignores the aim and drops on the spot, which is what a
+   * ground slam is when the character is already above what he wants to hit.
+   */
+  startDiveSlam({
+    speed = 46, radius = 8, maxRange = 34, straightDown = false,
+    color = 0xff7a2a, iframes = 0.25, onLand = null,
+  } = {}) {
+    void radius;
+    const target = new THREE.Vector3();
+    if (straightDown) {
+      target.copy(this.position);
+      target.y = this.game.arena.groundHeightAt(this.position.x, this.position.z, this.position.y + 1);
+    } else {
+      target.copy(this.aimPoint);
+      // Cap the reach so it stays a slam rather than a teleport with a crater.
+      _v.copy(target).sub(this.position);
+      if (_v.length() > maxRange) target.copy(this.position).addScaledVector(_v.normalize(), maxRange);
+      target.y = this.game.arena.groundHeightAt(target.x, target.z, target.y + 3);
+    }
+    this.diveSlam = { target, speed, color, onLand, time: 0 };
+    this.dashIFrames = Math.max(this.dashIFrames || 0, iframes);
+    this.invulnerable = Math.max(this.invulnerable, iframes);
+    this.game.fx.ring(this.position, 0.4, 4, color, 0.35, 0.8);
+  }
+
+  _tickDiveSlam(dt, world) {
+    const d = this.diveSlam;
+    d.time += dt;
+    _v.copy(d.target).sub(this.position);
+    const dist = _v.length();
+    const step = d.speed * dt;
+    // Arrived, ran out of patience, or hit something on the way: all three end
+    // it here, because a slam that never lands is a player stuck in the air.
+    if (dist <= step || d.time > 1.6) {
+      const landing = this.position.clone();
+      this.diveSlam = null;
+      this.velocity.set(0, 0, 0);
+      d.onLand?.(landing);
+      return;
+    }
+    _v.divideScalar(dist);
+    this.velocity.copy(_v).multiplyScalar(d.speed);
+    const res = moveWithCollision(this, _v.multiplyScalar(step), world);
+    this.grounded = res.grounded;
+    if (this.game.frame % 2 === 0) {
+      this.game.fx.spawnParticle(
+        _v2.copy(this.position).setY(this.position.y + 0.5),
+        _v.set((Math.random() - 0.5) * 3, 3 + Math.random() * 3, (Math.random() - 0.5) * 3),
+        { color: d.color, size: 0.18, life: 0.35, gravity: 2, drag: 0.93 },
+      );
+    }
+    if (res.grounded || res.hitWall) {
+      const landing = this.position.clone();
+      this.diveSlam = null;
+      this.velocity.set(0, 0, 0);
+      d.onLand?.(landing);
+    }
   }
 
   /**
@@ -879,7 +1007,7 @@ export class Player {
       lookYaw: this.camYaw,
       velocity: this.velocity,
       speed: this.speedXZ,
-      moveSpeed: this.stats.moveSpeed,
+      moveSpeed: this.stats.moveSpeed * this.passiveMoveMult(),
       grounded: this.grounded,
       aiming: this.aiming,
       firing: !!this.game.combat?.firing,
@@ -888,7 +1016,10 @@ export class Player {
       grapple: !!this.grapple,
       cloaked: this.buffs.has('cloak'),
       aimPoint: this.aimPoint,
-      flying: !!this.flight,
+      // Standing on something is standing, whatever the thrusters are doing.
+      // Diver's are never off, so without this he would walk around a stage
+      // with his legs trailing behind him like a dropped puppet.
+      flying: !!this.flight && !this.grounded,
       // Normalised throttle: +1 climbing flat out, 0 holding height, -1 sinking.
       // Read off the velocity rather than the button so it eases with the
       // damping the thrusters already have instead of snapping on the keypress.

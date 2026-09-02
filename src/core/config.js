@@ -56,10 +56,13 @@ export const CAMERA = {
   collisionPad: 0.3,        // stop this far short of whatever we hit
   minDistance: 1.55,
   groundClearance: 0.55,   // never closer than this to whatever is underneath
-  // The body only turns to match the camera when you are doing something that
-  // needs it to. These are the two speeds it turns at.
-  bodyTurnCombat: 16,
-  bodyTurnFree: 9,
+  /* How fast the body swings round to the camera.
+     There used to be two of these — a fast one for when the weapon needed to
+     be on the crosshair and a slow one for free running, where the character
+     turned into its own travel direction instead. The body faces the camera
+     at all times now, so there is one speed and it is the fast one; the legs
+     carry the travel direction. */
+  bodyTurn: 16,
 };
 
 export const DIRECTOR = {
@@ -189,6 +192,30 @@ export const ULTIMATE = {
   perBossKill: 11,
   // Per 1% of your max health actually lost. A full bar is worth six points.
   perHealthPercent: 0.06,
+  /* Per 1% of an enemy's *own* max health you take off it.
+   *
+   * The meter used to pay out only for finishing things and for bleeding,
+   * which meant the two characters who spend a whole fight chipping a boss
+   * down earned nothing for it while the one who cleaned up a spawn wave got
+   * a bar. Damage is what an ultimate is actually made of, so damage is what
+   * buys it: measured as a fraction of the target rather than as raw numbers,
+   * so a build with ten times the damage does not charge ten times as fast —
+   * it kills the same body ten times quicker and is paid the same for it.
+   *
+   * Capped per hit at `maxPerHit`, which is deliberately exactly one whole
+   * body: `takeDamage` reports what was thrown rather than what fitted, so a
+   * 2600% slam into a husk returns fifteen times the husk's health, and
+   * without the cap one ultimate would pay for the next four. Overkill is
+   * worth the thing you killed and not a point more.
+   *
+   * Sized against the director: a five-minute stage spawns about 56 bodies, so
+   * clearing one on damage alone is worth a little under a full meter. Added
+   * to what kills and blood already paid, an ultimate now arrives about once a
+   * stage rather than once every two — which is the point of paying for damage
+   * at all. It is the largest single source now, as it should be: the meter is
+   * meant to measure how much fighting you have done. */
+  perEnemyHealthPercent: 0.016,
+  maxPerHit: 1.6,
   perSecond: 0.035,
   startCharge: 0,
 };

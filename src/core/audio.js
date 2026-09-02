@@ -307,6 +307,11 @@ export class Audio {
       beam: { body: 700, decay: 0.06, noise: 5200, gain: 0.22, type: 'sine' },
       scythe: { body: 340, decay: 0.22, noise: 4200, gain: 0.5, type: 'triangle' },
       fists: { body: 150, decay: 0.14, noise: 1800, gain: 0.7, type: 'triangle' },
+      // The three held things that are not guns. A blade is air, a chain is
+      // iron on iron, and a spear is somewhere between the two.
+      shadowblade: { body: 420, decay: 0.18, noise: 4800, gain: 0.42, type: 'triangle' },
+      chainhat: { body: 190, decay: 0.2, noise: 2200, gain: 0.55, type: 'triangle' },
+      spear: { body: 300, decay: 0.15, noise: 3400, gain: 0.45, type: 'triangle' },
     }[model] || { body: 220, decay: 0.12, noise: 2600, gain: 0.5, type: 'square' };
 
     const v = this._voice(`shoot:${model}`, { position, gain: spec.gain, throttle: 0.022, send: 0.16 });

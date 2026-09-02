@@ -55,23 +55,32 @@ across the head and chest.
 
 ## Content
 
-- **8 characters** — Vanguard (baseline), **Unloader** (grapple + momentum punch, the
-  Loader-alike), Wraith (glass cannon, blink), Bulwark (tank, shield charge + bastion),
-  **Halcyon** (flies; low health, negative armour, slightly softer damage, impact bombs),
-  **Dasher** (marking spear on two charges + a look-directed piercing dash that refunds
-  itself on a marked hit; the thinnest frame in the game, and the hardest hitting — matte
-  black plate carried entirely by an additive aura), **Chain** (straw hat and robe; one hat,
-  thrown three different ways), **Sniper** (a bolt gun that never rolls a crit and goes
-  looking for one instead — the seam behind the glass — plus a cloak to leave with, a range
-  card that strips armour off a circle of ground, and an ultimate that is just the rifle at
-  four times the rate with the aiming taken out). A character sets base stats plus utility,
-  special and
-  ultimate, and names the one weapon it carries — weapons are not a separate choice.
+- **9 characters** — Vanguard (baseline), **Unloader** (a slow, committed punch off
+  alternating fists; grapple + momentum punch, the Loader-alike), Wraith (glass cannon; twin
+  blades worth four times as much at the hilt as at the tip, blink, and two seconds of being
+  neither hittable nor findable), Bulwark (tank; an eight-round shotgun that reaches 15m and a
+  shield he can simply hold up), **Halcyon** (flies; a white beam with no falloff at any
+  range, impact bombs, low health and negative armour), **Dasher** (a three-hit lance combo
+  ending in a longer thrust, a half-second parry, and a look-directed piercing dash that
+  refunds itself on a marked hit; the thinnest frame in the game and the hardest hitting),
+  **Chain** (straw hat and robe; one hat thrown three ways plus a second one swung on a
+  chain), **Sniper** (a bolt gun that never rolls a crit and goes looking for one instead —
+  the seam behind the glass — plus a cloak to leave with and an ultimate that is just the
+  rifle with the aiming taken out), and **Diver** (a drop-suit that never has to land: fire
+  patches thrown onto the floor as ammunition, and a slam that detonates every one it lands
+  on). A character sets base stats plus a **passive**, a utility, a special and an ultimate,
+  and names the kit it carries — the M1 and the Q ability — which nobody else can hold.
 - **Four of them are authored meshes** — Halcyon, Dasher, Unloader and Sniper ship as glTF and are
   skeletoned, skinned and painted at load time by `entities/authoredRig.js`; the rest are
   built from primitives by `entities/models.js`. An authored mesh also *carries* its weapon:
-  the geometry was sculpted into its hand, so it is skinned to the weapon mount and aimed
-  there rather than having a procedural weapon model attached. See "Adding a character" in the
+  the geometry was sculpted into its hand, so it is skinned to the weapon mount rather than
+  having a procedural weapon model attached. Held weapons no longer swivel onto the crosshair
+  — a weapon is welded into the carry the art was drawn in and moves only because the arm
+  did, which is what makes it read as belonging to whoever is holding it. `aimWeapon` is the
+  one exception and one character sets it: Sniper, whose whole identity is the line from an
+  optic to a body. Two characters carry something in the *other* hand as well — Bulwark's
+  plate and Wraith's second blade — and `offhandHeld` keeps that arm out of the weapon
+  support pose, which was bringing a shield up across the chest every time a target appeared. See "Adding a character" in the
   README, and `tools/rigview.html` / `tools/modelview.html` for the two pages every
   measurement in that module was taken with. A spec can also repair a mesh at load time:
   `strip` takes off geometry the character should not have (Unloader's cargo hook), and
@@ -91,20 +100,34 @@ across the head and chest.
   after the gait and blends over it by `rig.fly`, driven by `flying` / `flightClimb` off the
   player. Legs trail and scissor, ankles point, the trunk pitches with the throttle, and the
   arms yield to aiming and to attack animations rather than fighting them.
-- **Ultimates** — one per character, with **no cooldown**. A meter fills from kills
+- **Ultimates** — one per character, with **no cooldown**. A meter fills from **damage dealt**
+  (0.016 per 1% of the target's own max health, capped at one whole body per hit), from kills
   (0.28 / 0.9 / 11 per normal / elite / boss) and from damage taken (0.06 per 1% of max
   health lost), plus a 0.035/s trickle; spending empties it. Tuning lives in `ULTIMATE` in
-  `core/config.js`, priced against the director for roughly **one ultimate every two
-  stages** — the old rates paid out 3–5.5 meters per stage, which made them a rotation
-  rather than the run-swinging thing they are meant to be.
-- **9 weapons** — MK-4 Sidearm, Breach Scattergun, Arc Emitter, Rivet Driver, Seeker
-  Launcher, Photon Lance, Void Reaper, **Siege Gauntlets**, **Meridian Longrifle**. All but
-  the Longrifle are tuned to near-identical single-target DPS (~64–84 at base damage) so the
-  choice is about *how* you fight. Every ability names an `anim` and the rig acts it out
-  (slash / punch / thrust / pump / lob).
-- **Siege Gauntlets** is the melee option, and it reaches: each punch is a 9m compression
-  cone (`ctx.shockwave()`) and the secondary fires both gauntlets at the floor to ride the
-  blast straight up (`ctx.jetBoost()`), jumps refunded.
+  `core/config.js`. Damage is the largest source and is measured as a *fraction of the
+  target* rather than as raw numbers, so a build with ten times the damage kills the same
+  husk ten times quicker and is paid the same for it; the cap is exactly one body because
+  `takeDamage` reports what was thrown rather than what fitted, and without it a 2600% slam
+  into a husk would pay for the next four ultimates. Clearing a stage on damage alone is
+  worth a little under a full meter, so an ultimate arrives about **once a stage**.
+- **9 kits, one per character** — a kit is the M1 and the Q ability, and nobody can carry
+  anybody else's. That is what lets each one be built for exactly one body: Bulwark's shotgun
+  reaches 15m because only a 200-health frame could walk into that range, Halcyon's beam has
+  no falloff at all because a bombardier four hundred metres up has to reach the ground, and
+  Wraith's blades pay 480% at the hilt against 120% at the tip because that is the only thing
+  that makes 88 health walk *towards* something. Every ability names an `anim` — or `animFor`
+  when it changes shot to shot — and the rig acts it out (slash / swing / punch / punchL /
+  thrust / pump / lob / beam / shoot).
+- **Q has four shapes**: a plain press, `charges: n` (Diver's three fire patches on
+  independent timers), `charge: t` (a wind-up), and `sustain: true` — an ability that is
+  simply true while the button is down. Bulwark's **Guard** is the only sustained one: 62%
+  less damage taken, no cooldown, and no attacking behind it. Holding it is the price;
+  charging a cooldown as well would be billing twice for the same thing.
+- **Passives** — one per character, and hooks rather than numbers. `damageMult(player, enemy)`
+  folds in at the end of `damageEnemy` (Desperation, Executioner, Momentum), `moveMult(player)`
+  is read every frame by the movement code (Altitude), `onDamaged` fires after a hit lands
+  (Overshield), `onHatHit` rides an ability (Chain Reaction). Each is read at the moment it
+  applies, which is what lets one depend on things a stat block cannot see.
 - **Meridian Longrifle** is the precision option and the only weapon that takes the dice
   away. `scope` on the weapon collapses the camera onto the eye at 15° FOV, hides the body
   and draws a lens overlay; every enemy carries a red seam box (`Enemy._buildWeakPoint`) that

@@ -1,7 +1,24 @@
 /**
- * Weapon arsenal.
+ * Character kits.
  *
- * Damage figures are multipliers of the player's current damage stat, so weapons
+ * This used to be an arsenal — a list of guns you unlocked, picked up and
+ * handed to whoever you happened to be playing. It is not one any more. Every
+ * character carries exactly one of these and can carry nothing else, so what
+ * each entry actually describes is *how that character fights*: the attack on
+ * M1 and the ability on Q. The other three — Shift, R and F — live on the
+ * character itself in `data/characters.js`, and the split is only which file
+ * they are written in, not what they are.
+ *
+ * The consequence worth stating: a kit is free to be strange. A weapon that
+ * anybody might pick up has to be balanced against everybody's stat line; one
+ * that exactly one 200-health character with a shield will ever fire can be
+ * built around that character and nothing else. So Bulwark's shotgun is short
+ * enough that only a body that can walk into range would carry it, Halcyon's
+ * beam has no falloff at all because a bombardier who is never on the ground
+ * has to be able to reach the ground, and Wraith's blades pay four times as
+ * much at the hilt as at the tip.
+ *
+ * Damage figures are multipliers of the player's current damage stat, so kits
  * scale automatically with levels and items.
  *
  * Every ability receives a combat context (see systems/combat.js) exposing:
@@ -9,12 +26,12 @@
  *   ctx.dir         normalised aim direction (Vector3)
  *   ctx.aimPoint    world point under the crosshair
  *   ctx.dmg         the player's current damage stat
- *   ctx.spawnBullet(spec) / ctx.hitscan(spec) / ctx.melee(spec) / ctx.spawnMortar(spec)
+ *   ctx.spawnBullet(spec) / ctx.hitscan(spec) / ctx.melee(spec) / ctx.shotgun(spec)
  *   ctx.recoil(n) / ctx.shake(n) / ctx.impulse(vec) / ctx.fx
  *
  * `proc` is the proc coefficient — how strongly a hit triggers on-hit items.
  *
- * A weapon may also opt into three things nothing else in the arsenal has:
+ * A kit may also opt into:
  *   scope: { fov, distance, sensitivity }  the camera goes to the eye while
  *                                          aiming, and the HUD draws a lens
  *   randomCrits: false                     crits are never rolled, only earned
@@ -22,18 +39,32 @@
  *                                          as n× that much crit damage instead
  * and `primary.activeReload: { time, window, cooldown }`, which takes the fire
  * button away after each shot until the reload bar is answered. The Meridian
- * Longrifle is the one weapon that carries it, and the only one in the arsenal
- * you have to answer a bar to keep firing.
+ * Longrifle is the one kit that carries it.
  *
  * `primary.magazine: { size, time }` is the other kind: a round is spent on
  * every shot, and when the last one goes the weapon stops for `time` seconds
  * flat — no window, nothing to get right, just a hole in your damage the
- * weapon's rhythm is priced around.
+ * kit's rhythm is priced around.
  *
- * `anim` names the body animation the ability plays: 'shoot' (a recoil punch
- * through the shoulder), 'pump', 'slash', 'punch', 'thrust', 'beam' or 'lob'.
- * It is a hint to the rig, not a state machine — see entities/characterRig.js.
- * An ability with no `anim` still recoils; it just does not act out a swing.
+ * The Q slot understands four shapes, and which one an ability is says most of
+ * what it is for:
+ *   plain            one press, one cooldown
+ *   `charges: n`     n uses on independent timers, like the Shift slot
+ *   `charge: t`      held to wind up, released to fire
+ *   `sustain: true`  true while the button is down; `onSustain(ctx, on)` is
+ *                    told when that changes and `whileHeld(ctx, dt)` runs every
+ *                    frame it is. `blocksPrimary` takes M1 away while it holds.
+ *
+ * `anim` names the body animation an ability plays: 'shoot', 'pump', 'slash',
+ * 'swing', 'punch', 'punchL', 'thrust', 'beam' or 'lob'. `animFor(ctx)` is the
+ * same thing for an attack whose animation changes shot to shot — a combo that
+ * ends on a thrust, a pair of fists that alternate. It is a hint to the rig,
+ * not a state machine; see entities/characterRig.js.
+ *
+ * `model` picks the held object (entities/models.js) and the report it makes
+ * (core/audio.js). It is welded into the hand and does not swivel to the
+ * crosshair — see `poseWeapon` — so what you see is a character holding a
+ * thing, not a character standing beside one.
  */
 
 export const WEAPONS = [
@@ -73,264 +104,294 @@ export const WEAPONS = [
 
   /* ------------------------------------------------------------------ */
   {
-    id: 'arc_emitter',
-    name: 'Arc Emitter',
-    icon: '⚡',
-    tag: 'Chaining · Crowd Control',
-    color: 0x6fd0ff,
-    model: 'rifle',
-    desc: 'Fires an ionised tether that leaps between targets. Damage falls off with each jump, but the chain never asks permission.',
-    displayStats: { Damage: '95% ×4', 'Fire Rate': '2.8/s', Range: 'Medium', Proc: '0.6' },
+    id: 'siege_gauntlets',
+    name: 'Siege Gauntlets',
+    icon: '🥊',
+    tag: 'Melee · Slow · Heavy',
+    color: 0xffb347,
+    model: 'fists',
+    desc: 'Two demolition drivers worn on the hands. One arm at a time, all the way through, and nothing about the rhythm is negotiable — the suit was built to move freight and it swings like it.',
+    lore: 'Rated for load-bearing walls. Nobody wrote down what else.',
+    displayStats: { Damage: '340%', 'Punch Rate': '1.6/s', Range: '7m', Proc: '1.0' },
     primary: {
-      name: 'Arc Bolt', key: 'M1', icon: '⌁', hold: true,
-      anim: 'shoot',
-      desc: 'Zap a target for 95% damage, chaining to 3 more for 70% each.',
-      cooldown: 0.36, scalesWithAttackSpeed: true,
+      /* Slow, and slow is the whole of it.
+         Every other primary in the game is something you hold down; this one is
+         a decision you commit to, and the reason it can hit for three and a
+         half times a hit is that you are standing still for two thirds of a
+         second afterwards. The arms alternate because a punch thrown twice off
+         the same shoulder is a man shadow-boxing, not a man hitting something. */
+      name: 'Punch', key: 'M1', icon: '🤜', hold: true,
+      animFor: (ctx) => (ctx.combo(2) === 0 ? 'punch' : 'punchL'),
+      desc: 'Drive a fist through everything 7m in front for 340% damage, right then left. Slow — this is one punch at a time.',
+      cooldown: 0.62, scalesWithAttackSpeed: true,
       fire(ctx) {
-        const hit = ctx.hitscan({ damage: ctx.dmg * 0.95, proc: 0.6, range: 70, color: 0x9fe0ff, tracer: true, thick: 0.05 });
-        if (hit) ctx.chain(hit, 3, ctx.dmg * 0.7, 15, 0x9fe0ff, 0.35);
-        ctx.recoil(0.7);
+        ctx.shockwave({
+          damage: ctx.dmg * 3.4, proc: 1.0, range: 7, angle: 0.8,
+          knockback: 13, color: 0xffb347,
+        });
+        ctx.recoil(2.2);
+        ctx.shake(0.1);
       },
     },
     secondary: {
-      name: 'Overload Sphere', key: 'Q', icon: '🔆',
-      anim: 'lob',
-      desc: 'Launch a slow orb that zaps everything within 14m for 70% damage 12 times.',
-      cooldown: 8.0,
+      name: 'Down Slam', key: 'Q', icon: '⬇️',
+      anim: 'punch',
+      desc: 'Drop straight down under full power, cratering for 620% damage in 9m and throwing everything caught away from you.',
+      cooldown: 5.0,
       fire(ctx) {
-        ctx.spawnBullet({
-          speed: 11, damage: 0, radius: 0.7, life: 7, color: 0x6fd0ff, glow: 2.4, gravity: 0, ghost: true,
-          aura: { radius: 14, interval: 0.4, damage: ctx.dmg * 0.7, proc: 0.3, color: 0x9fe0ff },
+        ctx.downSlam({
+          damage: ctx.dmg * 6.2, radius: 9, speed: 58, knockback: 26, color: 0xffd24b,
         });
-        ctx.recoil(1.2);
       },
     },
   },
 
   /* ------------------------------------------------------------------ */
   {
-    id: 'seeker_launcher',
-    name: 'Seeker Launcher',
-    icon: '🚀',
-    tag: 'Explosive · Area',
-    color: 0x8fbf6a,
-    model: 'launcher',
-    desc: 'Fires arcing charges that lock onto whatever is unlucky enough to be near the impact point. Clears rooms; also clears you if you are careless.',
-    displayStats: { Damage: '260% AoE', 'Fire Rate': '1.2/s', Range: 'Medium', Proc: '1.0' },
-    primary: {
-      name: 'Seeker Charge', key: 'M1', icon: '◆', hold: true,
-      anim: 'lob',
-      desc: 'Lob a charge that detonates for 260% damage in 8m.',
-      cooldown: 0.85, scalesWithAttackSpeed: true,
-      fire(ctx) {
-        ctx.spawnBullet({
-          speed: 46, damage: 0, radius: 0.3, life: 5, color: 0xa8e070, gravity: -22, homingRadius: 9, homingStrength: 3.4,
-          splash: { radius: 8, damage: ctx.dmg * 2.6, proc: 1.0, color: 0xa8e070, force: 12 },
-          detonateOnGround: true, trail: 1.2,
-        });
-        ctx.recoil(2.1); ctx.shake(0.12);
-      },
-    },
-    secondary: {
-      name: 'Cluster Barrage', key: 'Q', icon: '☄️',
-      anim: 'lob',
-      desc: 'Call down 9 mortars around your aim point for 220% damage each.',
-      cooldown: 9.0,
-      fire(ctx) {
-        for (let i = 0; i < 9; i++) {
-          ctx.spawnMortar({
-            target: ctx.aimPoint, scatter: 8, delay: i * 0.1,
-            splash: { radius: 7, damage: ctx.dmg * 2.2, proc: 0.7, color: 0xa8e070, force: 8 },
-          });
-        }
-        ctx.recoil(3); ctx.shake(0.3);
-      },
-    },
-  },
-
-  /* ------------------------------------------------------------------ */
-  {
-    id: 'photon_lance',
-    name: 'Photon Lance',
-    icon: '🔆',
-    tag: 'Beam · Ramping',
-    color: 0xff7ad4,
-    model: 'beam',
-    desc: 'A continuous coherent beam that heats up the longer it stays on a target — up to triple damage. Rewards commitment and punishes flinching. The ramp is what a boss is armoured against: against one it is worth barely a third as much.',
-    displayStats: { Damage: '58%/tick →170%', 'Tick Rate': '11/s', Magazine: '30 · 2s', 'vs Boss': 'ramp ×0.3', Proc: '0.15' },
-    /* The ramp is the weapon, and a boss is the one target that lets it sit at
-       the top of its curve for free.
-       Everything else in the arena moves, dies, or has to be re-acquired, which
-       is the cost the 3× was priced against; a boss is a stationary wall that
-       pays that cost once. So the *ramp* is cut against bosses rather than the
-       damage — the beam still opens at full strength, it just does not get to
-       triple itself for standing still. One number, read by both abilities. */
-    bossRamp: 0.3,
-    primary: {
-      name: 'Coherent Beam', key: 'M1', icon: '━', hold: true, beam: true,
-      anim: 'beam',
-      desc: 'Sustained beam dealing 58% damage per tick, ramping to 170% after 3s on target — but only to 93% against a boss. Thirty rounds in the cell, then two seconds of nothing.',
-      cooldown: 0.09, scalesWithAttackSpeed: true,
-      /* Thirty ticks is a little under three seconds held down — which is the
-         exact length of the ramp. The weapon reaches the top of its own curve
-         at almost the same moment the cell runs dry, so holding the beam on one
-         target now costs you the reload rather than being free forever. The two
-         seconds are flat: attack speed buys rounds, not hands. */
-      magazine: { size: 30, time: 2.0 },
-      fire(ctx) {
-        const heat = ctx.getHeat();
-        const ramp = 1 + 2.0 * heat;
-        const bossRamp = 1 + 2.0 * heat * 0.3;
-        const hit = ctx.hitscan({
-          damage: ctx.dmg * 0.58 * ramp, proc: 0.15, range: 130, thick: 0.05 + heat * 0.11,
-          color: heat > 0.6 ? 0xffd0f0 : 0xff7ad4, beam: 0.1, spread: 0,
-          bossScale: bossRamp / ramp,
-        });
-        ctx.setHeat(hit ? Math.min(1, heat + 0.055) : Math.max(0, heat - 0.02));
-        ctx.recoil(0.06);
-      },
-      onRelease(ctx) { ctx.decayHeat(); },
-    },
-    secondary: {
-      name: 'Prism Burst', key: 'Q', icon: '✳️',
-      anim: 'beam',
-      desc: 'Discharge stored light in a piercing lance for 620% damage, scaled by beam heat. A boss takes far less of the stored half.',
-      cooldown: 7.0,
-      fire(ctx) {
-        const heat = ctx.getHeat();
-        // Same split: half the burst is the base charge, half is stored heat,
-        // and only the stored half is cut down against a boss.
-        const stored = 0.5 + heat;
-        const bossStored = 0.5 + heat * 0.3;
-        ctx.hitscan({
-          damage: ctx.dmg * 6.2 * stored, proc: 1.0, range: 200, thick: 0.42,
-          color: 0xffb0e8, pierce: 99, beam: 0.35,
-          bossScale: bossStored / stored,
-        });
-        ctx.setHeat(0);
-        ctx.recoil(4); ctx.shake(0.45);
-      },
-    },
-  },
-
-  /* ------------------------------------------------------------------ */
-  {
-    id: 'void_reaper',
-    name: 'Void Reaper',
-    icon: '🌑',
-    tag: 'Piercing · Lifesteal',
+    id: 'shadow_blades',
+    name: 'Shadow Blades',
+    icon: '🗡️',
+    tag: 'Melee · Proximity',
     color: 0xa15bff,
-    model: 'voidblade',
-    desc: 'A blade folded out of a collapsed star. Every swing feeds you a little of what it takes. Requires getting uncomfortably close.',
-    displayStats: { Damage: '245% arc + 130% wave', 'Swing Rate': '2.2/s', Range: 'Melee → 26m', Proc: '1.0' },
+    model: 'shadowblade',
+    desc: 'A matched pair folded out of a collapsed star, one in each hand. They pay for reach in damage and then refuse to sell any of it back: at arm\'s length a cut is worth four times what the same cut is worth at the tip, so a character with 88 health and negative armour has exactly one way to do damage, and it is forward.',
+    displayStats: { Damage: '480% → 120%', 'Swing Rate': '2.4/s', Range: '6.5m', Proc: '1.0' },
     primary: {
-      name: 'Reaping Arc', key: 'M1', icon: '◜', hold: true,
+      name: 'Void Slashes', key: 'M1', icon: '◜', hold: true,
       anim: 'slash',
-      desc: 'A flat horizontal slash for 245% damage that heals you for 8% of what it deals — and throws the cut itself out as a crescent wave for another 130%, cleaving through everything it passes.',
-      cooldown: 0.45, scalesWithAttackSpeed: true,
+      desc: 'Cut with one blade and then the other for 480% damage in your face, falling to 120% at the very tip of the reach. Heals you for 7% of everything it takes.',
+      cooldown: 0.42, scalesWithAttackSpeed: true,
       fire(ctx) {
-        ctx.slashWave({
-          damage: ctx.dmg * 2.45, proc: 1.0, range: 6.4, angle: 1.5, lifesteal: 0.08,
-          color: 0xa15bff,
-          // The wave is the swing leaving the blade: same cut, still travelling.
-          wave: {
-            damage: ctx.dmg * 1.3, proc: 0.6, speed: 34, range: 26, radius: 2.6,
-            pierce: 99, lifesteal: 0.08,
-          },
+        ctx.melee({
+          damage: ctx.dmg * 4.8, proc: 1.0, range: 6.5, angle: 1.15,
+          lifesteal: 0.07, color: 0xa15bff, tilt: 0.3,
+          // 1.0 at the hilt down to 0.25 at the tip. Written as a curve rather
+          // than as two numbers so the middle of the swing is worth something
+          // specific instead of being whatever a lerp happened to produce.
+          rangeScale: (t) => 1 - 0.75 * t * t,
         });
         ctx.recoil(0.9);
       },
     },
     secondary: {
-      name: 'Blink Slash', key: 'Q', icon: '⟿',
-      anim: 'slash',
-      desc: 'Phase 14m along your line of sight — upward, downward, or across a gap — cutting everything on the path for 560% damage.',
-      cooldown: 4.5,
+      name: 'Phase', key: 'Q', icon: '🌑',
+      desc: 'Step out of the world for 2s: nothing can touch you and nothing can find you. Everything hunting you loses the thread and has to look again.',
+      cooldown: 10,
       fire(ctx) {
-        ctx.blinkSlash({ distance: 14, damage: ctx.dmg * 5.6, proc: 1.0, radius: 3.2, lifesteal: 0.12, color: 0xc98aff });
-        ctx.shake(0.3);
+        ctx.phase({ duration: 2, radius: 30, aggro: 2.4, color: 0xd94bff });
+        ctx.toast('PHASE', '#d94bff');
       },
     },
   },
 
-
   /* ------------------------------------------------------------------ */
   {
-    id: 'siege_gauntlets',
-    name: 'Siege Gauntlets',
-    icon: '🥊',
-    tag: 'Melee · Shockwave · Mobility',
-    color: 0xffb347,
-    model: 'gauntlet',
-    desc: 'Two demolition drivers worn on the hands. Each punch fires a compression charge a few metres out in front of the knuckles, and the same charge, pointed downward, will put you on a rooftop.',
-    lore: 'Rated for load-bearing walls. Nobody wrote down what else.',
-    displayStats: { Damage: '210% wave', 'Punch Rate': '2.9/s', Range: '9m cone', Proc: '0.8' },
+    id: 'breach_shotgun',
+    name: 'Breach Shotgun',
+    icon: '💥',
+    tag: 'Shotgun · Short',
+    color: 0xf97316,
+    model: 'shotgun',
+    desc: 'A short, ugly, eight-round thing carried in the hand that is not holding the plate. It reaches almost nowhere, which is the point: it is the weapon of the one character who can afford to walk all the way in and stand there.',
+    displayStats: { Damage: '420% close', Magazine: '8 · 1.8s', Range: '15m', Proc: '1.0' },
     primary: {
-      name: 'Shock Jab', key: 'M1', icon: '🥊', hold: true,
-      anim: 'punch',
-      desc: 'Punch a compression wave 9m out in front of you for 210% damage, knocking everything it catches backwards.',
-      cooldown: 0.35, scalesWithAttackSpeed: true,
+      name: 'Shotgun', key: 'M1', icon: '💥', hold: true,
+      anim: 'pump',
+      desc: 'Nine pellets for 420% damage together at close range, falling to a fifth of that by 15m. Eight in the tube, then a second and a half to fill it.',
+      cooldown: 0.72, scalesWithAttackSpeed: true,
+      magazine: { size: 8, time: 1.8 },
       fire(ctx) {
-        ctx.shockwave({
-          damage: ctx.dmg * 2.1, proc: 0.8, range: 9, angle: 0.95,
-          knockback: 15, color: 0xffb347,
+        ctx.shotgun({
+          pellets: 9, damage: ctx.dmg * 4.2, range: 15, spread: 0.075,
+          near: 4, falloff: 0.2, knockback: 5, color: 0xffb066,
         });
-        ctx.recoil(1.6);
+        ctx.recoil(3.2);
+        ctx.shake(0.16);
       },
     },
     secondary: {
-      name: 'Jet Boost', key: 'Q', icon: '🚀',
-      anim: 'punch',
-      desc: 'Fire both gauntlets at the floor and ride the blast straight up, refunding your jumps and blasting anything underneath for 260% damage.',
-      cooldown: 4.5,
-      fire(ctx) {
-        ctx.jetBoost({
-          up: 21, forward: 6, damage: ctx.dmg * 2.6, radius: 6.5, color: 0xffb347,
-        });
-      },
+      /* No cooldown, and it does not need one.
+         An ability you hold is an ability you are not shooting during, and for
+         the character whose damage is already the lowest in the descent that is
+         a real price paid continuously. Anything else — a duration, a timer, a
+         resource — would be charging twice for the same thing. */
+      name: 'Guard', key: 'Q', icon: '🛡️',
+      sustain: true, blocksPrimary: true, cooldown: 0,
+      desc: 'Hold to put the plate between you and everything: 62% less damage taken for as long as you hold it. You cannot attack behind it, and that is the whole of the price.',
+      onSustain(ctx, on) { ctx.guard(on, { reduction: 0.62, color: 0x6fd0ff }); },
+      whileHeld(ctx) { ctx.holdGuard({ reduction: 0.62, color: 0x6fd0ff }); },
+      fire() {},
     },
   },
 
   /* ------------------------------------------------------------------ */
   {
-    id: 'splitting_lance',
-    name: 'Splitting Lance',
-    icon: '🔻',
-    tag: 'Reach · Melee · Piercing',
-    color: 0x00ffa6,
-    model: 'spear',
-    desc: 'A long haft and a head of contained discharge. Every thrust goes through whatever it starts on and keeps going, which is the only reason a weapon with this little reserve is worth carrying at all.',
-    displayStats: { Damage: '150% ×3 pierce', 'Fire Rate': '2.6/s', Range: 'Reach', Proc: '0.7' },
+    id: 'palm_beam',
+    name: 'Palm Beam',
+    icon: '🔆',
+    tag: 'Beam · Infinite Range',
+    color: 0xffffff,
+    model: 'beam',
+    desc: 'A white line out of the right hand that does not care how far away anything is. No falloff, no travel time, no arc — which is the only kind of weapon that works from four hundred metres up, and the reason the cell is as small as it is.',
+    displayStats: { Damage: '62%/tick', 'Tick Rate': '13/s', Magazine: '40 · 1.6s', Range: 'Infinite', Proc: '0.2' },
     primary: {
-      name: 'Lance Thrust', key: 'M1', icon: '↑', hold: true,
-      anim: 'thrust',
-      desc: 'Drive the head through the line for 150%, piercing three.',
-      cooldown: 0.38, scalesWithAttackSpeed: true,
+      name: 'Beam', key: 'M1', icon: '━', hold: true, beam: true,
+      anim: 'beam',
+      desc: 'A continuous beam for 62% damage a tick at any range at all. Forty in the cell, then a second and a half of nothing.',
+      cooldown: 0.075, scalesWithAttackSpeed: true,
+      magazine: { size: 40, time: 1.6 },
       fire(ctx) {
         ctx.hitscan({
-          damage: ctx.dmg * 1.5, proc: 0.7, range: 4.6, thick: 0.42,
-          color: 0x00ffa6, pierce: 3, beam: 0.07, spread: 0,
+          damage: ctx.dmg * 0.62, proc: 0.2, range: 500, thick: 0.045,
+          color: 0xf2fbff, beam: 0.1, spread: 0,
         });
-        ctx.recoil(1.1);
+        ctx.recoil(0.06);
       },
     },
     secondary: {
-      name: 'Vault Cut', key: 'Q', icon: '⤢',
-      anim: 'slash',
-      /* The spear is a reach weapon with no answer to being surrounded, so the
-         secondary is the answer: it clears the ring you are standing in and
-         puts you somewhere else while it does. */
-      desc: 'Sweep the haft through everything within 6m for 380%, and ride the turn a short way out of the crowd.',
-      cooldown: 6.0,
+      name: 'Missile Cluster', key: 'Q', icon: '🚀',
+      anim: 'lob',
+      desc: 'Fire four small missiles down onto your aim point for 260% damage each in 5m.',
+      cooldown: 5.0,
       fire(ctx) {
-        // A full turn of the haft — `angle: PI` is every direction at once,
-        // which is what "the ring you are standing in" has to mean.
-        ctx.melee({
-          damage: ctx.dmg * 3.8, proc: 0.9, range: 6, angle: Math.PI,
-          color: 0x00ffa6, tilt: 0.15,
+        ctx.missileCluster({
+          count: 4, damage: ctx.dmg * 2.6, radius: 5, scatter: 3.5, color: 0x7fe0ff,
         });
-        ctx.dash({ speed: 26, duration: 0.22, iframes: 0.14, color: 0x00ffa6 });
-        ctx.recoil(2.4); ctx.shake(0.22);
+      },
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'black_lance',
+    name: 'Black Lance',
+    icon: '🔻',
+    tag: 'Reach · Combo',
+    color: 0x00ffa6,
+    model: 'spear',
+    desc: 'A long matte haft and a head of contained discharge, and a rhythm three swings long. Two cuts to hold a crowd off the body, then a thrust that goes considerably further than either of them and through whatever it starts on.',
+    displayStats: { Damage: '210% · 210% · 380%', 'Rate': '2.9/s', Range: '5.4m → 9m', Proc: '0.8' },
+    primary: {
+      /* Three hits, and the third is the reason for the first two.
+         A combo whose finisher is only bigger is a combo you can ignore; one
+         whose finisher is bigger *and reaches four metres further* changes
+         where you are standing, which is the one thing this character's whole
+         kit is about. */
+      name: 'Lance', key: 'M1', icon: '↑', hold: true,
+      animFor: (ctx) => (ctx.comboPeek(3) === 2 ? 'thrust' : 'slash'),
+      desc: 'Two cuts across everything within 5.4m for 210% each, then a thrust that goes 9m out and through three bodies for 380%.',
+      cooldown: 0.34, scalesWithAttackSpeed: true,
+      fire(ctx) {
+        const step = ctx.combo(3);
+        if (step < 2) {
+          ctx.melee({
+            damage: ctx.dmg * 2.1, proc: 0.8, range: 5.4, angle: 1.25,
+            color: 0x00ffa6, tilt: 0.2,
+          });
+          ctx.recoil(0.9);
+          return;
+        }
+        ctx.hitscan({
+          damage: ctx.dmg * 3.8, proc: 0.8, range: 9, thick: 0.42,
+          color: 0x3dffa5, pierce: 3, beam: 0.09, spread: 0, knockback: 7,
+        });
+        ctx.recoil(2.2);
+        ctx.shake(0.14);
+      },
+    },
+    secondary: {
+      /* Half a second, and nothing happens during it.
+         An ability that does something while it waits is one you press on
+         cooldown; one that does nothing at all is a read. Ten seconds is the
+         price of being wrong, and getting the dash back is what makes being
+         right worth the whole rotation. */
+      name: 'Parry', key: 'Q', icon: '⟠',
+      desc: 'A 0.5s window. Anything that lands in it does nothing at all and comes back at whoever threw it for 300%, and your dash is handed straight back.',
+      cooldown: 10,
+      fire(ctx) {
+        ctx.parry({ window: 0.5, reflect: 3.0, range: 22, iframes: 0.35, color: 0x3dffa5 });
+      },
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'chain_hat',
+    name: 'Chain Hat',
+    icon: '👒',
+    tag: 'Melee · Reach',
+    color: 0xff5a4d,
+    model: 'chainhat',
+    desc: 'A length of iron with the other hat on the end of it. Swung rather than thrown, so it does not chain and does not come back — it is simply the longest thing a man in a robe can hit you with, and that turns out to be quite long.',
+    displayStats: { Damage: '300%', 'Swing Rate': '2/s', Range: '7.5m', Proc: '1.0' },
+    primary: {
+      name: 'Chain Hat', key: 'M1', icon: '👒', hold: true,
+      anim: 'swing',
+      desc: 'Swing the chain through everything within 7.5m in front for 300% damage. It does not bounce — that is the other hat.',
+      cooldown: 0.5, scalesWithAttackSpeed: true,
+      fire(ctx) {
+        ctx.melee({
+          damage: ctx.dmg * 3.0, proc: 1.0, range: 7.5, angle: 1.05,
+          color: 0xff5a4d, tilt: 0.24, knockback: 6,
+        });
+        ctx.recoil(1.4);
+      },
+    },
+    secondary: {
+      name: 'Chain Pull', key: 'Q', icon: '⛓️',
+      anim: 'lob',
+      desc: 'Throw the chain at something for 180% and winch it in. Whatever it catches arrives at your feet, which is where the swing is.',
+      cooldown: 5.0,
+      fire(ctx) {
+        ctx.chainPull({
+          damage: ctx.dmg * 1.8, speed: 72, pullTime: 0.8, pullSpeed: 42, color: 0xff5a4d,
+        });
+      },
+    },
+  },
+
+  /* ------------------------------------------------------------------ */
+  {
+    id: 'ember_scattergun',
+    name: 'Ember Scatter',
+    icon: '🔥',
+    tag: 'Scatter · Projectile',
+    color: 0xff7a2a,
+    model: 'fists',
+    desc: 'Not a gun. A palmful of burning shot thrown out of the hand, seven pieces at a time — devastating against something standing on your boots, and still worth firing at a body across the arena, which is not a thing a shotgun normally gets to be.',
+    displayStats: { Damage: '400% close · 180% far', 'Rate': '2.4/s', Range: '34m', Proc: '0.9' },
+    primary: {
+      name: 'Scatter Shot', key: 'M1', icon: '✳️', hold: true,
+      anim: 'shoot',
+      desc: 'Seven embers in a cone for 400% damage together up close, keeping 45% of it all the way out to 34m.',
+      cooldown: 0.42, scalesWithAttackSpeed: true,
+      fire(ctx) {
+        const pellets = 7;
+        for (let i = 0; i < pellets; i++) {
+          ctx.spawnBullet({
+            speed: 96, damage: (ctx.dmg * 4.0) / pellets, proc: 0.9 / pellets,
+            radius: 0.26, life: 0.42, color: 0xff9a3a, gravity: 0, spread: 0.075,
+            glow: 1.8, trail: 0.5, knockback: 2,
+            // Still worth firing from a distance, and never as good as being
+            // in somebody's face — which is the whole shape of the character.
+            falloff: { near: 7, far: 34, min: 0.45 },
+          });
+        }
+        ctx.fx.muzzle(ctx.origin, ctx.dir, 0xff7a2a, 2.2);
+        ctx.recoil(1.8);
+      },
+    },
+    secondary: {
+      name: 'Fire Patch', key: 'Q', icon: '🔥',
+      anim: 'lob',
+      charges: 3,
+      desc: 'Throw fire onto the ground where you are looking. Everything standing in the circle burns for 55% a second and keeps burning after it leaves. Three charges, three seconds each — and everything you land a slam on goes up.',
+      cooldown: 3.0,
+      fire(ctx) {
+        ctx.firePatch({
+          radius: 4.2, duration: 6, dps: ctx.dmg * 0.55, burn: ctx.dmg * 0.3,
+          speed: 42, color: 0xff7a2a,
+        });
       },
     },
   },
