@@ -27,6 +27,25 @@ function orientWave(mesh, velocity, roll = 0.22) {
   if (roll) mesh.quaternion.multiply(_roll.setFromAxisAngle(FORWARD, roll));
 }
 
+/**
+ * How much of its damage a projectile still has, this far from where it began.
+ *
+ * Linear between `near` and `far`, flat outside both. A shot with no falloff
+ * spec is worth exactly what it was worth when it left, which is what almost
+ * everything in the game wants.
+ */
+function falloffAt(p) {
+  const f = p.falloff;
+  if (!f) return 1;
+  const d = p.position.distanceTo(p.origin);
+  const near = f.near ?? 0;
+  const far = f.far ?? 40;
+  if (d <= near) return 1;
+  const min = f.min ?? 0.3;
+  if (d >= far) return min;
+  return 1 - (1 - min) * ((d - near) / (far - near));
+}
+
 const SPHERE = new THREE.SphereGeometry(1, 10, 8);
 const RING = (() => { const g = new THREE.RingGeometry(0.82, 1, 32); g.rotateX(-Math.PI / 2); return g; })();
 
@@ -159,6 +178,15 @@ export class ProjectileManager {
       dead: false,
       crit: spec.crit ?? null,
       lifesteal: spec.lifesteal ?? 0,
+      /* Distance falloff: `{ near, far, min }`.
+         A pellet is devastating in somebody's face and merely useful across a
+         room, and that is a property of the pellet rather than of the gun that
+         threw it — so it lives here, measured from where the shot started,
+         rather than being baked in at spawn time when nobody yet knows how far
+         it is going to get. `min` is the floor: a scatter gun that keeps some
+         of its bite at range keeps it because this number is not zero. */
+      falloff: spec.falloff || null,
+      origin: spec.position.clone(),
       dagger: !!spec.dagger,
       disc: !!spec.disc,
       slash: !!spec.slash,
@@ -404,7 +432,7 @@ export class ProjectileManager {
       this._detonate(p, dir);
       return true;
     }
-    this.game.combat.damageEnemy(entity, p.damage, opts);
+    this.game.combat.damageEnemy(entity, p.damage * falloffAt(p), opts);
     this.game.fx.impact(p.position, dir.clone().negate(), p.color, 1);
 
     if (p.harpoon && !entity.dead) {

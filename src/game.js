@@ -188,6 +188,9 @@ export class Game {
       this.player.model.parent?.remove(this.player.model);
       this.player = null;
     }
+    // `startRun` builds a fresh Combat, so anything the old one put in the
+    // scene has to come out here — nothing else holds a reference to it.
+    this.combat?.clearWorldObjects();
     this.arena?.dispose();
     this.arena = null;
     this.coop?._teardownRemotes();
@@ -212,6 +215,11 @@ export class Game {
       ? COOP.pendingSeed
       : (layout?.seed ?? this.rng.int(1, 0x7ffffffe));
     const final = opts.final ?? !!layout?.final;
+    /* Anything the combat system has left lying on the *old* floor goes with
+       it. A hat waiting to be recalled and a patch of ground on fire are both
+       positions in an arena that is about to stop existing, so carrying them
+       across a descent leaves them hanging in the air over the next one. */
+    this.combat?.clearWorldObjects();
     this.stageSeed = seed;
     this.stagePending = !!layout?.pending;
     this.finalStage = final;

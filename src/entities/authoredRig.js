@@ -644,6 +644,24 @@ const SNIPER_RIG = {
    * position was read off the mesh's own cross-sections, which is why the
    * numbers are not symmetric: he stands staggered, left foot forward, so his
    * right leg is 4 cm further back than his left.
+   *
+   * ---------------------------------------------------------------------
+   * Every plate here is on its second pass, and every change was a reduction.
+   *
+   * The first pass read as a fat man. The reason is worth writing down because
+   * it is not "too many pieces": it is that each piece was scaled to cover the
+   * limb underneath it *and* stood proud of it, so the plate's own thickness
+   * was added on top of a shape that was already the full width of the body.
+   * Eight of those in a row is 3-4 cm added to every silhouette edge, and a
+   * silhouette 8 cm wider than the body inside it is the definition of looking
+   * heavy. Doubling up — a cap, a lame and a band on one shoulder; a guard and
+   * a strap on one thigh — did the rest.
+   *
+   * So: every shell is thinner in its facing axis, narrower across the limb it
+   * sits on, and closer to the surface. The pieces that existed only to fill
+   * the gap between two other pieces are gone rather than shrunk, because the
+   * gap was never the problem. What is left is a scout in a plate carrier and
+   * bracers, which is what the sheet draws.
    */
   attachments(char) {
     const S = characterSurfaces();
@@ -658,14 +676,14 @@ const SNIPER_RIG = {
       roughness: 0.4, metalness: 0.72, scale: 7.4,
     });
 
-    /* Both shoulders get the same pauldron, mirrored: a cap over a lame, which
-       is two shapes and reads as five times that many at any distance. */
+    /* One cap per shoulder, and nothing under it.
+       This was a cap, a lame, a band and a slab — four shapes stacked outboard
+       of an arm that is only 9 cm across, which put the widest point of the
+       character 6 cm outside his own shoulder. A single low cap sitting *on*
+       the deltoid says "armoured" from every distance the game is played at,
+       and costs the silhouette a centimetre. */
     const pauldron = (sx) => [
-      shell(plate, [0.125, 0.08, 0.135], [sx * 0.225, 1.41, -0.02]),
-      shell(plate, [0.135, 0.055, 0.125], [sx * 0.25, 1.345, -0.02]),
-      // Upper-arm band, so the arm between pauldron and bracer is not bare.
-      sleeve(dark, [0.09, 0.09, 0.95], [sx * 0.255, 1.28, 0.0], [0.25, 0, sx * 0.32]),
-      slab(plate, [0.05, 0.10, 0.10], [sx * 0.30, 1.29, 0.02], [0, 0, sx * 0.3]),
+      shell(plate, [0.098, 0.05, 0.105], [sx * 0.205, 1.405, -0.02]),
     ];
     // Forearm: a sleeve of plate with a strap at each end.
     const bracer = (from, to, r) => {
@@ -677,10 +695,11 @@ const SNIPER_RIG = {
       );
       const e = new THREE.Euler().setFromQuaternion(q);
       const rot = [e.x, e.y, e.z];
+      // One strap, not two, and the sleeve is a skin on the forearm rather
+      // than a tube with the forearm rattling inside it.
       return [
-        sleeve(plate, [r, len * 0.62, 0.85], mid, rot),
-        sleeve(dark, [r * 1.04, len * 0.12, 0.9], from.map((v, i) => v + (to[i] - v) * 0.22), rot),
-        sleeve(dark, [r * 1.04, len * 0.12, 0.9], from.map((v, i) => v + (to[i] - v) * 0.78), rot),
+        sleeve(plate, [r, len * 0.52, 0.8], mid, rot),
+        sleeve(dark, [r * 1.03, len * 0.1, 0.85], from.map((v, i) => v + (to[i] - v) * 0.74), rot),
       ];
     };
     /* Thigh guard, knee cap and greave, per leg.
@@ -692,22 +711,23 @@ const SNIPER_RIG = {
        and floating off the other. These were read off the mesh's own
        cross-sections; each piece then stands 2 cm proud of the number. */
     const legKit = (sx, hip, knee, ankle, front) => ({
+      // A guard down the front of the thigh and nothing wrapped round the back
+      // of it: the strap that used to sit there was pure width on the one part
+      // of the leg the camera sees in profile all day.
       thigh: [
-        shell(plate, [0.10, 0.026, 0.175],
-          [(hip[0] + knee[0]) / 2 + sx * 0.02, (hip[1] + knee[1]) / 2 + 0.04,
-            front[0] - 0.015], [1.2, 0, 0]),
-        slab(dark, [0.105, 0.028, 0.115], [(hip[0] + knee[0]) / 2, hip[1] - 0.13, front[0] - 0.07]),
+        shell(plate, [0.075, 0.018, 0.155],
+          [(hip[0] + knee[0]) / 2 + sx * 0.015, (hip[1] + knee[1]) / 2 + 0.04,
+            front[0] - 0.028], [1.2, 0, 0]),
       ],
       shin: [
         // Knee cap, sitting on the joint so it turns with the shin.
-        shell(plate, [0.078, 0.028, 0.078], [knee[0] + sx * 0.01, knee[1] - 0.01, front[1] - 0.012],
+        shell(plate, [0.062, 0.02, 0.062], [knee[0] + sx * 0.008, knee[1] - 0.01, front[1] - 0.022],
           [1.3, 0, 0]),
         // Greave: a plate down the front of the shin, not a pipe the leg is
         // inside — a sleeve reads as a tin can from every angle that matters.
-        shell(plate, [0.078, 0.026, 0.19],
-          [(knee[0] + ankle[0]) / 2 + sx * 0.005, (knee[1] + ankle[1]) / 2,
-            front[2] - 0.012], [1.4, 0, 0]),
-        slab(dark, [0.085, 0.026, 0.095], [(knee[0] + ankle[0]) / 2, knee[1] - 0.10, front[2] - 0.06]),
+        shell(plate, [0.06, 0.018, 0.17],
+          [(knee[0] + ankle[0]) / 2 + sx * 0.004, (knee[1] + ankle[1]) / 2,
+            front[2] - 0.022], [1.4, 0, 0]),
       ],
     });
     const legL = legKit(-1, [-0.16, 0.95, -0.02], [-0.24, 0.55, 0.00], [-0.30, 0.15, -0.02],
@@ -727,22 +747,25 @@ const SNIPER_RIG = {
              proud of them, with a raised sternum down the middle. It has to sit
              forward — buried in the chest it is invisible from the one angle
              the game actually shows a character from. */
-          shell(plate, [0.165, 0.045, 0.165], [0, 1.22, 0.235], [1.45, 0, 0]),
-          slab(plate, [0.05, 0.22, 0.04], [0, 1.26, 0.285], [0.12, 0, 0]),
-          // Bandolier over one shoulder, and the buckle that holds it.
-          slab(dark, [0.06, 0.34, 0.045], [0.09, 1.27, 0.26], [0.08, 0, 0.5]),
-          slab(brass, [0.045, 0.045, 0.03], [0.04, 1.13, 0.28]),
+          shell(plate, [0.14, 0.028, 0.15], [0, 1.22, 0.214], [1.45, 0, 0]),
+          // Bandolier over one shoulder, and the buckle that holds it. The
+          // raised sternum rib that used to run beside it is gone: two ridges
+          // 5 cm apart on a chest 28 cm across is a barrel, not a plate.
+          slab(dark, [0.05, 0.32, 0.03], [0.085, 1.27, 0.238], [0.08, 0, 0.5]),
+          slab(brass, [0.04, 0.04, 0.024], [0.038, 1.13, 0.256]),
           // Collar, so the chest plate has something to end against.
-          shell(dark, [0.135, 0.06, 0.115], [0, 1.44, 0.01]),
+          shell(dark, [0.115, 0.042, 0.098], [0, 1.44, 0.01]),
         ],
       },
       {
         bone: 'pelvis',
         nodes: [
-          // Tassets: two hanging plates over the hips.
-          slab(plate, [0.085, 0.15, 0.13], [-0.19, 0.88, 0.10], [0, 0, -0.18]),
-          slab(plate, [0.085, 0.15, 0.13], [0.19, 0.88, 0.08], [0, 0, 0.18]),
-          slab(brass, [0.30, 0.03, 0.21], [0, 0.99, 0.08]),
+          // Tassets: two hanging plates over the hips, and a belt. Thinner and
+          // pulled inboard — hung at the old width they were the second-widest
+          // thing on him after the pauldrons.
+          slab(plate, [0.062, 0.135, 0.105], [-0.175, 0.88, 0.10], [0, 0, -0.18]),
+          slab(plate, [0.062, 0.135, 0.105], [0.175, 0.88, 0.08], [0, 0, 0.18]),
+          slab(brass, [0.28, 0.024, 0.185], [0, 0.99, 0.08]),
         ],
       },
       { bone: 'legL', nodes: legL.thigh },
@@ -750,8 +773,8 @@ const SNIPER_RIG = {
       { bone: 'legLlower', nodes: legL.shin },
       { bone: 'legRlower', nodes: legR.shin },
       // Ankle cuffs, rounded rather than blocked: a boot top, not a brick.
-      { bone: 'legLankle', nodes: [shell(plate, [0.095, 0.035, 0.10], [-0.31, 0.11, 0.02])] },
-      { bone: 'legRankle', nodes: [shell(plate, [0.095, 0.035, 0.10], [0.26, 0.11, -0.06])] },
+      { bone: 'legLankle', nodes: [shell(plate, [0.075, 0.024, 0.082], [-0.31, 0.11, 0.02])] },
+      { bone: 'legRankle', nodes: [shell(plate, [0.075, 0.024, 0.082], [0.26, 0.11, -0.06])] },
     ];
   },
   materials(char, weapon) {
@@ -1588,12 +1611,27 @@ function publishRigContract(g, byName, spec, char, visorMaterial) {
     a.userData.lower = byName.get(`arm${side}lower`);
     return a;
   };
+  /**
+   * A leg, plus how far out of vertical the sculptor stood it.
+   *
+   * `splayZ` is the roll that would bring this leg's hip-to-ankle line back
+   * under the hip, measured off the bones the mesh was actually fitted with.
+   * The gait spends it against the stride so a running body draws its feet in
+   * instead of throwing them wider the faster it goes — see `LEG_TUCK` in
+   * characterRig.js. A mesh modelled with straight legs measures zero here and
+   * is left exactly as it was.
+   */
   const leg = (side, outZ) => {
     const l = byName.get(`leg${side}`);
     l.userData.lower = byName.get(`leg${side}lower`);
     l.userData.ankle = byName.get(`leg${side}ankle`);
     l.userData.restZ = 0;
     l.userData.outZ = outZ;
+    const hip = l.userData.head;
+    const foot = (byName.get(`leg${side}ankle`) ?? l).userData.tail;
+    // +Z takes the downward axis toward +X, so cancelling a leg that already
+    // leans toward +X is a negative roll.
+    l.userData.splayZ = -Math.atan2(foot[0] - hip[0], hip[1] - foot[1]);
     return l;
   };
   const torso = byName.get('torso');
@@ -1643,6 +1681,11 @@ function publishRigContract(g, byName, spec, char, visorMaterial) {
        there to drive a *separate* model out of the hand, and applied to a bone
        it would tear the blade off the fist holding it. */
     bodyWeapon: !!spec.weapon,
+    /* Whether the weapon swivels onto the crosshair on its own, or simply
+       stays in the hand it was sculpted into. Only the longrifle does the
+       former — see `poseWeapon` — and it is a property of the character
+       rather than of the mesh, so it comes from the character. */
+    aimWeapon: !!char.aimWeapon,
     mountIsGeometry: !!(spec.weapon?.radius || spec.weapon?.also),
     mountRest,
     muzzle,

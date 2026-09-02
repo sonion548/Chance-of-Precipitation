@@ -885,6 +885,16 @@ export function buildPlayerModel(char) {
       legLen: [0.535, 0.515], armLen: [0.35, 0.335], shoulder: 0.235,
       torsoKit: 'cloth', headKit: 'plain',
     },
+    /* A body built around a pack rather than around a weapon.
+       Broad through the shoulders because that is where the thrust is, light
+       in the legs because they are cargo — he is the one character in the
+       descent whose legs are not what moves him. */
+    diver: {
+      w: 0.505, d: 0.30, torso: 0.60, hipY: 1.06, headR: 0.129, neck: 0.056,
+      armR: [0.074, 0.062, 0.053], legR: [0.098, 0.082, 0.068],
+      legLen: [0.545, 0.515], armLen: [0.355, 0.34], shoulder: 0.262,
+      torsoKit: 'light', headKit: 'smooth',
+    },
   }[build] || {
     w: 0.50, d: 0.29, torso: 0.60, hipY: 1.04, headR: 0.136, neck: 0.062,
     armR: [0.079, 0.067, 0.057], legR: [0.107, 0.089, 0.073],
@@ -1878,6 +1888,110 @@ export function buildPlayerModel(char) {
       }
       break;
     }
+    case 'diver': {
+      /* A drop-suit with the whole budget spent on the pack.
+       *
+       * Every other airborne thing in the descent rations its thrust — Halcyon
+       * flies on a countdown, everyone else jumps. This one never lands unless
+       * it wants to, so the pack is not a detail on the back, it is the widest
+       * and heaviest thing on the silhouette, and everything else is drawn
+       * around leaving room for it: a low collar so the intakes clear the neck,
+       * a bare waist so the nozzles have somewhere to gimbal to, and the arms
+       * left completely empty because both hands are the weapon.
+       *
+       * The colour story is one idea: the suit is ash and the *heat* is the
+       * accent. Every lit thing on him — intake throats, nozzle bells, the
+       * burner tanks, the seams down the boots — is the same fire colour, so
+       * from any distance he reads as a dark shape with fire coming out of the
+       * bottom of it, which is exactly what he does.
+       */
+      const S = m.surfaces;
+      const ash = makeCharacterMaterial(S.plate, {
+        color: 0x2c2a2e, roughness: 0.68, metalness: 0.44, scale: 5.0,
+      });
+      const heat = new THREE.MeshStandardMaterial({
+        color: char.accent, emissive: char.accent, emissiveIntensity: 2.4,
+        roughness: 0.28, metalness: 0.4,
+      });
+
+      /* --- the pack --- */
+      const pack = new THREE.Group();
+      pack.position.set(0, P.torso * 0.62, -P.d * 0.62);
+      torso.add(pack);
+      const shellBody = roundedBox(P.w * 0.86, P.torso * 0.82, P.d * 0.62, ash, 0.05);
+      shellBody.castShadow = true;
+      pack.add(shellBody);
+      panelLine(pack, m.joint, { pos: [0, P.torso * 0.2, -P.d * 0.31], size: [P.w * 0.6, 0.012, 0.01] });
+      /* Fuel: two tanks lying across the top of the pack, lit at both caps.
+         Both ends, because a cylinder with one glowing end reads as a mistake
+         from the side the other end is on — which is half of them. */
+      for (const dz of [0, -0.11]) {
+        const tank = cyl(0.052, 0.052, P.w * 0.52, SEG.limb, m.trim,
+          0, P.torso * 0.3, -P.d * 0.16 + dz);
+        tank.rotation.z = Math.PI / 2;
+        tank.castShadow = true;
+        pack.add(tank);
+        for (const sx of [-1, 1]) {
+          pack.add(sphere(0.05, heat, sx * P.w * 0.26, P.torso * 0.3, -P.d * 0.16 + dz, 8));
+        }
+      }
+      // Intakes over the shoulders: two throats that are always alight.
+      for (const sx of [-1, 1]) {
+        const throat = cyl(0.058, 0.07, 0.14, SEG.limb, ash, sx * P.w * 0.3, P.torso * 0.44, 0);
+        throat.rotation.x = -0.5;
+        throat.castShadow = true;
+        pack.add(throat);
+        pack.add(sphere(0.046, heat, sx * P.w * 0.3, P.torso * 0.5, 0.03, 8));
+      }
+      /* Nozzles: two bells canted outward and down, hung low enough off the
+         pack that they clear the hips. These are the whole read of the
+         character from the front — a person with two burning things under
+         their ribs — so they are deliberately oversized. */
+      for (const sx of [-1, 1]) {
+        const arm = roundedBox(0.07, 0.07, 0.2, m.trim, 0.02);
+        arm.position.set(sx * P.w * 0.42, -P.torso * 0.16, 0.02);
+        arm.rotation.z = sx * 0.3;
+        pack.add(arm);
+        const bell = cyl(0.052, 0.098, 0.19, SEG.limb, ash,
+          sx * P.w * 0.5, -P.torso * 0.36, 0.03);
+        bell.rotation.set(0.25, 0, sx * 0.3);
+        bell.castShadow = true;
+        pack.add(bell);
+        const flame = cyl(0.076, 0.03, 0.07, SEG.limb, heat,
+          sx * P.w * 0.5, -P.torso * 0.5, 0.06);
+        flame.rotation.set(0.25, 0, sx * 0.3);
+        pack.add(flame);
+      }
+
+      /* --- the body around it --- */
+      // A hard chest yoke, and nothing below it: the waist stays narrow so the
+      // pack is the only heavy thing in the outline.
+      const yoke = torsoBand(P.w, P.d, P.torso, 0.62, 0.86, 1.05, m.trim);
+      torso.add(yoke);
+      torso.add(torsoBand(P.w, P.d, P.torso, 0.24, 0.32, 1.04, m.accent, 3));
+      boltRow(torso, m.joint, {
+        from: [-P.w * 0.24, P.torso * 0.72, P.d * 0.52],
+        to: [P.w * 0.24, P.torso * 0.72, P.d * 0.52], count: 5,
+      });
+      // Burner cuffs: both wrists are the weapon, so both wrists are lit.
+      for (const arm of [armL, armR]) {
+        const cuff = cyl(P.armR[2] * 1.5, P.armR[2] * 1.25, 0.11, SEG.limb, ash, 0, -P.armLen[1] * 0.82, 0);
+        cuff.castShadow = true;
+        arm.userData.lower.add(cuff);
+        const ring = cyl(P.armR[2] * 1.3, P.armR[2] * 1.3, 0.035, SEG.limb, heat, 0, -P.armLen[1] * 0.94, 0);
+        arm.userData.lower.add(ring);
+      }
+      /* Vents down the back of each shin, so the legs are lit from below.
+         Stacked vertically and set against the surface: run along z at this
+         radius and they hang in the air behind the leg instead of on it. */
+      for (const leg of [legL, legR]) {
+        ventStack(leg.userData.lower, heat, {
+          pos: [0, -0.24, -P.legR[2] * 0.86], count: 3, axis: 'y',
+          size: [P.legR[2] * 1.5, 0.018, 0.03], spacing: 0.062,
+        });
+      }
+      break;
+    }
     default: {
       // Vanguard: utility pouches and a shoulder lamp.
       for (const sx of [-1, 1]) {
@@ -1917,11 +2031,163 @@ export function buildPlayerModel(char) {
     weaponMount.add(gripHand);
   }
 
+  /* The other hand, and what it is holding.
+   *
+   * Built exactly like the weapon mount and for the same reason: a shield or a
+   * second blade that hangs off the forearm rather than off the fist reads as
+   * strapped to somebody's arm instead of held in their hand. Nothing aims it —
+   * an offhand is by definition the hand not pointed at anything — so whatever
+   * goes in here is authored in the carry it should be seen in and then simply
+   * travels with the arm.
+   */
+  const offMount = new THREE.Group();
+  offMount.position.set(0, -0.34, 0.02);
+  armL.userData.lower.add(offMount);
+  const offHand = armL.userData.hand;
+  if (offHand) {
+    offHand.parent.remove(offHand);
+    offHand.position.set(0, -0.055, -0.015);
+    offHand.rotation.set(0.34, 0, 0);
+    offMount.add(offHand);
+  }
+  const offhand = buildOffhand(char, build, m);
+  if (offhand) offMount.add(offhand);
+
+  /* A character who holds nothing still has to have somewhere for a shot to
+     come out of. Diver's scatter shot leaves the palm, so the muzzle sits just
+     past the fist and the mount is left empty. */
+  let handMuzzle = null;
+  if (char.emptyHanded) {
+    handMuzzle = new THREE.Object3D();
+    handMuzzle.position.set(0, -0.12, 0.1);
+    weaponMount.add(handMuzzle);
+  }
+
   g.userData = {
     torso, torsoBaseY: torso.position.y, head, armL, armR, legL, legR, pelvis,
-    weaponMount, gripHand, visor: m.visor, build, hipY: P.hipY, hat: hatNode,
+    weaponMount, offMount, gripHand, visor: m.visor, build, hipY: P.hipY, hat: hatNode,
+    /* Two questions about the thing in the right hand.
+       `bodyWeapon` says do not hang a weapon model on the mount — either the
+       body already carries one, or the character carries nothing at all.
+       `aimWeapon` says the weapon swivels to the crosshair independently of the
+       arm. Exactly one character does that now: everybody else's weapon is
+       fixed in the hand and moves only because the hand does. */
+    bodyWeapon: !!char.emptyHanded,
+    aimWeapon: !!char.aimWeapon,
+    // A hand with a shield or a second blade in it is not free to go and brace
+    // the weapon in the other one — see `poseArms`.
+    offhandHeld: !!offhand,
+    muzzle: handMuzzle,
   };
   return mergeStaticMeshes(g);
+}
+
+/**
+ * What the left hand is holding, if anything.
+ *
+ * Authored in the hand's own frame, pointing the way the arm points: −Y is
+ * down the forearm, +Z is out the back of the hand. Returned rather than added
+ * so the caller owns the parenting, and null for the characters whose offhand
+ * is empty — which is most of them, deliberately. A second object in the left
+ * hand is a strong statement about a character and only three of them are
+ * making it.
+ */
+function buildOffhand(char, build, m) {
+  switch (build) {
+    /* Bulwark's plate. The character is a shield with somebody behind it, so
+       this is by a distance the largest held object in the game: 1.1 m of tower
+       shield, faced in the character's own accent, with a boss in the middle
+       and a rim thick enough to read as edge-on. It hangs off the forearm at
+       the angle a shield is actually carried — face out, top canted forward —
+       rather than square, which reads as a door being carried to a skip. */
+    case 'bulwark': {
+      /* Sizes and orientation both come from the mount, not from the world.
+         The offhand mount rides the forearm: its local +Y runs back up the arm
+         and its local +Z points out the front of the hand — which is already a
+         shield's two axes. A tall plate is therefore tall in local Y and thin
+         in local Z, and needs no rotation to be carried correctly; the only
+         turns applied are the cant a shield is actually held at. */
+      const g = new THREE.Group();
+      const steel = mat(0x6d7787, { roughness: 0.32, metalness: 0.9 });
+      const H = 0.98;
+      const face = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.33, H, 8, 1, false), m.trim);
+      face.scale.z = 0.2;
+      face.castShadow = true;
+      g.add(face);
+      // Rim: the same lathe a little wider and open, so the plate has a lip
+      // instead of an edge you can see the polygons of.
+      const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.315, 0.355, H * 1.04, 8, 1, true), steel);
+      rim.scale.z = 0.2;
+      g.add(rim);
+      // Boss, and a rib down the centreline behind it.
+      const boss = new THREE.Mesh(
+        new THREE.SphereGeometry(0.1, SEG.medium, SEG.small, 0, Math.PI * 2, 0, Math.PI * 0.5), steel);
+      boss.rotation.x = Math.PI / 2;
+      boss.scale.set(1, 1, 0.5);
+      boss.position.z = 0.055;
+      boss.castShadow = true;
+      g.add(boss);
+      g.add(box(0.07, H * 0.86, 0.04, m.accent, 0, 0, 0.062));
+      for (const sy of [-1, 1]) {
+        g.add(box(0.46, 0.05, 0.035, m.accent, 0, sy * 0.3, 0.058));
+      }
+      // Straps on the inside, where the forearm actually goes.
+      for (const sy of [-1, 1]) {
+        g.add(box(0.2, 0.045, 0.05, m.joint, 0, sy * 0.12, -0.07));
+      }
+      // Canted so the top edge leads and the plate stands off the body.
+      g.rotation.set(0.22, 0, 0.2);
+      g.position.set(-0.07, -0.14, 0.15);
+      return g;
+    }
+    /* Wraith's second blade. The pair is the character: one blade is a
+       swordsman, two is something that does not intend to block. Shorter and
+       lighter than a two-handed weapon, held reversed — point back along the
+       forearm — which is the only way two blades in two hands do not read as
+       somebody carrying a bundle of poles. */
+    case 'wraith':
+      return buildShadowBlade(char.accent, -1);
+    default:
+      return null;
+  }
+}
+
+/**
+ * One shadow blade: a short single-edged sword, dark with a lit fuller.
+ *
+ * `side` mirrors the cant so a matched pair reads as a pair rather than as the
+ * same prop twice. Authored pointing +Z with the grip at the origin, which is
+ * the convention every held object in this file follows.
+ */
+function buildShadowBlade(color, side = 1) {
+  const g = new THREE.Group();
+  const bladeMat = mat(0x241d2e, { roughness: 0.24, metalness: 0.92 });
+  const edge = mat(color, { emissive: color, emissiveIntensity: 1.7, roughness: 0.2, metalness: 0.7 });
+  const steel = mat(0x6d7787, { roughness: 0.3, metalness: 0.9 });
+  const grip = mat(0x22262e, { roughness: 0.88, metalness: 0.12 });
+
+  const handle = cyl(0.03, 0.034, 0.2, 8, grip, 0, 0, -0.12);
+  handle.rotation.x = Math.PI / 2;
+  g.add(handle);
+  g.add(sphere(0.038, steel, 0, 0, -0.23, 8));
+  g.add(box(0.2, 0.04, 0.06, steel, 0, 0, 0.01));
+  // Blade: three narrowing segments and a point, the lit groove down each.
+  let z = 0.04;
+  for (let i = 0; i < 3; i++) {
+    const len = 0.26;
+    const w = 0.105 - i * 0.02;
+    const th = 0.03 - i * 0.005;
+    g.add(box(w, th, len, bladeMat, 0, 0, z + len / 2));
+    g.add(box(w * 0.3, th * 1.15, len * 0.92, edge, 0, 0, z + len / 2));
+    z += len;
+  }
+  const point = cyl(0, 0.05, 0.18, 4, bladeMat, 0, 0, z + 0.09);
+  point.rotation.set(Math.PI / 2, Math.PI / 4, 0);
+  g.add(point);
+  // Down the forearm, angled out so the two blades do not cross the body.
+  g.rotation.set(Math.PI / 2 - 0.22, side * 0.26, side * 0.12);
+  g.position.set(0, -0.1, 0.02);
+  return g;
 }
 
 /* ==========================================================================
@@ -2495,6 +2761,92 @@ export function buildWeaponModel(weapon) {
       break;
     }
 
+    /* Chain's chain: a length of iron with a straw hat on the end of it.
+     *
+     * Not a flail and not a weapon at all in the ordinary sense — it is the one
+     * possession of a character whose whole kit is throwing the thing he owns
+     * and having it come back. So the hat on the end is the *same* hat, built
+     * from the same shapes as the one the throwing abilities put in the air,
+     * and the chain between is heavy enough that swinging it reads as effort.
+     *
+     * Authored down +Z like everything else here, which for a chain means the
+     * links run away from the fist and the hat trails at the far end. It has a
+     * slight sag built in — a dead straight chain is a rod. */
+    case 'chainhat': {
+      const iron = mat(0x4a4038, { roughness: 0.55, metalness: 0.72 });
+      const straw = mat(0xd2b48c, { roughness: 0.94, metalness: 0.02 });
+      const band = mat(0x8a6f4a, { roughness: 0.96, metalness: 0.04 });
+      // A wrapped haft in the fist, so the chain has something to leave from.
+      const haft = cyl(0.032, 0.036, 0.22, 8, grip, 0, 0, -0.08);
+      haft.rotation.x = Math.PI / 2;
+      g.add(haft);
+      for (let i = 0; i < 3; i++) {
+        const wrap = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.008, 8, SEG.medium), dark);
+        wrap.rotation.x = Math.PI / 2;
+        wrap.position.z = -0.16 + i * 0.07;
+        g.add(wrap);
+      }
+      g.add(sphere(0.042, steel, 0, 0, -0.2, 8));
+      // The links. Alternating planes is what makes a stack of toruses read as
+      // chain rather than as a pile of washers.
+      const LINKS = 11;
+      for (let i = 0; i < LINKS; i++) {
+        const t = i / (LINKS - 1);
+        const link = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.012, 8, SEG.ring), iron);
+        link.rotation.y = (i % 2) * Math.PI / 2;
+        link.rotation.x = Math.PI / 2;
+        link.position.set(0, -Math.sin(t * Math.PI) * 0.07, 0.06 + t * 0.62);
+        g.add(link);
+      }
+      // The hat, flat and light, hanging off the last link.
+      const hat = new THREE.Group();
+      hat.position.set(0, -0.02, 0.78);
+      hat.rotation.x = 1.1;
+      g.add(hat);
+      const brim = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.06, SEG.medium, 1, true), straw);
+      hat.add(brim);
+      const crown = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.08, SEG.medium), straw);
+      crown.position.y = 0.055;
+      hat.add(crown);
+      const hatBand = new THREE.Mesh(new THREE.TorusGeometry(0.062, 0.011, 8, SEG.ring), band);
+      hatBand.rotation.x = Math.PI / 2;
+      hatBand.position.y = 0.03;
+      hat.add(hatBand);
+      const flower = new THREE.Mesh(new THREE.SphereGeometry(0.032, SEG.small, SEG.small), accent);
+      flower.scale.y = 0.5;
+      flower.position.set(0.088, 0.022, 0.04);
+      hat.add(flower);
+      muzzle.position.set(0, 0, 0.9);
+      break;
+    }
+    /* One of a matched pair. Short, single-edged, dark with a lit fuller —
+       the same blade `buildShadowBlade` puts in the left hand, built here for
+       the right so the two are unmistakably the same object twice. */
+    case 'shadowblade': {
+      const bladeMat = mat(0x241d2e, { roughness: 0.24, metalness: 0.92 });
+      const edge = mat(weapon.color, {
+        emissive: weapon.color, emissiveIntensity: 1.7, roughness: 0.2, metalness: 0.7,
+      });
+      const handle = cyl(0.03, 0.034, 0.2, 8, grip, 0, 0, -0.12);
+      handle.rotation.x = Math.PI / 2;
+      g.add(handle);
+      g.add(sphere(0.038, steel, 0, 0, -0.23, 8));
+      g.add(box(0.2, 0.04, 0.06, steel, 0, 0, 0.01));
+      let bz = 0.04;
+      for (let i = 0; i < 3; i++) {
+        const len = 0.26;
+        const w = 0.105 - i * 0.02;
+        const th = 0.03 - i * 0.005;
+        g.add(box(w, th, len, bladeMat, 0, 0, bz + len / 2));
+        g.add(box(w * 0.3, th * 1.15, len * 0.92, edge, 0, 0, bz + len / 2));
+        bz += len;
+      }
+      const tip = cyl(0, 0.05, 0.18, 4, bladeMat, 0, 0, bz + 0.09);
+      tip.rotation.set(Math.PI / 2, Math.PI / 4, 0);
+      g.add(tip);
+      muzzle.position.set(0, 0, bz + 0.2);
+      break;
+    }
     case 'voidblade': {
       /*
        * A straight two-handed blade.

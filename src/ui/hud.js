@@ -283,9 +283,20 @@ export class HUD {
         // warning you get before the two seconds land, so it is always on.
         if (combat.ammo !== null) stackText = `${combat.ammo}`;
       } else if (a.kind === 'secondary') {
-        total = w.secondary.cooldown * p.stats.cooldownMult;
-        remaining = combat.secondaryTimer;
-        if (combat.charging) chargeFrac = combat.chargeTime / (w.secondary.charge || 1);
+        const q = w.secondary;
+        total = Math.max(0.01, q.cooldown * p.stats.cooldownMult);
+        if (q.sustain) {
+          // A held ability has no cooldown to draw. What it has is a state, so
+          // the slot lights while the button is down and is otherwise ready.
+          remaining = 0;
+          chargeFrac = combat.sustaining ? 1 : 0;
+        } else if ((q.charges ?? 1) > 1) {
+          remaining = combat.secondaryCharges > 0 ? 0 : Math.max(0, combat.secondaryTimer);
+          stackText = `${combat.secondaryCharges}`;
+        } else {
+          remaining = combat.secondaryTimer;
+          if (combat.charging) chargeFrac = combat.chargeTime / (q.charge || 1);
+        }
       } else if (a.kind === 'utility') {
         const util = combat.character?.utility;
         total = Math.max(0.01, (util?.cooldown ?? 3) * p.stats.cooldownMult * p.stats.dashCooldownMult);

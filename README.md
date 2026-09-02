@@ -88,10 +88,10 @@ downstream knowing the difference. The defaults:
 | `W` `A` `S` `D` | Move — **relative to the camera**, not to the character |
 | Mouse | Look (click the canvas to capture the pointer) |
 | Left click | Primary attack |
-| `Q` | Weapon secondary — **hold to charge** on weapons that support it |
+| `Q` | Second ability — **hold** it on Bulwark, **hold to charge** on Vanguard |
 | `Shift` | Utility ability (character-specific) |
 | `R` | Special ability (character-specific) |
-| `F` | **Ultimate** — no cooldown; the meter fills from kills and from damage taken |
+| `F` | **Ultimate** — no cooldown; the meter fills from damage dealt, kills and damage taken |
 | Right click | Aim — pulls the camera in and narrows the field of view |
 | `Space` | Jump (double jump with Gravity Boots) |
 | `E` | Interact — chests, shrines, eggs, the Beacon, the rift |
@@ -100,11 +100,23 @@ downstream knowing the difference. The defaults:
 
 ### The character
 
-The weapon is held by the grip, in the hand, and the hand goes where the weapon goes: the
-glove is parented into the weapon mount, so however the barrel turns to track the crosshair,
-the fingers turn with it. The aim is clamped to a cone around the forearm, so a body facing
-its travel direction while the camera looks elsewhere can never end up presenting a gun
-pointing somewhere the arm plainly is not.
+**The weapon is welded into the hand.** It used to swivel onto the crosshair independently of
+the arm holding it, clamped to a cone so it could never end up somewhere the shoulder plainly
+could not reach — which worked, and still read as a character standing *beside* a gun rather
+than holding one. Every weapon now sits in the carry the art was drawn in and moves for
+exactly one reason: the arm moved. A slash rolls the blade over because the shoulder swung; a
+thrust drives the point out because the elbow straightened; standing still, a spear hangs
+where a spear hangs.
+
+One character is exempt, and it is the obvious one. Sniper's longrifle still tracks the
+crosshair, because that character *is* the line from an optic to a body and a muzzle sitting a
+few degrees off it is not a scoped weapon, it is a decoration.
+
+Two characters have something in the other hand as well — Bulwark's plate and Wraith's second
+blade — and a hand with something in it does not go and brace the weapon in the other one. The
+support pose exists to put a second hand on a rifle; applied to a shield it brought the plate
+up across the chest every time a target appeared, which is a shield being *aimed*. A busy
+offhand keeps its carry through the ready blend and lifts about a quarter as far.
 
 Elbows bend forwards and knees bend backwards, which sounds like it should not need saying.
 Both were positive rotations about the same axis, so both bent the same way and one of them
@@ -113,15 +125,21 @@ The hips are also set wider than they were, with a few degrees of splay, because
 width the two boots were seven centimetres apart and every walk cycle looked like the knees
 were being pressed together.
 
-### The camera is not bolted to the character
+### The body faces the camera; the legs say where you are going
 
-Look direction and body facing are two separate quantities. The mouse drives the camera and
-nothing else; the character turns to face **wherever it is travelling** while you are simply
-running around, and snaps to the camera only when the weapon needs to be pointed at the
-crosshair — firing, aiming, charging, or an ability. So you can sprint one way and watch
-another, and the legs tell you which: a run, a backpedal and a side-step are three different
-gaits blended by the travel direction in the body's own frame, sharing one clock so a
-diagonal is a continuous gait changing shape rather than a crossfade.
+The character always faces straight ahead — wherever the camera is looking — and it is the
+**legs** that carry which way you are actually travelling. A run, a backpedal and a side-step
+are three different gaits blended by the travel direction in the body's own frame, sharing one
+clock so a diagonal is a continuous gait changing shape rather than a crossfade between two
+animations.
+
+It used to turn into its travel direction whenever you were not fighting, which is what a
+person running actually does and was the wrong call for this camera: running left across the
+screen turned the character side-on and you spent most of a stage looking at an ear.
+Everything the character does — the weapon in the hand, every ability, the crosshair itself —
+resolves along the camera's line, so a body pointed ninety degrees off it is a second model
+sharing a position with the first. Movement is still camera-relative and you can still run one
+way and watch another; you now watch it over a shoulder rather than from behind an ear.
 
 Looking steeply up is a supported move. A boom is a rigid arm — swing it up and the far end
 goes *down*, which on a character standing on the ground meant straight into the floor. The
@@ -252,28 +270,54 @@ The host's machine owns the world, so if they leave, the session ends for everyo
 
 ## Content
 
-**7 characters.** A character sets your stats, all three signature abilities *and* the weapon
-it carries — so picking one decides how you move, how you commit and how you shoot, in a
-single choice.
+**9 characters.** A character is five buttons and one thing that is always true about them:
+an attack on M1, an ability on Q, a utility on Shift, a special on R, an ultimate on F, and a
+**passive** that is not a button at all. Picking one decides how you move, how you commit and
+how you shoot, in a single choice.
 
-| Character | Identity | Utility (Shift) | Special (R) | Ultimate (F) |
-| --- | --- | --- | --- | --- |
-| Vanguard | Balanced baseline — 115 HP, no sharp edges | Combat Roll | Overclock | Fire Mission |
-| Unloader | Heavy exosuit, 165 HP, slow but armoured | **Grapple Gun** | **Overcharged Fist** | Terminal Velocity |
-| Wraith | Glass cannon — 88 HP, negative armour, double jump | Blink (in the air too) | Umbral Volley | Event Horizon |
-| Bulwark | 200 HP and 16 armour, walks slowly at the problem | Shield Charge | Bastion | Last Stand |
-| Halcyon | 84 HP, −10 armour, slightly softer damage — and it **flies** | **Thruster Flight** | **Bomb Cluster** | Ordnance Override |
-| Dasher | 76 HP, −8 armour, the fastest and hardest-hitting frame in the descent | **Lance Dash** | **Marking Spear** (×2) | Skewer |
-| Chain | 104 HP wanderer in a straw hat. Owns one thing and throws it | **Wanderer's Mark** | **Hat Toss** | Unbroken Chain |
+| Character | Identity | Passive | M1 | Q | Shift | R | F |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Vanguard | Balanced baseline — 115 HP, no sharp edges | — | Service Round | Focused Shot | Combat Roll | Overclock | Fire Mission |
+| Unloader | Heavy exosuit, 165 HP, slow but armoured | **Momentum** | **Punch** | **Down Slam** | Grapple Gun | Overcharged Fist | Terminal Velocity |
+| Wraith | Glass cannon — 88 HP, negative armour, double jump | **Executioner** | **Void Slashes** | **Phase** | Blink (in the air too) | Umbral Volley | Event Horizon |
+| Bulwark | 200 HP and 16 armour, walks slowly at the problem | **Overshield** | **Shotgun** | **Guard** (held) | Shield Charge | Bastion | Last Stand |
+| Halcyon | 84 HP, −10 armour, softer damage — and it **flies** | **Altitude** | **Beam** | **Missile Cluster** | Thruster Flight | Bomb Cluster | Ordnance Override |
+| Dasher | 76 HP, −8 armour, the fastest and hardest-hitting frame | **Desperation** | **Lance** (3-hit) | **Parry** | Lance Dash | Marking Spear (×2) | Skewer |
+| Chain | 104 HP wanderer in a straw hat. Owns one thing and throws it | **Chain Reaction** | **Chain Hat** | **Chain Pull** | Wanderer's Mark | Hat Toss | Unbroken Chain |
+| Sniper | 92 HP overwatch: one round, one body, then be gone | — | Bolt Round | Sidearm Revolver | Break Contact | Range Card | Kill Order |
+| **Diver** | 108 HP drop-suit that **never has to land** | **Firebomb** | **Scatter Shot** | **Fire Patch** (×3) | **Speed Dash** (×2) | **Dive Slam** | **Inferno** |
+
+**Passives** are the newest slot and the one that does the most work per line. Each is a
+sentence about the character that is true whether or not you press anything, and each reads
+something about the *moment* rather than about the build:
+
+| Passive | What it does |
+| --- | --- |
+| Dasher · Desperation | Up to +85% damage as your health falls. 76 HP and −8 armour already; the passive doubles down rather than softening it |
+| Halcyon · Altitude | Up to +55% movement speed with height, full at 30m above the ground under you |
+| Bulwark · Overshield | A hit worth 12% of your health grants a barrier worth 25% of it, once every 20s. Flat reduction is worth least against exactly the hit that kills you |
+| Wraith · Executioner | +45% damage to anything at or below 40% health — a threshold you can see on a bar and decide about, not a ramp that quietly exists |
+| Unloader · Momentum | Up to +80% damage with speed, measured against the 30 u/s a grapple leaves you carrying |
+| Chain · Chain Reaction | Every body the thrown hat crosses takes 0.6s off all your cooldowns |
+| Diver · Firebomb | A slam landing on his own fire patches detonates them, for far more than the slam alone |
 
 **Ultimates** are the one ability the game gives you for having been in a fight rather than
-for having waited. There is no cooldown: the meter beside the ability bar fills from kills
+for having waited. There is no cooldown: the meter beside the ability bar fills from **damage
+dealt** (measured as a fraction of the target, capped at one whole body per hit), from kills
 (0.28% a kill, 0.9% an elite, 11% a boss) and from damage taken (0.06% per 1% of your health
-lost), plus a slow trickle so a quiet stretch is not dead time. It empties completely when
-spent, and it is priced so that a full meter is worth about two stages of fighting — the
-boss is the single biggest contributor, because it is the one landmark every stage has.
+lost), plus a slow trickle so a quiet stretch is not dead time.
+
+Damage is the largest source and that is the point: the meter is meant to measure how much
+fighting you have done, and before it paid only for *finishing* things and for bleeding — so
+the two characters who spend a whole boss chipping it down earned nothing for it while the one
+who cleaned up a spawn wave got a bar. It is measured as a fraction of the target's own health
+rather than as raw numbers, so a build with ten times the damage kills the same husk ten times
+quicker and is paid the same for it. Clearing a stage on damage alone is worth a little under
+a full meter, so an ultimate now arrives about once a stage rather than once every two.
+
 They are deliberately enormous — a 26-shell fire mission, a 2600% crater, three singularities
-with thirty shades thrown into them, six seconds of literal invulnerability.
+with thirty shades thrown into them, six seconds of literal invulnerability, ten seconds of
+the arena being on fire.
 
 **Halcyon** is the flying character. Thruster Flight switches gravity off for seven seconds:
 hold `Space` to climb, release to drift down, full ground-level control of your direction the
@@ -417,81 +461,78 @@ tier is unlocked yet" fallback cannot drop below, so an expensive chest can neve
 hand back a white item. **Fortune Clover** rerolls every rarity roll and keeps the better
 result.
 
-**7 weapons**, one bound to each character, each with a distinct primary and secondary.
-They are deliberately tuned to near-identical single-target DPS (~64–84 at base damage) so no
-character is simply out-gunned by another; what differs is *how* each one fights.
+**9 kits**, one per character, and a kit is not a weapon you picked up — it is the attack that
+character throws and the ability that goes with it. `data/weapons.js` still holds them, and
+the split between that file and `data/characters.js` is now purely historical: nobody can
+carry anybody else's.
 
-**A weapon is not a choice — it is part of who a character is.** Weapons used to be a second
-list you unlocked and picked from, which meant any character could be handed any gun and none
-of the nine said anything about whoever was holding it. Each character now carries exactly one,
-and the pair is the unit of identity:
+**That is the whole reason a kit is free to be strange.** A weapon anybody might pick up has
+to be balanced against everybody's stat line. One that exactly one 200-health character with a
+shield will ever fire can be built around that character and nothing else:
 
-| Character | Weapon | Why that one |
-| --- | --- | --- |
-| Vanguard | MK-4 Sidearm | Standard issue for the standard soldier — the weapon the others are measured against, on the character the others are tuned against |
-| Unloader | Siege Gauntlets | A cargo handler does not carry a gun. The punch *is* the weapon, and it is the only thing that keeps up with the grapple |
-| Wraith | Void Reaper | Thin armour needs a weapon that pays some of it back, and Blink Slash is the same phase-step the character already thinks in |
-| Bulwark | Photon Lance | The ramp needs three seconds on one target, and Bulwark is the only frame in the descent that can afford to stand still that long |
-| Halcyon | Seeker Launcher | A bombardier does not aim, it drops — and an arc thrown from thirty metres up is the shape this weapon was already built around |
-| Dasher | **Splitting Lance** | Reach, almost no reserve, and a sweep to answer being surrounded: its one weakness is exactly what his dash exists to escape |
-| Chain | Arc Emitter | It chains. A weapon that jumps body to body belongs to the character whose every ability is about the thing that comes back |
+| Character | M1 | Q | The idea |
+| --- | --- | --- | --- |
+| Vanguard | Service Round | Focused Shot | Standard issue for the standard soldier — the attack the others are measured against |
+| Unloader | **Punch** — 340%, right fist then left, 1.6/s | **Down Slam** | The only primary in the game you *commit* to. It hits for three and a half times a hit because you are standing still for two thirds of a second afterwards |
+| Wraith | **Void Slashes** — 480% at the hilt, 120% at the tip | **Phase** | Pays four times as much at arm's length as at the point, which is the only thing that makes a character with 88 HP walk *towards* something |
+| Bulwark | **Shotgun** — 420% close, 8 rounds, 15m | **Guard** (held) | Fifteen metres of reach on the character who walks at 6.9. A weapon that short is only carryable by a body that survives the walk |
+| Halcyon | **Beam** — 62%/tick, no falloff, 40-round cell | **Missile Cluster** | Infinite range because a bombardier four hundred metres up has to be able to reach the ground |
+| Dasher | **Lance** — 210%, 210%, then a 380% thrust at 9m | **Parry** | A finisher that is bigger *and reaches four metres further*, so the combo changes where you are standing |
+| Chain | **Chain Hat** — 300% through 7.5m | **Chain Pull** | The swung hat, as against the thrown one. It does not chain and does not come back |
+| Sniper | Bolt Round — 900%, timed reload | Sidearm Revolver | Unchanged. One round, one body, and a bar you have to answer to keep firing |
+| **Diver** | **Scatter Shot** — 400% close, 45% at 34m | **Fire Patch** (×3) | A shotgun that is still worth firing across the arena, which is not a thing a shotgun normally gets to be |
 
-The **Splitting Lance** is new — the spear Dasher is drawn holding, and nothing in the old
-roster was one. Thrusts pierce three for 150% at 2.6/s; Vault Cut sweeps the whole ring for
-380% and rides the turn out of it.
+**Q understands four shapes**, and which one an ability is says most of what it is for: a
+plain press on a cooldown, `charges: n` for independent timers (Diver's three patches),
+`charge: t` for a wind-up (Vanguard's focused shot), and `sustain` for an ability that is
+simply true while the button is down. Bulwark's **Guard** is the only sustained one and the
+only one that should be: 62% less damage taken, no cooldown, and you cannot attack behind it. An ability you hold is an ability you are not doing anything else during, which is
+a real price paid continuously — charging for it twice would be double-billing.
 
-Three weapons left with nobody to carry them and were retired: the Breach Scattergun, the
-Rivet Driver and the Meridian Longrifle. Nothing is bought in the Sanctum any more either —
-buying a character buys the weapon that comes with them.
+**Every attack acts itself out.** An ability names an `anim` — `slash`, `swing`, `punch`,
+`punchL`, `thrust`, `pump`, `lob`, `beam` or `shoot` — and the rig plays it, or names
+`animFor(ctx)` when the animation changes shot to shot. Dasher's lance answers `slash`,
+`slash`, `thrust`; Unloader's fists answer `punch`, `punchL`, so the shoulders open the
+opposite way on every second swing. The trunk leads every one of them, because a swing that
+lives only in the wrist reads as a mannequin twitching.
 
-**Every weapon acts its attack out.** A weapon ability names an `anim` — `slash`, `punch`,
-`thrust`, `pump`, `lob`, `beam` or `shoot` — and the rig plays it: the blade sweeps across the
-body and rolls through its arc, the gauntlet drives the shoulder forward and snaps the elbow
-straight, the harpoon is a two-handed stab, the shotgun racks its action with the support
-hand. The trunk leads every one of them, because a swing that lives only in the wrist reads
-as a mannequin twitching. Alternate strokes reverse, so holding attack is a sequence rather
-than one shape stuttering.
+**Diver** is the new character, and he is the one that never has to come down. The thrusters
+are not an ability with a duration — they are how he stands up: hold `Space` to climb, hold
+nothing and he sinks about three metres a second, which is enough to touch the floor, take a
+fight and leave again without pressing anything. Halcyon flies on a countdown and pays for
+every second of it; Diver trades every ability Halcyon spends on *getting* airborne for
+abilities that only make sense once you already are.
 
-The **Void Reaper**'s primary is a flat horizontal cut that then leaves the blade: the swing
-does 245% in an arc and the crescent travels 26m at 34 u/s doing another 130%, sweeping
-through everything it passes rather than raycasting down its centre line. It is drawn as the
-cut itself — a tapered crescent lying flat — not as a glowing ball.
+His kit is one conversation between two buttons. **Fire Patch** throws burning ground where he
+is looking — three charges on three-second timers, three patches on the floor at a time — and
+on its own it is a mediocre zone. **Dive Slam** drops him onto the aim point at fifty metres a
+second for 560% in 9m, and on its own it is a mediocre nuke. Landing one on the other is the
+character: **Firebomb**, his passive, detonates every patch he lands on for 1340% each. So the
+whole thing is a question of whether you set up two seconds ago, which is exactly what a
+passive should be — true whether or not you remembered. **Speed Dash** (two charges) keeps 45%
+movement speed for five seconds after it, and **Inferno** sets everything within 22m alight
+for ten seconds while he moves half again as fast through the middle of it.
 
-The **Photon Lance** ramps, and a boss is the one target that lets it ramp for free. Everything
-else in the arena moves, dies, or has to be re-acquired, which is the cost the 3× was priced
-against; a boss is a stationary wall that pays that cost once and then stands there. So the
-*ramp* is cut against bosses rather than the damage: the beam still opens at exactly full
-strength — 7.66 against a husk and 7.66 against the Colossus, measured — and then climbs to
-3× on ordinary bodies against 1.6× on a boss. At full heat that is 53% of the damage. Prism
-Burst splits the same way, since half of it is stored heat.
+Bulwark's **Shotgun** is the only kit with a magazine that is not a beam: eight in the tube,
+then a second and a half to fill it. Fifteen metres of reach on a character who walks at 6.9
+is not an oversight — nobody else in the descent could carry it, which is the point of
+building a weapon for one body.
 
-It also has the only magazine in the arsenal: thirty rounds in the cell, then two flat
-seconds of nothing. Thirty ticks is a shade under three seconds held down, which is exactly
-the length of the ramp — so the weapon now reaches the top of its own curve at about the
-moment the cell runs dry, and holding the beam on one target costs you the reload instead of
-being free forever. The two seconds do not shorten with attack speed: attack speed buys
-rounds, not hands. There is no window and nothing to get right, just a hole in your damage
-the weapon's rhythm is priced around. The round count sits on the M1 slot and the
+Halcyon's **Beam** has no falloff and no travel time at all, out to five hundred metres. Every
+other attack in the game has a range; a character who spends the fight four hundred metres up
+needs one that does not, and the price is the cell — forty ticks, a shade over three seconds
+held down, then a second and a half of nothing. The round count sits on the M1 slot and the
 reload bar runs without a marker.
 
-The **Siege Gauntlets** have no muzzle: the reach *is* the ability. Each punch resolves a 9m
-cone with three upright crescents marching away from the fist, and the secondary fires both
-gauntlets at the floor — straight up, jumps refunded, with a 260% blast under you.
-
-It never rolls a crit of its own. That is what makes the seam mean anything — a weapon that
-sometimes crits anyway turns aiming into a suggestion — and it is why every point of crit
-*chance* an item hands you is read as 2.5× that much crit *damage* instead, so a Glass Shard
-is still worth picking up.
-
-Each shot then takes the fire button away and gives you a bar with a marker sweeping across
-it. Click as the marker crosses the mark and the bolt is chambered instantly; click early,
-click late, or let the marker run off the right-hand end, and the action jams for three
-seconds. The mark moves every shot, because a fixed one is a rhythm you learn once and then
-stop reading.
-
-Its secondary is a revolver, and it prices itself on the outcome: 260% damage, and if the
-shot finishes something it holsters free. If the target is still standing, it is gone for ten
-seconds. It is a finisher, not a second primary.
+Sniper is untouched, and is the one character who still aims a weapon rather than holding one.
+The longrifle never rolls a crit of its own — that is what makes the seam mean anything, and
+it is why every point of crit *chance* an item hands you is read as 2.5× that much crit
+*damage* instead, so a Glass Shard is still worth picking up. Each shot takes the fire button
+away and gives you a bar with a marker sweeping across it: click as the marker crosses the
+mark and the bolt is chambered instantly; click early, click late, or let it run off the
+right-hand end, and the action jams for three seconds. The mark moves every shot, because a
+fixed one is a rhythm you learn once and then stop reading. Its revolver prices itself on the
+outcome — 260%, and if the shot finishes something it holsters free.
 
 **13 enemy types** (7 regulars, 6 bosses) with melee, ranged, flying, charging and artillery
 behaviours, plus **4 elite affixes** — Blazing, Glacial, Overcharged, Voidtouched — that
@@ -961,13 +1002,34 @@ weapons use, extended with movement primitives — `dash`, `lanceDash`, `fireGra
 camera correctly. An ultimate needs no cooldown field: it is gated by the charge meter in
 `Combat`, and `ULTIMATE` in `core/config.js` decides how fast that fills.
 
-### Adding a weapon
+A character may also declare a **`passive`**, which is a set of hooks rather than a number —
+`damageMult(player, enemy)` folded in at the end of `damageEnemy`, `moveMult(player)` read
+every frame by the movement code, `onDamaged(player, dealt, raw)` after a hit lands, or
+`onHatHit(combat, enemy, hat)` for the one that rides an ability. Each is read at the moment
+it applies, which is what lets a passive depend on things a stat block cannot see: how hurt
+you are, how fast you are going, how far off the ground.
 
-Append to `src/data/weapons.js` with a `primary` and `secondary`. Damage is expressed as a
-multiplier of the player's damage stat so it scales with levels and items automatically. The
-context gives you `hitscan`, `spawnBullet`, `spawnMortar`, `cone`, `melee`, `slashWave`,
-`shockwave`, `jetBoost`, `blinkSlash` and `chain`. Give each ability an `anim` so the body
-acts it out — see `rigAttack` in `entities/characterRig.js` for the moves available.
+Three flags round it out. `emptyHanded` means the character holds nothing, so no weapon model
+is attached and shots leave the palm. `aimWeapon` lets the weapon swivel onto the crosshair
+independently of the arm — one character sets it. `infiniteFlight` makes the thrusters a
+property of the body rather than an ability with a duration.
+
+### Adding a kit
+
+Append to `src/data/weapons.js` with a `primary` (M1) and a `secondary` (Q), and name it from
+the character's `weapon` field. Damage is expressed as a multiplier of the player's damage
+stat so it scales with levels and items automatically. The context gives you `hitscan`,
+`spawnBullet`, `spawnMortar`, `cone`, `melee`, `shotgun`, `slashWave`, `shockwave`, `combo`,
+`firePatch`, `diveSlam`, `parry`, `phase`, `guard`, `chainPull` and a dozen more — every one
+of them is documented where it is defined in `systems/combat.js`.
+
+Give each ability an `anim` so the body acts it out, or `animFor(ctx)` if the animation
+changes shot to shot; see `rigAttack` in `entities/characterRig.js` for the moves available.
+`model` picks the held object and the report it makes, `charges: n` gives Q a charge pool,
+and `sustain: true` makes it a held posture instead of a press.
+
+**Nothing else has to know.** The HUD, the co-op profile packet, the character-select readout
+and the remote-player model all read the kit through the same two fields they always did.
 
 ### Tuning
 

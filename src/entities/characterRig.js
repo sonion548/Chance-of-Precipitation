@@ -119,7 +119,8 @@ export function rigAttack(rig, kind = 'shoot', power = 1) {
 }
 
 const ATTACK_DURATION = {
-  slash: 0.34, punch: 0.26, thrust: 0.24, pump: 0.3, lob: 0.28, beam: 0.16, shoot: 0.16,
+  slash: 0.34, punch: 0.26, punchL: 0.26, swing: 0.40, thrust: 0.24,
+  pump: 0.3, lob: 0.28, beam: 0.16, shoot: 0.16,
 };
 
 /**
@@ -290,6 +291,25 @@ export function updateRig(model, rig, dt, s) {
    whole leg sideways, carrying the forward foot across the centreline. */
 const PELVIS_SWING = 0.15;
 
+/* How much of a splayed leg's stance is taken out as the stride comes up.
+
+   A body sculpted standing still is sculpted with its feet apart — the
+   authored meshes stand between 60 and 85 cm wide at the boots — and every
+   swing the gait asks for is a rotation about the hip's lateral axis. Swing a
+   leg that already points 17° outboard forward by 45° and the vertical drop
+   shortens while the sideways offset does not, so the leg reads as swinging
+   *out* as well as forward: measured on Dasher, an apparent stance of 17° at
+   rest opening to 25° at mid-stride, on both legs, in opposite phase. That is
+   the whole of the wide-legged run on the advanced models.
+
+   A runner does the opposite — the faster they go the further under the body
+   the feet land — so the correction is the same thing the animation was
+   missing rather than a fudge over it: take the sculpted splay back out in
+   proportion to the stride. `splayZ` is measured off each rig's own bones (see
+   `publishRigContract`), so a body that was modelled standing straight gets
+   nothing and nothing changes for it. */
+const LEG_TUCK = 0.85;
+
 /* How much of that twist the hips answer, so the legs keep tracking the way the
    body is going. This is what a femur does: the pelvis rotates and the leg
    rotates back under it, which is why a person's feet land in a line and not in
@@ -353,7 +373,10 @@ function poseLegs(ud, rig, dt, o) {
     // The rest splay set at build time is the baseline, not zero — writing an
     // absolute here is what collapsed the stance back to parallel on frame one.
     const rest = leg.userData.restZ ?? 0;
-    leg.rotation.z = damp(leg.rotation.z, rest - abduct + cross, 12, dt);
+    // Bring a splayed leg under the body in proportion to how hard it is
+    // running. Zero on a body modelled with its legs already vertical.
+    const tuck = (leg.userData.splayZ ?? 0) * stride * LEG_TUCK;
+    leg.rotation.z = damp(leg.rotation.z, rest + tuck - abduct + cross, 12, dt);
 
     /* --- yaw: where the foot points, and undoing the pelvis ---
        Feet turn out towards the direction of travel; a side-step turns them
@@ -400,6 +423,24 @@ function poseLegs(ud, rig, dt, o) {
   }
 }
 
+/**
+ * May this rig move a joint, as opposed to turning one?
+ *
+ * On a body built out of primitives every joint is a Group with its own boxes
+ * hanging off it, so sliding one up an inch slides its geometry with it and
+ * nothing else moves. On an authored mesh it is a *bone*, and the vertices
+ * around it are shared with the bones on either side — so the same inch does
+ * not move the chest, it stretches the waist into it. That is the whole of why
+ * the advanced models used to visibly change shape as they ran: the breath, the
+ * step bob, the shoulder shrug and the head float were all translations, and on
+ * a skinned body a translation is a deformation.
+ *
+ * So on a skinned body the rig rotates and does not translate. The one
+ * exception is the pelvis, which is the root: moving it carries every other
+ * bone with it, which is a body bobbing rather than a body stretching.
+ */
+const canTranslate = (ud) => !ud.authored;
+
 /* ---------------------------------------------------------------- pelvis */
 function posePelvis(ud, rig, dt, o) {
   if (!ud.pelvis) return;
@@ -429,7 +470,9 @@ function poseTorso(ud, rig, dt, s, o) {
 
   const bob = Math.abs(Math.sin(ph)) * 0.05 * stride;
   const breathe = breath * (0.022 + idle * 0.03);
-  torso.position.y = ud.torsoBaseY - 0.03 * stride - land * 0.24 + bob + breathe;
+  if (canTranslate(ud)) {
+    torso.position.y = ud.torsoBaseY - 0.03 * stride - land * 0.24 + bob + breathe;
+  }
 
   // Shoulders counter-rotate against the hips; a lean into the turn on top.
   const counter = Math.sin(ph) * 0.28 * stride * (rig.gaitF + rig.gaitB);
@@ -462,7 +505,13 @@ function poseTorso(ud, rig, dt, s, o) {
   if (atk > 0.001) {
     switch (rig.attackKind) {
       case 'slash': twist = side * 0.52 * atk; roll = side * 0.14 * atk; fold = 0.1 * atk; break;
-      case 'punch': twist = -side * 0.3 * atk; fold = 0.24 * atk; roll = side * 0.1 * atk; break;
+      /* A round swing is a slash with the whole body behind it: the trunk
+         leads further and always the same way, because a chain on a length of
+         iron has one direction it can be thrown and it is not negotiable. */
+      case 'swing': twist = 0.85 * atk; roll = 0.2 * atk; fold = 0.14 * atk; break;
+      case 'punch': twist = -0.34 * atk; fold = 0.24 * atk; roll = 0.1 * atk; break;
+      // The other fist, so the shoulders open the opposite way.
+      case 'punchL': twist = 0.34 * atk; fold = 0.24 * atk; roll = -0.1 * atk; break;
       case 'thrust': twist = -0.18 * atk; fold = 0.2 * atk; break;
       case 'pump': twist = 0.16 * atk; fold = 0.12 * atk; break;
       case 'lob': twist = -side * 0.2 * atk; fold = -0.14 * atk; break;
@@ -473,10 +522,17 @@ function poseTorso(ud, rig, dt, s, o) {
   torso.rotation.z = rig.torsoZ + roll;
   torso.rotation.x = rig.torsoX + fold;
 
-  // The chest itself swells with the breath cycle. Tiny, but it kills the
-  // "statue with moving legs" read more than any of the big rotations do.
-  const swell = 1 + breath * (0.012 + idle * 0.016);
-  torso.scale.set(swell, 1 + breath * 0.006, swell);
+  /* The chest itself swells with the breath cycle. Tiny, but it kills the
+     "statue with moving legs" read more than any of the big rotations do.
+
+     Not on a skinned body, where it is not a chest being scaled but a bone —
+     and every vertex weighted partly to it and partly to its neighbours gets
+     pulled off the surface it belongs to. Non-uniform scale down a bone chain
+     is the single worst thing you can do to a skinned mesh; on the authored
+     characters this was the breathing visibly inflating and deflating the
+     torso as they ran. */
+  const swell = canTranslate(ud) ? 1 + breath * (0.012 + idle * 0.016) : 1;
+  torso.scale.set(swell, canTranslate(ud) ? 1 + breath * 0.006 : 1, swell);
 }
 
 /* ---------------------------------------------------------------- flight */
@@ -593,9 +649,12 @@ function poseHead(ud, rig, dt, s, o) {
   head.rotation.z = damp(head.rotation.z, -torso.rotation.z * 0.6 - rig.strafe * 0.07, 16, dt);
   head.rotation.x = damp(head.rotation.x,
     -torso.rotation.x * 0.35 - s.pitch * 0.28 + nod + rig.recoil * 0.1 + rig.flinch * 0.22, 16, dt);
-  // Slight vertical float so the neck is not welded.
-  head.position.y = (ud.headBaseY ??= head.position.y)
-    + Math.abs(Math.sin(ph)) * 0.012 * stride + breath * 0.008;
+  // Slight vertical float so the neck is not welded — on a body that has a
+  // neck to float. On a skinned one it stretches the throat instead.
+  if (canTranslate(ud)) {
+    head.position.y = (ud.headBaseY ??= head.position.y)
+      + Math.abs(Math.sin(ph)) * 0.012 * stride + breath * 0.008;
+  }
 }
 
 /* ------------------------------------------------------------------ arms */
@@ -635,12 +694,20 @@ function poseArms(ud, rig, dt, s, o) {
   rig.armRY = damp(rig.armRY, -rig.turnRate * 0.2 * ready, 12, dt);
 
   /* ---- left arm: supports the weapon, or reaches out on a grapple ---- */
+  /* Unless it is already holding something.
+     The support pose exists to put a second hand on a rifle, and it is exactly
+     wrong for the two characters carrying a shield and a second blade — the
+     shield came up across the chest every time a target appeared, which is a
+     plate being aimed rather than a plate being carried. A busy offhand keeps
+     most of its carry through the ready blend: it lifts a little, the way a
+     shield does when you square up, and no further. */
+  const readyL = ud.offhandHeld ? ready * 0.26 : ready;
   const bracedL = (-0.95 + aimLift) - rig.recoil * 0.28;
   const loweredL = -0.16 + swingL;
-  const supportPose = s.grapple ? -1.5 : lerp(loweredL, bracedL - swingL * 0.5, ready);
+  const supportPose = s.grapple ? -1.5 : lerp(loweredL, bracedL - swingL * 0.5, readyL);
   rig.armLX = damp(rig.armLX, supportPose - airborne * 0.2, 18, dt);
-  rig.armLZ = damp(rig.armLZ, s.grapple ? 0.1 : lerp(-0.06, 0.34, ready) - sideDrift, 12, dt);
-  rig.armLY = damp(rig.armLY, s.grapple ? 0 : lerp(0.04, -0.28, ready), 12, dt);
+  rig.armLZ = damp(rig.armLZ, s.grapple ? 0.1 : lerp(-0.06, 0.34, readyL) - sideDrift, 12, dt);
+  rig.armLY = damp(rig.armLY, s.grapple ? 0 : lerp(0.04, -0.28, readyL), 12, dt);
 
   /* Elbows.
      Negative bends the forearm *forward*, which is the only direction a human
@@ -652,7 +719,7 @@ function poseArms(ud, rig, dt, s, o) {
   rig.armRLower = damp(rig.armRLower,
     -(lerp(0.34, 0.42 + rig.recoil * 0.5, ready) + Math.abs(swingR) * lerp(0.3, 0.22, ready)), 18, dt);
   rig.armLLower = damp(rig.armLLower,
-    s.grapple ? -0.35 : -(lerp(0.3, 0.7, ready) + Math.abs(swingL) * lerp(0.3, 0.22, ready)), 14, dt);
+    s.grapple ? -0.35 : -(lerp(0.3, 0.7, readyL) + Math.abs(swingL) * lerp(0.3, 0.22, readyL)), 14, dt);
 
   const atk = poseAttackArms(rig);
   ud.armR.rotation.x = rig.armRX + atk.rx;
@@ -664,11 +731,15 @@ function poseArms(ud, rig, dt, s, o) {
   if (ud.armR.userData.lower) ud.armR.userData.lower.rotation.x = rig.armRLower + atk.rElbow;
   if (ud.armL.userData.lower) ud.armL.userData.lower.rotation.x = rig.armLLower + atk.lElbow;
 
-  // Shoulders shrug with the breath and rock with the stride.
-  const shrug = breath * 0.03 * idle * (1 - ready * 0.6);
-  const rock = Math.sin(ph) * 0.035 * stride;
-  ud.armR.position.y = (ud.armRBaseY ??= ud.armR.position.y) + shrug - rock;
-  ud.armL.position.y = (ud.armLBaseY ??= ud.armL.position.y) + shrug + rock;
+  // Shoulders shrug with the breath and rock with the stride — again, only
+  // where a shoulder is a Group of its own and not a bone sharing its skin
+  // with the chest it would otherwise tear away from.
+  if (canTranslate(ud)) {
+    const shrug = breath * 0.03 * idle * (1 - ready * 0.6);
+    const rock = Math.sin(ph) * 0.035 * stride;
+    ud.armR.position.y = (ud.armRBaseY ??= ud.armR.position.y) + shrug - rock;
+    ud.armL.position.y = (ud.armLBaseY ??= ud.armL.position.y) + shrug + rock;
+  }
 }
 
 /**
@@ -705,6 +776,28 @@ function poseAttackArms(rig) {
       out.lx = 0.5 * a;
       out.lElbow = 0.5 * a;
       break;
+    /* The same punch thrown off the other shoulder. Written out rather than
+       folded into `punch` with a sign, because the two arms do not have
+       mirrored rest poses — the left is the support hand — and mirroring the
+       offsets would land the left fist somewhere the right one never goes. */
+    case 'punchL':
+      out.lx = -0.95 * a;
+      out.lz = 0.18 * a;
+      out.lElbow = -0.75 * a;
+      out.rx = 0.5 * a;
+      out.rElbow = 0.5 * a;
+      break;
+    /* A round swing: the arm comes across from outside the shoulder, opening
+       through the elbow, and the far hand stays out of its way. Bigger than a
+       slash in every axis — this is a weight on the end of a chain. */
+    case 'swing':
+      out.ry = 1.9 * a;
+      out.rx = -0.5 * a;
+      out.rz = -0.7 * a;
+      out.rElbow = -0.55 * a;
+      out.ly = 0.5 * a;
+      out.lz = -0.2 * a;
+      break;
     case 'thrust':
       out.rx = -0.6 * a;
       out.rElbow = -0.55 * a;
@@ -730,9 +823,29 @@ function poseAttackArms(rig) {
 }
 
 /* ---------------------------------------------------------------- weapon */
+/**
+ * The weapon, and where it is allowed to point.
+ *
+ * There are two answers now and the character picks one.
+ *
+ * A **fixed** weapon is part of the body. It sits in the hand in the carry it
+ * was authored in and moves for exactly one reason: the arm moved. A spear
+ * swung in a slash goes where the shoulder takes it; standing still, it hangs
+ * where a spear hangs. This is what every character carries, and it is the
+ * reason a weapon reads as belonging to the person holding it — the old
+ * behaviour swivelled the gun onto the crosshair independently of the arm, so a
+ * body running one way with the camera pointed another had a rifle rotating in
+ * a fist that was plainly not turning with it.
+ *
+ * An **aimed** weapon is the exception, and it is a scope: Sniper's longrifle
+ * has to sit exactly on the line the round is going down, because the whole
+ * character is that line. One character, deliberately.
+ */
 function poseWeapon(ud, rig, dt, s) {
   const mount = ud.weaponMount;
   if (!mount || !mount.parent) return;
+
+  if (!ud.aimWeapon) { poseFixedWeapon(ud, rig); return; }
 
   mount.parent.updateWorldMatrix(true, false);
   mount.getWorldPosition(_mountPos);
@@ -771,7 +884,8 @@ function poseWeapon(ud, rig, dt, s) {
   if (a > 0.001) {
     switch (rig.attackKind) {
       case 'slash': swingRoll = rig.attackSide * 1.15 * a; swingPitch = -0.3 * a; break;
-      case 'punch': reach = 0.34 * a; swingPitch = -0.12 * a; break;
+      case 'swing': swingRoll = 1.6 * a; swingPitch = -0.15 * a; break;
+      case 'punch': case 'punchL': reach = 0.34 * a; swingPitch = -0.12 * a; break;
       case 'thrust': reach = 0.42 * a; break;
       case 'pump': swingPitch = 0.22 * a; reach = -0.1 * a; break;
       case 'lob': swingPitch = -0.4 * a; break;
@@ -850,6 +964,49 @@ function poseWeapon(ud, rig, dt, s) {
   if (ud.mountRest) mount.quaternion.slerp(ud.mountRest, 1 - rig.ready);
 }
 
+/**
+ * A weapon welded into the hand.
+ *
+ * The rest pose is whatever the art intended — `mountRest` for a mesh weapon
+ * sculpted into the body, and the standard hold for a model dropped into a
+ * fist, which continues the line of the forearm with a little wrist under it.
+ * On top of that go the same swing offsets the aimed path uses, so a slash
+ * still rolls the blade over and a thrust still drives the point out; they are
+ * simply expressed in the hand's frame instead of in the world's.
+ */
+function poseFixedWeapon(ud, rig) {
+  const mount = ud.weaponMount;
+  const rest = ud.mountRest ?? (ud.mountFixedRest ??= _holdOffset.clone());
+
+  const a = rig.attack;
+  let swingRoll = 0;
+  let swingPitch = 0;
+  let reach = 0;
+  if (a > 0.001) {
+    switch (rig.attackKind) {
+      case 'slash': swingRoll = rig.attackSide * 1.15 * a; swingPitch = -0.3 * a; break;
+      case 'swing': swingRoll = 1.6 * a; swingPitch = -0.15 * a; break;
+      case 'punch': case 'punchL': reach = 0.34 * a; swingPitch = -0.12 * a; break;
+      case 'thrust': reach = 0.42 * a; break;
+      case 'pump': swingPitch = 0.22 * a; reach = -0.1 * a; break;
+      case 'lob': swingPitch = -0.4 * a; break;
+      default: swingPitch = -rig.recoil * 0.35; break;
+    }
+  }
+  _euler.set(swingPitch - rig.recoil * 0.3, 0, swingRoll, 'XYZ');
+  _offsetQuat.setFromEuler(_euler);
+  mount.quaternion.copy(rest).multiply(_offsetQuat);
+
+  // Same rule as the aimed path: a weapon that is vertices in the body's own
+  // buffer cannot be slid out of the fist holding it.
+  if (!ud.mountIsGeometry) {
+    ud.mountBaseZ ??= mount.position.z;
+    ud.mountBaseY ??= mount.position.y;
+    mount.position.z = ud.mountBaseZ + reach;
+    mount.position.y = ud.mountBaseY + reach * 0.18;
+  }
+}
+
 /* ----------------------------------------------------------------- death */
 function poseDeath(ud, rig, dt) {
   const t = clamp01(rig.deathTime * 1.6);
@@ -857,7 +1014,7 @@ function poseDeath(ud, rig, dt) {
   if (ud.torso) {
     ud.torso.rotation.x = damp(ud.torso.rotation.x, 0.9 * fall, 6, dt);
     ud.torso.rotation.z = damp(ud.torso.rotation.z, 0.35 * fall, 6, dt);
-    ud.torso.position.y = ud.torsoBaseY - 0.55 * fall;
+    if (canTranslate(ud)) ud.torso.position.y = ud.torsoBaseY - 0.55 * fall;
     ud.torso.scale.setScalar(1);
   }
   if (ud.pelvis) {

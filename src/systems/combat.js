@@ -52,8 +52,21 @@ export class Combat {
     this.secondaryTimer = 0;
     this.utilityTimer = 0;
     this.utilityCharges = 1;
+    // The secondary is a character ability now rather than a second trigger on
+    // a gun, so it gets the same charge pool the other two have had all along.
+    this.secondaryCharges = 1;
     this.specialTimer = 0;
     this.specialCharges = 1;
+    // A held ability — Bulwark behind his plate — while the button is down.
+    this.sustaining = false;
+    // Fire patches burning on the ground, oldest first. Diver's, and the only
+    // thing in the game that is both a hazard and a target.
+    this.firePatches = [];
+    /* Where a multi-hit primary is up to, and when it forgets.
+       A three-hit lance combo is a property of the trigger being pulled in
+       rhythm, not of the weapon, so it lives here and resets itself. */
+    this._comboIndex = 0;
+    this._comboTimer = 0;
     // Dashes that have already been paid for. Spent before charges are, so an
     // ultimate that hands you three of them is three dashes rather than three
     // seconds shaved off one cooldown.
@@ -77,6 +90,9 @@ export class Combat {
     this._ultimateAnnounced = false;
     this._pendingSlam = null;
     this._killOrder = null;
+    this.infernoTimer = 0;
+    // What the last parry was told to do with the blow it catches.
+    this._parrySpec = null;
     this.chargeTime = 0;
     this.charging = false;
     this.heat = 0;
@@ -91,7 +107,10 @@ export class Combat {
     this.utilityTimer = 0;
     this.specialTimer = 0;
     this.specialCharges = this.character.special.charges ?? 1;
+    this.secondaryCharges = 1;
+    this.sustaining = false;
     this.dashResets = 0;
+    this._clearFirePatches();
     this._clearHat();
     this._clearHatMarker();
     this.ultimateCharge = ULTIMATE.startCharge;
@@ -134,6 +153,23 @@ export class Combat {
     this.addUltimateCharge((amount / max) * 100 * ULTIMATE.perHealthPercent);
   }
 
+  /**
+   * Dealing damage is the main half of it.
+   *
+   * Measured as a fraction of the *target*, not as raw damage, and that is the
+   * whole design: a run that has quadrupled its damage kills the same husk four
+   * times faster and is paid the same for it, so the meter tracks how much
+   * fighting you have done rather than how big your numbers have got. The cap
+   * is what stops one enormous slam into something small being worth a whole
+   * bar — you are paid for the body, not for the overkill.
+   */
+  noteDamageDealt(enemy, dealt) {
+    if (!(dealt > 0)) return;
+    const max = enemy?.maxHealth || 1;
+    const gain = (dealt / max) * 100 * ULTIMATE.perEnemyHealthPercent;
+    this.addUltimateCharge(Math.min(ULTIMATE.maxPerHit, gain));
+  }
+
   /** Hands one utility charge back and restarts its regeneration cleanly. */
   refundUtility() {
     const max = this.maxUtilityCharges;
@@ -165,6 +201,27 @@ export class Combat {
 
   /** Max special charges. Ability-defined; nothing grants extras yet. */
   get maxSpecialCharges() { return this.character?.special.charges ?? 1; }
+
+  /** Max secondary charges. Most abilities want one; Fire Patch wants three. */
+  get maxSecondaryCharges() { return this.weapon?.secondary?.charges ?? 1; }
+
+  /**
+   * Spends one use of the utility and starts its cooldown.
+   *
+   * Pulled out of the input handler because one ability does not pay when it is
+   * pressed. Chain's mark is two presses — a throw and a recall — and the thing
+   * you are buying is the recall: charging the throw would start the timer
+   * while the hat is still in the air, so a hat left in a field for twenty
+   * seconds would come back with the cooldown already served. Paying on arrival
+   * makes the five seconds mean what the ability says it means.
+   */
+  spendUtility() {
+    if (this.dashResets > 0) { this.dashResets--; return; }
+    const cd = (this.character?.utility.cooldown ?? 3)
+      * this.game.player.stats.cooldownMult * this.game.player.stats.dashCooldownMult;
+    this.utilityCharges = Math.max(0, this.utilityCharges - 1);
+    if (this.utilityTimer <= 0) this.utilityTimer = cd;
+  }
 
   /**
    * What one use of the special costs in seconds.
@@ -214,6 +271,12 @@ export class Combat {
     }
     this.primaryTimer = 0;
     this.secondaryTimer = 0;
+    // A multi-charge Q arrives full, for the same reason a magazine does: a
+    // character who starts a run with one of their three patches has been
+    // charged for a cooldown they never spent.
+    this.secondaryCharges = this.weapon.secondary?.charges ?? 1;
+    this._comboIndex = 0;
+    this._comboTimer = 0;
     this.heat = 0;
     this.reload = null;
     // Anything picked up comes with a full magazine. Carrying a half-empty one
@@ -238,6 +301,8 @@ export class Combat {
       if (this.weapon) this.ammo = this.weapon.primary.magazine?.size ?? null;
       this._clearHat();
       this._clearHatMarker();
+      this._clearFirePatches();
+      this.sustaining = false;
       return;
     }
 
@@ -245,9 +310,28 @@ export class Combat {
     const secondary = this.weapon.secondary;
     const canAct = !this.game.paused;
 
-    // ---- Secondary: Q, charged or instant ----
+    // Combos forget themselves if you stop swinging.
+    if (this._comboTimer > 0 && (this._comboTimer -= dt) <= 0) this._comboIndex = 0;
+
+    /* ---- Secondary: Q — held, charged, charge-based or instant ----
+     *
+     * Four shapes now, because the second button is a character ability rather
+     * than a gun's alternate fire. A *sustained* ability is the odd one: it has
+     * no cooldown and no cast, it is simply true for as long as the button is
+     * down, and the ability is told when that changes rather than when it
+     * fires. Bulwark's guard is the only one, and it is the only one that
+     * should be: an ability you hold is an ability you are not doing anything
+     * else during, which is a real cost and a hard one to price twice.
+     */
     const secondaryHeld = input.actionDown(SECONDARY_ACTION);
-    if (secondary.charge) {
+    if (secondary.sustain) {
+      const want = canAct && secondaryHeld;
+      if (want !== this.sustaining) {
+        this.sustaining = want;
+        secondary.onSustain?.(this.ctx, want);
+      }
+      if (want) secondary.whileHeld?.(this.ctx, dt);
+    } else if (secondary.charge) {
       if (secondaryHeld && this.secondaryTimer <= 0 && canAct) {
         this.charging = true;
         this.chargeTime = Math.min(secondary.charge, this.chargeTime + dt);
@@ -257,8 +341,28 @@ export class Combat {
         if (this.chargeTime >= (secondary.minCharge ?? 0.15)) this._fireAbility(secondary, t);
         this.chargeTime = 0;
       }
-    } else if (input.actionPressed(SECONDARY_ACTION) && this.secondaryTimer <= 0 && canAct) {
-      this._fireAbility(secondary, 1);
+    } else {
+      /* Charge regeneration, as the utility and the special do it — but
+         without a second `-= dt`. The secondary timer is already stepped once
+         at the top of this function, which the other two slots are not, and
+         subtracting again here regenerated three-second charges in a second
+         and a half. */
+      const maxSecondary = this.maxSecondaryCharges;
+      const qcd = secondary.cooldown * stats.cooldownMult;
+      if (maxSecondary > 1) {
+        if (this.secondaryCharges < maxSecondary && this.secondaryTimer <= 0) {
+          this.secondaryCharges++;
+          this.secondaryTimer = this.secondaryCharges < maxSecondary ? qcd : 0;
+        }
+      }
+      const ready = maxSecondary > 1 ? this.secondaryCharges > 0 : this.secondaryTimer <= 0;
+      if (input.actionPressed(SECONDARY_ACTION) && ready && canAct) {
+        if (maxSecondary > 1) {
+          this.secondaryCharges--;
+          if (this.secondaryTimer <= 0) this.secondaryTimer = qcd;
+        }
+        this._fireAbility(secondary, 1);
+      }
     }
 
     // ---- Utility (Shift): charge-based, character-defined ----
@@ -277,12 +381,17 @@ export class Combat {
       }
       const canDash = this.utilityCharges > 0 || this.dashResets > 0;
       if (canAct && canDash && input.actionPressed(UTILITY_ACTION)) {
-        // A banked reset is spent before the charge is, so three of them are
-        // three genuinely free dashes rather than a shorter cooldown.
-        if (this.dashResets > 0) this.dashResets--;
-        else {
-          this.utilityCharges--;
-          if (this.utilityTimer <= 0) this.utilityTimer = cd;
+        /* Most abilities are paid for on the press. One is not: an ability
+           that declares `deferCooldown` bills itself, from inside `fire`, at
+           whichever of its steps is the one worth charging for. */
+        if (!util.deferCooldown) {
+          // A banked reset is spent before the charge is, so three of them are
+          // three genuinely free dashes rather than a shorter cooldown.
+          if (this.dashResets > 0) this.dashResets--;
+          else {
+            this.utilityCharges--;
+            if (this.utilityTimer <= 0) this.utilityTimer = cd;
+          }
         }
         this._fireAbility(util, 1, false, 'utility');
       }
@@ -328,6 +437,8 @@ export class Combat {
     this._tickSlam(dt, player);
     this._tickKillOrder(dt, player);
     this._tickHat(dt, player);
+    this._tickFirePatches(dt, player);
+    this._tickInferno(dt, player);
 
     // ---- Primary ----
     // A weapon mid-reload owns the fire button: the click that lands on the
@@ -335,7 +446,9 @@ export class Combat {
     // for the frame the minigame consumed.
     const reloading = this._tickReload(dt, input, player, canAct);
     const wantPrimary = primary.hold ? input.actionDown('primary') : input.actionPressed('primary');
-    if (wantPrimary && !reloading && this.primaryTimer <= 0 && canAct && !this.charging) {
+    // Both hands on the shield is both hands off everything else.
+    const blocked = this.sustaining && secondary.blocksPrimary;
+    if (wantPrimary && !reloading && !blocked && this.primaryTimer <= 0 && canAct && !this.charging) {
       const interval = primary.cooldown / Math.max(0.05, stats.attackSpeed);
       this.primaryTimer = interval;
       this.firing = true;
@@ -375,9 +488,13 @@ export class Combat {
       audio.shoot(this.weapon?.model || 'pistol', _origin,
         kind === 'secondary' ? 0.72 : kind === 'primary' ? 1 : 0.85);
     }
-    // The body acts the ability out: a swing swings, a punch punches. The rig
-    // owns what that looks like; all that is decided here is which one to play.
-    if (ability.anim) rigAttack(player.rig, ability.anim, chargeRatio);
+    /* The body acts the ability out: a swing swings, a punch punches. The rig
+       owns what that looks like; all that is decided here is which one to play
+       — and an ability whose animation changes from swing to swing, like a
+       combo that ends on a thrust or a pair of fists that alternate, answers
+       `animFor` instead of naming one. */
+    const anim = ability.animFor ? ability.animFor(this.ctx) : ability.anim;
+    if (anim) rigAttack(player.rig, anim, chargeRatio);
 
     this._secondaryRefund = false;
     try {
@@ -387,9 +504,15 @@ export class Combat {
     }
 
     if (kind === 'secondary') {
-      // An ability may buy its own cooldown back out of what it just did — the
-      // revolver holsters free when the shot finishes something.
-      this.secondaryTimer = this._secondaryRefund ? 0 : ability.cooldown * player.stats.cooldownMult;
+      /* An ability may buy its own cooldown back out of what it just did — the
+         revolver holsters free when the shot finishes something.
+         A multi-charge secondary has already been billed above, and setting the
+         timer here would restart its regeneration from scratch on every use. */
+      if ((ability.charges ?? 1) <= 1) {
+        this.secondaryTimer = this._secondaryRefund ? 0 : ability.cooldown * player.stats.cooldownMult;
+      } else if (this._secondaryRefund) {
+        this.secondaryCharges = Math.min(this.maxSecondaryCharges, this.secondaryCharges + 1);
+      }
       this._secondaryRefund = false;
       this.game.inventory.trigger('onSecondary', { ability });
     }
@@ -729,6 +852,8 @@ export class Combat {
         });
         h.bounces++;
         h.damage *= 1 + h.growth;
+        // Chain Reaction: every body the hat crosses is time off everything.
+        this.character?.passive?.onHatHit?.(this, struck, h);
         this.game.fxApi.ring(struck.center, 0.3, h.radius * 1.6, h.color, 0.28, 0.85);
         if (!this._aimHatAtNextTarget(h, struck)) h.state = 'return';
       } else if (h.travelled >= h.range) {
@@ -747,6 +872,197 @@ export class Combat {
       return;
     }
     h.velocity.copy(_v).divideScalar(dist).multiplyScalar(h.speed);
+  }
+
+  /* ------------------------------------------------------------------ fire */
+  /**
+   * The fire patches burning on the floor, and why they are objects rather
+   * than hazards.
+   *
+   * `spawnHazard` already exists and already burns things that stand in it, so
+   * the obvious implementation is one line. It is the wrong one: Diver's whole
+   * kit is a conversation between two abilities — the patch says where, the
+   * slam says now — and for the slam to detonate a patch it lands on, the patch
+   * has to be a thing with a position and a life that something else can find,
+   * take and consume. A hazard is fire on the ground; this is ammunition that
+   * happens to be on fire while it waits.
+   */
+  /**
+   * Puts a patch on the floor at `position` and keeps it there.
+   *
+   * Three at a time, oldest evicted — a cap rather than a cooldown, because
+   * the ability already has one and a floor covered in every patch you have
+   * ever thrown is not a decision about where to throw the next.
+   */
+  placeFirePatch(position, spec = {}) {
+    const radius = spec.radius ?? 4.2;
+    const color = spec.color ?? 0xff7a2a;
+    const p = position.clone();
+    p.y = this.game.arena.groundHeightAt(p.x, p.z, p.y + 2) + 0.06;
+
+    const geo = new THREE.CircleGeometry(radius, 24);
+    geo.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.26, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }));
+    mesh.position.copy(p);
+    this.game.engine.scene.add(mesh);
+
+    this.firePatches.push({
+      mesh, position: p, radius, color,
+      time: spec.duration ?? 6,
+      // Per half-second tick, so the number in the description is per second.
+      damage: (spec.dps ?? 0) * 0.5,
+      burn: spec.burn ?? 0,
+      tick: 0,
+    });
+    while (this.firePatches.length > (spec.max ?? 3)) this._removeFirePatch(0);
+    this.game.fxApi.ring(p, 0.4, radius, color, 0.45, 0.9);
+    this.game.fxApi.explosion(p, radius * 0.5, color, 0.5);
+  }
+
+  _tickFirePatches(dt, player) {
+    if (!this.firePatches.length) return;
+    for (let i = this.firePatches.length - 1; i >= 0; i--) {
+      const f = this.firePatches[i];
+      f.time -= dt;
+      f.tick -= dt;
+      f.mesh.rotation.y += dt * 0.6;
+      // Fading out over the last second, so a patch about to die says so.
+      const fade = clamp01(f.time / 1.0);
+      f.mesh.material.opacity = (0.24 + Math.sin(f.time * 7) * 0.05) * fade;
+      if (this.game.frame % 4 === 0) {
+        const a = this.game.rng.next() * TAU;
+        const r = Math.sqrt(this.game.rng.next()) * f.radius;
+        this.game.fx.spawnParticle(
+          _v.set(f.position.x + Math.cos(a) * r, f.position.y + 0.1, f.position.z + Math.sin(a) * r),
+          _v2.set(0, 2.4 + this.game.rng.next() * 2, 0),
+          { color: f.color, size: 0.16, life: 0.45, gravity: 2, drag: 0.94 },
+        );
+      }
+      if (f.tick <= 0) {
+        f.tick = 0.5;
+        for (const e of this.game.enemies.inRadius(f.position, f.radius)) {
+          this.damageEnemy(e, f.damage, { proc: 0.25, source: 'Fire Patch' });
+          e.applyStatus('burn', 3, { dps: f.burn });
+        }
+      }
+      if (f.time <= 0) this._removeFirePatch(i);
+    }
+    void player;
+  }
+
+  /**
+   * Sets everything within `radius` of a point alight, consuming any patch it
+   * catches. Returns how many patches went up, which is what the slam reports.
+   */
+  detonateFirePatches(position, radius, damage, color) {
+    let count = 0;
+    for (let i = this.firePatches.length - 1; i >= 0; i--) {
+      const f = this.firePatches[i];
+      if (f.position.distanceTo(position) > radius + f.radius) continue;
+      count++;
+      const blastR = f.radius * 1.9;
+      this.areaDamage(f.position, blastR, damage, {
+        proc: 0.7, source: 'Firebomb', force: 16,
+        burn: { time: 4, dps: f.burn * 1.6 },
+      });
+      this.game.fxApi.explosion(f.position, blastR, color ?? f.color, 1.3);
+      this.game.fxApi.ring(f.position, 0.6, blastR, color ?? f.color, 0.45, 1);
+      this._removeFirePatch(i);
+    }
+    if (count) this.game.engine.addShake(0.12 * count);
+    return count;
+  }
+
+  _removeFirePatch(i) {
+    const f = this.firePatches[i];
+    f.mesh.parent?.remove(f.mesh);
+    f.mesh.geometry.dispose();
+    f.mesh.material.dispose();
+    this.firePatches.splice(i, 1);
+  }
+
+  _clearFirePatches() {
+    while (this.firePatches.length) this._removeFirePatch(this.firePatches.length - 1);
+  }
+
+  /**
+   * Everything this system has put into the scene that is not the player.
+   *
+   * The hat in flight, the hat lying in a field, and the fire on the ground.
+   * All three are *positions in an arena*, so they belong to the stage rather
+   * than to the run — the game calls this when it tears a stage down and when
+   * it tears a run down, and both matter: a run builds a fresh `Combat`, so
+   * anything the old one left behind has nobody to remove it.
+   */
+  clearWorldObjects() {
+    this._clearHat();
+    this._clearHatMarker();
+    this._clearFirePatches();
+  }
+
+  /**
+   * Inferno: ten seconds during which standing near Diver is a mistake.
+   *
+   * A ring rather than a one-off blast, pulsed off the buff the same way
+   * Bastion and Last Stand are, so the ability owns no timer of its own and
+   * cannot outlive the thing that says it is running.
+   */
+  _tickInferno(dt, player) {
+    const buff = player.buffs.get('inferno');
+    if (!buff) { this.infernoTimer = 0; return; }
+    const extra = buff.extra || {};
+    this.infernoTimer = (this.infernoTimer ?? 0) - dt;
+    if (this.infernoTimer > 0) return;
+    this.infernoTimer = extra.interval ?? 0.5;
+    const radius = extra.radius ?? 22;
+    const color = extra.color ?? 0xff7a2a;
+    for (const e of this.game.enemies.inRadius(player.position, radius)) {
+      this.damageEnemy(e, extra.damage ?? 0, { proc: 0.3, source: 'Inferno' });
+      e.applyStatus('burn', 3.5, { dps: extra.burn ?? 0 });
+    }
+    this.game.fxApi.ring(player.position, radius * 0.25, radius, color, 0.5, 0.7);
+    this.game.fxApi.glow(player.chestPosition, { color, size: 2.2, life: 0.25, grow: 2.6 });
+  }
+
+  /**
+   * A blow that was caught rather than taken.
+   *
+   * The player has already refused the damage by this point; all that is left
+   * is to decide what "reflected" means. It means the attacker wears it: the
+   * enemy that threw it if the call site named one, otherwise whatever is
+   * nearest and in front, because a parry is a thing you do facing somebody.
+   */
+  onParried(amount, opts = {}) {
+    const player = this.game.player;
+    const spec = this._parrySpec || {};
+    const color = spec.color ?? 0x3dffa5;
+    player.invulnerable = Math.max(player.invulnerable, spec.iframes ?? 0.35);
+    this.game.fxApi.ring(player.position, 0.5, 4.2, color, 0.4, 1);
+    this.game.fxApi.glow(player.chestPosition, { color, size: 2, life: 0.3, grow: 2.4 });
+    this.game.engine.addShake(0.25);
+    this.game.ui.toast('PARRY', '#3dffa5');
+    audio.uiClick('confirm');
+
+    const back = amount * (spec.reflect ?? 3.0);
+    let target = opts.enemy && !opts.enemy.dead ? opts.enemy : null;
+    if (!target) {
+      const dir = player.aimDirection(_dir);
+      const pool = this.game.enemies.inRadius(player.position, spec.range ?? 22);
+      let best = -1;
+      for (const e of pool) {
+        const dot = _v.copy(e.center).sub(player.chestPosition).normalize().dot(dir);
+        if (dot > best) { best = dot; target = e; }
+      }
+    }
+    if (target) {
+      this.damageEnemy(target, back, { proc: 1, source: 'Parry', crit: true, knockback: 14 });
+      this.game.fxApi.lightning(player.chestPosition, target.center, color, 0.16, 5);
+    }
+    // The dash comes back, which is the whole reason to take the risk.
+    this.refundUtility();
   }
 
   /**
@@ -844,7 +1160,19 @@ export class Combat {
 
     damage = this.game.inventory.modifyDamage({ enemy, damage, isCrit, proc });
 
+    /* The character's own passive, and it goes last on purpose.
+     *
+     * Every one of these reads something about the moment rather than about
+     * the build — how hurt you are, how fast you are moving, how nearly dead
+     * the thing in front of you is — so it multiplies the finished number, and
+     * a passive that doubles your damage doubles the damage you were actually
+     * about to deal rather than some intermediate the items had not seen yet. */
+    const passive = this.character?.passive;
+    if (passive?.damageMult) damage *= passive.damageMult(player, enemy);
+
     const dealt = enemy.takeDamage(damage, { ...opts, crit: isCrit });
+    // The other half of the ultimate meter.
+    this.noteDamageDealt(enemy, dealt);
 
     // Lifesteal (weapon-specific plus item-wide)
     const steal = (opts.lifesteal ?? 0) + stats.lifesteal;
@@ -1069,19 +1397,30 @@ export class Combat {
         game.fxApi.muzzle(origin, dir, spec.color ?? 0xffa050, 2.4);
       },
 
-      /** Wide melee arc centred on the aim direction. */
+      /**
+       * Wide melee arc centred on the aim direction.
+       *
+       * `rangeScale` is optional and is the difference between a sword and a
+       * *reach* — hand it a function of how far out along the swing a body is
+       * (0 at the hilt, 1 at the tip) and it decides what that body is worth.
+       * Wraith's blades pay far more at the hilt than at the point, which is
+       * the whole of what makes a character with 88 health walk towards things.
+       */
       melee(spec) {
         const player = game.player;
         const origin = player.chestPosition;
         const dir = self.ctx.dir;
+        const range = spec.range ?? 5;
         const cosLimit = Math.cos(spec.angle ?? 1.4);
-        const targets = game.enemies.inRadius(origin, spec.range ?? 5);
+        const targets = game.enemies.inRadius(origin, range);
         let any = false;
         for (const e of targets) {
-          _v.copy(e.center).sub(origin).normalize();
+          const dist = _v.copy(e.center).sub(origin).length();
+          _v.normalize();
           if (_v.dot(dir) < cosLimit) continue;
           any = true;
-          self.damageEnemy(e, spec.damage, {
+          const scale = spec.rangeScale ? spec.rangeScale(clamp01(dist / range)) : 1;
+          self.damageEnemy(e, spec.damage * scale, {
             proc: spec.proc ?? 1, source: self.weapon?.name, lifesteal: spec.lifesteal ?? 0,
             knockback: 5, knockbackDir: _v.clone().setY(0.3).normalize(),
           });
@@ -1636,21 +1975,36 @@ export class Combat {
         const color = spec.color ?? 0xff5a4d;
 
         if (self.hatMarker) {
+          /* Go to the hat. Not to the hat's *height* — to the hat.
+           *
+           * This used to run the exit through `settleTeleport`, which holds the
+           * altitude you left from and only ever rises. That is right for a
+           * blink, where crossing a gap must not drop you into it, and exactly
+           * wrong for a recall: the hat is a place, lying on a specific piece of
+           * ground, and throwing it off a ledge and pressing recall left you
+           * hanging in the air at the height you were standing at with the hat
+           * visible somewhere below your feet. The whole ability is "be where
+           * that is", so it puts you where that is. */
           const start = player.position.clone();
           const end = self.hatMarker.position.clone();
-          const airborne = settleTeleport(player, game.arena, start, end);
+          // The marker sits 12 cm above the ground it landed on; stand on it
+          // rather than in it.
+          end.y = game.arena.groundHeightAt(end.x, end.z, end.y + 2);
           game.fxApi.beam(start.clone().setY(start.y + 1), end.clone().setY(end.y + 1), color, 0.3, 0.2);
           game.fxApi.glow(start.clone().setY(start.y + 1), { color, size: 1.8, life: 0.3, grow: 2 });
           player.position.copy(end);
-          player.velocity.x *= 0.4;
-          player.velocity.z *= 0.4;
-          if (airborne) player.grounded = false;
+          player.velocity.set(0, 0, 0);
+          player.grounded = true;
+          player.jumpsUsed = 0;
           player.dashIFrames = Math.max(player.dashIFrames || 0, 0.2);
           player.snapCamera();
           game.fxApi.ring(end, 0.4, 4, color, 0.45, 0.9);
           self._clearHatMarker();
-          // The trip back is already paid for.
-          self.refundUtility();
+          /* And *now* the five seconds start.
+             The throw is free — see `deferCooldown` — because the thing being
+             bought is the trip, and a hat left in a field for half a minute
+             should not have been quietly serving its own cooldown out there. */
+          self.spendUtility();
           return;
         }
 
@@ -1676,7 +2030,260 @@ export class Combat {
         player.addRecoil(1);
       },
 
+      /* ---------------- primaries ---------------- */
+
+      /**
+       * Where a repeating primary is in its own sequence.
+       *
+       * Returns 0..length-1 and advances, resetting if the trigger has been
+       * quiet for `reset` seconds. That reset is what makes a combo a combo
+       * rather than a counter: stop swinging for a moment and the lance starts
+       * again at the first cut instead of handing you the long thrust for free
+       * every third click of a fight you walked away from.
+       */
+      combo(length, reset = 1.1) {
+        const i = self._comboIndex % length;
+        self._comboIndex = (self._comboIndex + 1) % length;
+        self._comboTimer = reset;
+        return i;
+      },
+
+      /** What the *next* call to `combo` will return, without advancing it. */
+      comboPeek(length) { return self._comboIndex % length; },
+
+      /**
+       * A spread of pellets down one trigger pull.
+       *
+       * Hitscan rather than projectiles, and deliberately: a shotgun is a
+       * decision about distance, and the distance has to be resolved on the
+       * frame you pull the trigger or the decision is being made by the
+       * travel time instead of by you. What makes it a shotgun and not a
+       * burst of rifle rounds is `falloff` — the fraction of its damage still
+       * standing at `range`. A short, brutal one keeps almost none; a scatter
+       * gun that is still worth firing across a room keeps half.
+       */
+      shotgun(spec) {
+        const pellets = spec.pellets ?? 8;
+        const spread = spec.spread ?? 0.08;
+        const range = spec.range ?? 22;
+        const each = spec.damage / pellets;
+        let hits = 0;
+        for (let i = 0; i < pellets; i++) {
+          const hit = api.hitscan({
+            damage: each, proc: (spec.proc ?? 1) / pellets, range,
+            color: spec.color ?? 0xffd58a, tracer: true, thick: spec.thick ?? 0.03,
+            spread, falloff: { start: spec.near ?? range * 0.18, end: range, min: spec.falloff ?? 0.3 },
+            knockback: spec.knockback ?? 0,
+          });
+          if (hit) hits++;
+        }
+        game.fxApi.muzzle(self.ctx.origin, self.ctx.dir, spec.color ?? 0xffd58a, 2.2);
+        return hits;
+      },
+
+      /* ---------------- Diver ---------------- */
+
+      /**
+       * Fire on the ground, thrown where you are looking.
+       *
+       * Two things at once, and the second is the point: it burns whatever
+       * stands in it, and it is a *charge* lying in the arena waiting for the
+       * slam. Everything about the patch — that it is thrown rather than
+       * placed, that there are three of them, that they last a while — exists
+       * so that by the time Diver commits to a slam there is already something
+       * on the floor worth landing on.
+       */
+      firePatch(spec) {
+        const target = self.ctx.aimPoint.clone();
+        const color = spec.color ?? 0xff7a2a;
+        game.projectiles.spawn({
+          position: game.player.chestPosition.clone(),
+          velocity: _v.copy(target).sub(game.player.chestPosition)
+            .normalize().multiplyScalar(spec.speed ?? 42).clone(),
+          damage: 0, proc: 0, radius: 0.28, life: 3, color,
+          gravity: spec.gravity ?? -16, trail: 1.2, glow: 2.2,
+          onLand: (position) => self.placeFirePatch(position, { ...spec, color }),
+          source: 'Fire Patch',
+        });
+        game.player.addRecoil(0.9);
+      },
+
+      /**
+       * The slam. Straight down onto the aim point, fast, and hard on arrival.
+       *
+       * The dive is a real movement rather than a teleport with an explosion at
+       * the end, because the patches are on the floor and the whole skill of
+       * the ability is choosing which one to arrive at.
+       */
+      diveSlam(spec) {
+        game.player.startDiveSlam({
+          ...spec,
+          onLand: (position) => {
+            const color = spec.color ?? 0xff7a2a;
+            self.areaDamage(position, spec.radius ?? 8, spec.damage ?? 0, {
+              proc: 0.9, source: 'Dive Slam', force: spec.knockback ?? 18,
+            });
+            game.fxApi.explosion(position, spec.radius ?? 8, color, 1.1);
+            game.fxApi.ring(position, 0.8, spec.radius ?? 8, color, 0.5, 1);
+            game.engine.addShake(0.4);
+            // Firebomb: everything he lands on goes up with him.
+            const lit = self.detonateFirePatches(
+              position, spec.patchRadius ?? (spec.radius ?? 8),
+              spec.patchDamage ?? (spec.damage ?? 0) * 2.4, color,
+            );
+            if (lit) game.ui.toast(`FIREBOMB ×${lit}`, '#ff7a2a');
+          },
+        });
+      },
+
+      /** A dash that leaves you faster than it found you. */
+      speedDash(spec) {
+        game.player.startDash({
+          speed: spec.speed ?? 40, duration: spec.duration ?? 0.26,
+          iframes: spec.iframes ?? 0.14, color: spec.color ?? 0xff7a2a,
+          pitched: spec.pitched ?? true,
+        });
+        game.player.addBuff('warcry', spec.buffTime ?? 5, 0, 1, spec.label ?? '💨 Speed Dash',
+          { move: spec.move ?? 0.45 });
+      },
+
+      /* ---------------- the second button ---------------- */
+
+      /**
+       * Opens the parry window.
+       *
+       * Half a second, and nothing happens during it — that is the design. An
+       * ability that does something while it waits is an ability you press on
+       * cooldown; one that does nothing at all is a read, and the reward for
+       * reading correctly is enormous precisely because the cost of pressing it
+       * blind is a whole ten seconds of not having a dash.
+       */
+      parry(spec) {
+        self._parrySpec = spec;
+        game.player.parryTime = spec.window ?? 0.5;
+        game.fxApi.ring(game.player.position, 0.3, 2.4, spec.color ?? 0x3dffa5, 0.35, 0.55);
+      },
+
+      /** Four small charges dropped on the aim point. */
+      missileCluster(spec) {
+        const target = self.ctx.aimPoint.clone();
+        for (let i = 0; i < (spec.count ?? 4); i++) {
+          game.projectiles.spawnMortar({
+            target, scatter: spec.scatter ?? 3.5, delay: i * (spec.interval ?? 0.08),
+            color: spec.color,
+            splash: {
+              radius: spec.radius ?? 5, damage: spec.damage, proc: 0.7,
+              color: spec.color, force: 8,
+            },
+            source: 'Missile Cluster',
+          });
+        }
+        game.player.addRecoil(1.6);
+      },
+
+      /** Two seconds of not being there, and of nothing looking for you. */
+      phase(spec) {
+        const player = game.player;
+        const dur = spec.duration ?? 2;
+        player.invulnerable = Math.max(player.invulnerable, dur);
+        player.addBuff('cloak', dur, 1, 1, spec.label ?? '🌑 Phase');
+        game.fxApi.cloakBurst(player.chestPosition);
+        game.fxApi.ring(player.position, 0.4, 5, spec.color ?? 0xd94bff, 0.45, 0.8);
+        // Losing aggro is the half of the ability the invulnerability does not
+        // cover: two seconds of immunity you spend still being chased is two
+        // seconds of nothing, and this is the character who cannot afford it.
+        for (const e of game.enemies.inRadius(player.position, spec.radius ?? 30)) {
+          e.loseTarget?.(spec.aggro ?? 2.4);
+        }
+      },
+
+      /**
+       * Behind the plate: sets or clears the guard posture.
+       *
+       * Refreshed rather than granted, because it has no duration — it is true
+       * for exactly as long as the button is down, and a buff with a duration
+       * would either expire under a held button or outlive a released one.
+       */
+      guard(on, spec) {
+        const player = game.player;
+        if (!on) { player.buffs.delete('guard'); player.markStatsDirty(); return; }
+        player.addBuff('guard', 0.3, spec.reduction ?? 0.62, 1, spec.label ?? '🛡️ Guard',
+          { move: spec.move ?? 1 });
+        game.fxApi.ring(player.position, 0.4, 2.6, spec.color ?? 0x6fd0ff, 0.35, 0.6);
+      },
+      holdGuard(spec) {
+        const player = game.player;
+        const b = player.buffs.get('guard');
+        if (b) b.time = 0.3;
+        else api.guard(true, spec);
+      },
+
+      /** Straight down, immediately, and hard. */
+      downSlam(spec) {
+        game.player.startDiveSlam({
+          ...spec, straightDown: true,
+          onLand: (position) => {
+            const color = spec.color ?? 0xffd24b;
+            self.areaDamage(position, spec.radius ?? 9, spec.damage ?? 0, {
+              proc: 0.9, source: 'Down Slam', force: spec.knockback ?? 24,
+            });
+            game.fxApi.explosion(position, spec.radius ?? 9, color, 1.2);
+            game.fxApi.ring(position, 1, spec.radius ?? 9, color, 0.5, 1);
+            game.engine.addShake(0.45);
+          },
+        });
+      },
+
+      /**
+       * The chain, thrown at a body and used as a winch.
+       *
+       * The same harpoon the projectile system already knows how to run, which
+       * is deliberate — Chain's whole identity is that the thing he throws
+       * comes back, and this is the version where what comes back is whoever
+       * he threw it at.
+       */
+      chainPull(spec) {
+        const color = spec.color ?? 0xff5a4d;
+        game.projectiles.spawn({
+          position: game.player.muzzlePosition.clone(),
+          velocity: game.player.aimDirection(new THREE.Vector3()).multiplyScalar(spec.speed ?? 70),
+          damage: spec.damage ?? 0, proc: 0.7, radius: 0.6, life: 1.1, color,
+          gravity: 0, trail: 1.4, glow: 1.6, knockback: 0,
+          harpoon: { time: spec.pullTime ?? 0.8, speed: spec.pullSpeed ?? 40, color },
+          source: 'Chain Pull',
+        });
+        game.player.addRecoil(1.4);
+      },
+
       /* ---------------- ultimates ---------------- */
+
+      /**
+       * Diver: everything within a very large circle catches, and stays lit.
+       *
+       * The damage is deliberately not front-loaded. An ultimate that goes off
+       * once is a button; this one is ten seconds during which the arena around
+       * him is on fire and he is faster than anything in it, so the play is to
+       * keep moving through the crowd rather than to stand in the middle of the
+       * explosion you just made.
+       */
+      inferno(spec) {
+        const player = game.player;
+        const color = spec.color ?? 0xff7a2a;
+        const duration = spec.duration ?? 10;
+        player.addBuff('inferno', duration, 0, 1, spec.label ?? '🔥 Inferno', {
+          radius: spec.radius ?? 22, damage: spec.damage ?? 0, burn: spec.burn ?? 0,
+          interval: spec.interval ?? 0.5, color,
+        });
+        // The speed comes from the same buff every other haste in the game
+        // uses, so items and abilities stack the one way rather than two.
+        player.addBuff('warcry', duration, 0, 1, '🔥 Inferno', { move: spec.move ?? 0.5 });
+        // The opening circle: everything caught right now is already burning.
+        for (const e of game.enemies.inRadius(player.position, spec.radius ?? 22)) {
+          e.applyStatus('burn', spec.burnTime ?? 6, { dps: spec.burn ?? 0 });
+        }
+        game.fxApi.ring(player.position, 1, spec.radius ?? 22, color, 0.9, 1);
+        game.fxApi.explosion(player.position, 6, color, 1.6);
+      },
 
       /** Vanguard: shells walked onto the aim point, one after another. */
       mortarStorm(spec) {

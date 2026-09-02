@@ -192,6 +192,19 @@ export class Enemy {
   // ------------------------------------------------------------------
   get center() { return _v2.set(this.position.x, this.position.y + this.height * 0.55, this.position.z); }
 
+  /**
+   * Loses track of the player for a moment.
+   *
+   * Wraith's phase is two seconds of immunity *and* two seconds of nothing
+   * looking for him, and the second half is the one that matters: immunity you
+   * spend still being chased buys a character with 88 health nothing at all.
+   */
+  loseTarget(seconds = 2) {
+    if (this.dead) return;
+    this.applyStatus('blind', seconds, {});
+    this.attackTimer = Math.max(this.attackTimer, seconds * 0.6);
+  }
+
   applyStatus(id, duration, data = {}) {
     const cur = this.statuses.get(id);
     if (cur) { cur.time = Math.max(cur.time, duration); cur.data = { ...cur.data, ...data }; }
@@ -312,7 +325,23 @@ export class Enemy {
     this.attackTimer -= dt;
 
     const slow = this.slowFactor;
-    if (slow > 0) this._runAI(dt * slow, player, world, toPlayer, distXZ);
+    /* Blinded: the body is still here, it simply has no idea where you are.
+     *
+     * The AI is skipped outright rather than lied to about the distance. Lying
+     * about it was the first attempt and it does not work: every chase in this
+     * file steers toward the player whatever the range says, so a "blinded"
+     * enemy walked straight at you with its attacks disabled, which is not
+     * losing somebody — it is politely declining to hit them. Skipping the
+     * think leaves the body standing where it last knew you were, bleeding off
+     * whatever speed it had, which is what looking around for two seconds
+     * looks like. Its own timers keep running; it has not been frozen, it has
+     * been left without a target. */
+    if (this.statuses.has('blind')) {
+      this.velocity.x *= 0.86;
+      this.velocity.z *= 0.86;
+    } else if (slow > 0) {
+      this._runAI(dt * slow, player, world, toPlayer, distXZ);
+    }
 
     // Being winched in overrides whatever the AI decided this frame. It is the
     // last word on velocity precisely because a charger sprinting away from the
@@ -519,7 +548,7 @@ export class Enemy {
       this.game.engine.addShake(0.16);
     }
     if (d <= range + player.radius) {
-      player.takeDamage(this.damage, { source: this.def.name });
+      player.takeDamage(this.damage, { source: this.def.name, enemy: this });
       this.elite?.onHitPlayer?.(this._affixCtx());
       _dir.copy(player.position).sub(this.position).setY(0).normalize();
       player.applyImpulse(_dir.multiplyScalar(4).setY(3));
@@ -623,7 +652,7 @@ export class Enemy {
       this.velocity.z = this.chargeDir.z * this.def.chargeSpeed;
       const d = distanceToBody(player.position.clone().setY(player.position.y + 0.8), this);
       if (d < this.radius + player.radius + 1.2) {
-        player.takeDamage(this.damage, { source: this.def.name });
+        player.takeDamage(this.damage, { source: this.def.name, enemy: this });
         this.elite?.onHitPlayer?.(this._affixCtx());
         player.applyImpulse(this.chargeDir.clone().multiplyScalar(14).setY(6));
         this.state = 'recover'; this.stateTime = 0;
@@ -709,7 +738,7 @@ export class Enemy {
           this.game.fx.explosion(this.position, this.def.slamRadius, this.def.accent, 1.4);
           this.game.engine.addShake(0.42);
           const d = Math.hypot(player.position.x - this.position.x, player.position.z - this.position.z);
-          if (d < this.def.slamRadius) player.takeDamage(this.damage * 1.4, { source: this.def.name });
+          if (d < this.def.slamRadius) player.takeDamage(this.damage * 1.4, { source: this.def.name, enemy: this });
           // Shockwave ring of fissures
           for (let i = 0; i < 10; i++) {
             const a = (i / 10) * Math.PI * 2;
@@ -886,7 +915,7 @@ export class Enemy {
         this.state = 'chase';
         if (this.pendingAttack === 'bite' && dist < def.attackRange + 2) {
           this.game.fx.explosion(this.center, 5, def.accent, 0.9);
-          if (dist < def.attackRange + 2) player.takeDamage(this.damage * 1.5, { source: def.name });
+          if (dist < def.attackRange + 2) player.takeDamage(this.damage * 1.5, { source: def.name, enemy: this });
         } else {
           // A fan of thorns, wide enough that backing straight up does not work.
           for (let i = -3; i <= 3; i++) {
@@ -1281,7 +1310,7 @@ export class Enemy {
     this.game.fx.explosion(this.center, 8, this.def.accent, 1.4);
     this.game.engine.addShake(0.5);
     const d = Math.hypot(player.position.x - this.position.x, player.position.z - this.position.z);
-    if (d < 9) player.takeDamage(this.damage * 1.5, { source: this.def.name });
+    if (d < 9) player.takeDamage(this.damage * 1.5, { source: this.def.name, enemy: this });
     for (let i = 0; i < 8; i++) {
       const ang = (i / 8) * Math.PI * 2;
       this.game.spawnHazard(
