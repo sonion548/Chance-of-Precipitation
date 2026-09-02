@@ -140,7 +140,7 @@
           <button class="nav-btn" data-goto="stats"><span class="nb-key">⌁</span> Records</button>
           <button class="nav-btn" data-goto="settings"><span class="nb-key">⚙</span> Settings</button>
           <button class="nav-btn" data-goto="help"><span class="nb-key">?</span> How to Play</button>
-          <button class="nav-btn" data-goto="settings"><span class="nb-key">⚙</span> Settings</button>
+          <button class="nav-btn" data-goto="feedback"><span class="nb-key">⚑</span> Feedback <em>Report a bug or pitch an idea</em></button>
         </nav>
         <footer class="menu-foot"><span id="menu-version"></span></footer>
       </div>
@@ -230,6 +230,21 @@
       </div>
     </div>
 
+    <div id="screen-feedback" class="screen panel-screen">
+      <div class="panel">
+        <div class="panel-head"><h2>Feedback</h2><button class="x-btn" id="feedback-close">✕</button></div>
+        <div class="tabs" id="feedback-tabs">
+          <button class="tab active" data-ftab="bug">Bug Report</button>
+          <button class="tab" data-ftab="idea">Idea</button>
+        </div>
+        <div class="panel-body" id="feedback-body"></div>
+        <div class="panel-foot spread">
+          <div id="feedback-status" class="fb-status"></div>
+          <button class="big-btn" id="feedback-send">Send</button>
+        </div>
+      </div>
+    </div>
+
     <div id="screen-pause" class="screen panel-screen">
       <div class="panel narrow">
         <div class="panel-head"><h2>Paused</h2></div>
@@ -237,6 +252,7 @@
         <div class="panel-foot stack">
           <button class="big-btn" id="resume-btn">Resume</button>
           <button class="ghost-btn" id="pause-settings-btn">Settings</button>
+          <button class="ghost-btn" id="pause-feedback-btn">Report a Bug</button>
           <button class="ghost-btn" id="abandon-btn">Abandon Run</button>
         </div>
       </div>
@@ -251,6 +267,23 @@
           <button class="ghost-btn" id="summary-menu">Return to Sanctum</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ============ Case-opening reveal ============
+       Optional, solo only, and purely a presentation of a roll that has already
+       happened. See src/ui/caseRoll.js. -->
+  <div id="case-roll" class="hidden">
+    <div class="cr-inner">
+      <div class="cr-head"><span id="cr-source">Chest</span><em>Unsealing</em></div>
+      <div class="cr-window" id="cr-window">
+        <div class="cr-reel" id="cr-reel"></div>
+        <div class="cr-marker"></div>
+        <div class="cr-fade left"></div>
+        <div class="cr-fade right"></div>
+      </div>
+      <div class="cr-result" id="cr-result"></div>
+      <div class="cr-hint" id="cr-hint"></div>
     </div>
   </div>
 

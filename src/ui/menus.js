@@ -31,6 +31,12 @@ export class Menus {
     // whenever the roster or the lobby address changes, and a re-render replaces
     // the fields — without this, a friend joining wipes what you were typing.
     this._clearCoopDraft();
+    // Same problem as the co-op form, same answer: the panel re-renders when
+    // you switch tabs, and a re-render replaces the fields. What is half-typed
+    // lives out here so switching from Bug to Idea and back does not eat it.
+    this.feedbackTab = 'bug';
+    this.feedbackReturn = 'menu';
+    this._clearFeedbackDraft();
     this._bind();
   }
 
@@ -50,7 +56,7 @@ export class Menus {
     if (name === 'settings') this._renderSettings();
     if (name === 'pause') this._renderPause();
     if (name === 'coop') this._renderCoop();
-    if (name === 'settings') this._renderSettings();
+    if (name === 'feedback') this._renderFeedback();
   }
 
   hide() {
@@ -65,6 +71,7 @@ export class Menus {
         audio.unlock();
         audio.uiClick(goto.dataset.goto === 'menu' ? 'back' : 'click');
         if (goto.dataset.goto === 'settings') this.settingsReturn = this.current;
+        if (goto.dataset.goto === 'feedback') this.feedbackReturn = this.current;
         this.show(goto.dataset.goto);
         return;
       }
@@ -76,6 +83,7 @@ export class Menus {
         tab.classList.add('active');
         audio.uiClick();
         if (tab.dataset.stab) { this.settingsTab = tab.dataset.stab; this._renderSettings(); }
+        else if (tab.dataset.ftab) { this.feedbackTab = tab.dataset.ftab; this._renderFeedback(); }
         else if (container.closest('#screen-unlocks')) { this.unlockTab = tab.dataset.tab; this._renderUnlocks(); }
         else { this.codexTab = tab.dataset.tab; this._renderCodex(); }
         return;
@@ -121,11 +129,22 @@ export class Menus {
         this._coopDraft.code = clean;
       } else if (el.id === 'coop-name') this._coopDraft.name = el.value;
       else if (el.id === 'coop-url') this._coopDraft.url = el.value;
+      else if (el.id === 'fb-title') this._feedbackDraft[this.feedbackTab].title = el.value;
+      else if (el.id === 'fb-body') this._feedbackDraft[this.feedbackTab].body = el.value;
+      else if (el.id === 'fb-contact') this._feedbackDraft.contact = el.value;
     });
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
+      // Ctrl/⌘+Enter sends from anywhere in the report, including the textarea,
+      // where a plain Enter has to keep meaning "new paragraph".
+      if ((e.ctrlKey || e.metaKey) && e.target.closest?.('#screen-feedback')) {
+        e.preventDefault();
+        this._sendFeedback();
+        return;
+      }
       if (e.target.id === 'coop-code' || e.target.id === 'coop-url') { e.preventDefault(); this._coopJoin(); }
       else if (e.target.id === 'coop-name' && !this.game.coop.active) { e.preventDefault(); this._coopHost(); }
+      else if (e.target.id === 'fb-title') { e.preventDefault(); $('fb-body')?.focus(); }
     });
     this.game.coop.onLobbyChange = () => {
       if (this.current === 'coop') this._renderCoop();
@@ -138,6 +157,7 @@ export class Menus {
     };
 
     this._bindSettings();
+    this._bindFeedback();
 
     $('launch-btn').addEventListener('click', () => {
       // In a lobby the host launches for everyone; solo, this is just Play.
@@ -425,6 +445,16 @@ export class Menus {
           'The figure that floats off everything you hit. Off is a quieter screen, not a quieter fight.')}
       </div>
       <div class="set-group">
+        <div class="sect-label">Chests</div>
+        ${this._toggle('caseOpening', 'Case-Opening Reveal',
+          'Every chest sends a strip of items scrolling past a marker before it stops on the one '
+          + 'you got. The roll happens first and the reel is built around the answer, so this cannot '
+          + 'change a single drop — it is five seconds of theatre over the same table.')}
+        <p class="set-note">Solo only. The reel stops the world, and the world is not yours to stop
+        with other people standing in it — in a lobby, chests open the way they always have.
+        ${this.game.coop?.active ? '<b style="color:var(--accent)">You are in a lobby now, so it is inactive.</b>' : ''}</p>
+      </div>
+      <div class="set-group">
         <div class="sect-label">Collection</div>
         <p class="set-note">The Sanctum exists so that a long campaign slowly widens the drop pool.
         Some people do not want the campaign; they want the game underneath it. This hands over
@@ -442,6 +472,238 @@ export class Menus {
           <div class="stat-row"><span>Echoes</span><b>${formatNumber(this.profile.echoes)}</b></div>
         </div>
       </div>`;
+  }
+
+  /* ------------------------------------------------------------------ feedback
+     Bug reports and ideas, posted to whoever is hosting this copy of the game.
+
+     The endpoint lives in the same server that served the page (`tools/serve.js`
+     → `tools/feedback.js`), so there is no third-party form to sign up for and
+     nothing to configure before the panel works — a report always lands in the
+     host's log, and reaches their Discord or their inbox as well if they have
+     pointed it at one. See FEEDBACK.md. */
+  /** Fresh, empty drafts. One per tab, so the two do not overwrite each other. */
+  _clearFeedbackDraft() {
+    this._feedbackDraft = {
+      bug: { title: '', body: '' },
+      idea: { title: '', body: '' },
+      contact: '',
+      // On by default because a bug report without a version and a stage is
+      // usually unactionable — but shown in full below the switch, because
+      // quietly attaching anything to someone's message is not on.
+      diagnostics: true,
+    };
+    this._feedbackStatus = null;
+    this._feedbackSending = false;
+  }
+
+  _bindFeedback() {
+    $('feedback-close')?.addEventListener('click', () => {
+      audio.uiClick('back');
+      this.show(this.feedbackReturn === 'pause' ? 'pause' : 'menu');
+    });
+    $('pause-feedback-btn')?.addEventListener('click', () => {
+      this.feedbackReturn = 'pause';
+      this.feedbackTab = 'bug';
+      audio.uiClick();
+      this.show('feedback');
+    });
+    $('feedback-send')?.addEventListener('click', () => this._sendFeedback());
+    $('feedback-body')?.addEventListener('click', (e) => {
+      if (e.target.closest('#fb-diag')) {
+        this._feedbackDraft.diagnostics = !this._feedbackDraft.diagnostics;
+        audio.uiClick();
+        this._renderFeedback();
+        return;
+      }
+      if (e.target.closest('#fb-copy')) this._copyFeedback();
+    });
+  }
+
+  /**
+   * What the report carries about the machine it was sent from.
+   *
+   * Whitelisted here and again on the server. A bug report is worth far more
+   * with a version and a stage attached, and worth nothing at all if people
+   * stop sending them because they cannot tell what they are sending.
+   */
+  _diagnostics() {
+    const g = this.game;
+    const run = g.run;
+    const inRun = g.state !== 'menu' && !!run;
+    const out = {
+      version: VERSION,
+      page: location.origin + location.pathname,
+      screen: `${window.innerWidth}×${window.innerHeight}`,
+      platform: navigator.userAgent,
+      language: navigator.language,
+      character: this.selectedCharacter,
+      coop: g.coop?.active ? `${g.coop.isHost ? 'hosting' : 'joined'}, ${g.coop.lobbyList().length} in party` : 'solo',
+    };
+    if (inRun) {
+      out.stage = run.stage;
+      out.stageName = g.arena?.theme?.name ?? '';
+      out.runTime = formatTime(run.time);
+      out.mode = run.mode;
+      out.difficulty = Number((g.director?.difficulty ?? 0).toFixed(2));
+      out.items = g.inventory?.order.length ?? 0;
+    }
+    return out;
+  }
+
+  _renderFeedback() {
+    const body = $('feedback-body');
+    if (!body) return;
+    for (const t of document.querySelectorAll('#feedback-tabs .tab')) {
+      t.classList.toggle('active', t.dataset.ftab === this.feedbackTab);
+    }
+    const bug = this.feedbackTab === 'bug';
+    const draft = this._feedbackDraft[this.feedbackTab];
+    const diag = this._diagnostics();
+    const on = this._feedbackDraft.diagnostics;
+
+    body.innerHTML = `
+      <div class="set-group">
+        <p class="set-note">${bug
+          ? 'Something behaving wrongly? Say what you did, what happened, and what you expected instead. '
+            + 'The version, the stage and the difficulty go along with it automatically, which is usually the difference between a fixable report and a mystery.'
+          : 'An item, an enemy, a character, a mechanic, a quality-of-life change — anything. '
+            + 'Half-formed is fine; the point is that the idea reaches whoever is running this server rather than nobody.'}</p>
+        <label class="fb-field">
+          <span>${bug ? 'What went wrong' : 'The idea, in one line'}</span>
+          <input id="fb-title" type="text" maxlength="120" autocomplete="off" spellcheck="true"
+                 placeholder="${bug ? 'Boss health bar stays on screen after it dies' : 'An item that converts overkill damage into barrier'}"
+                 value="${esc(draft.title)}" />
+        </label>
+        <label class="fb-field">
+          <span>${bug ? 'Steps, and what you expected' : 'How it would work'}</span>
+          <textarea id="fb-body" maxlength="4000" rows="7" spellcheck="true"
+                    placeholder="${bug ? 'Killed the stage 3 guardian, teleported out, and the bar was still there on the next stage.' : 'Damage past a kill is stored, and converts to barrier on your next kill…'}">${esc(draft.body)}</textarea>
+        </label>
+        <label class="fb-field">
+          <span>Name or contact <i>optional</i></span>
+          <input id="fb-contact" type="text" maxlength="120" autocomplete="off"
+                 placeholder="So you can be credited or asked a follow-up"
+                 value="${esc(this._feedbackDraft.contact)}" />
+        </label>
+      </div>
+      <div class="set-group">
+        <div class="set-row toggle">
+          <label>Attach what the game knows</label>
+          <button class="switch ${on ? 'on' : ''}" id="fb-diag" aria-pressed="${on}"></button>
+        </div>
+        <div class="fb-diag ${on ? '' : 'off'}">
+          ${Object.entries(diag).map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}
+        </div>
+        <p class="set-note">Exactly this, and nothing else. No save data, no account, no address —
+        the server keeps a salted hash of where the report came from so it can tell one sender from
+        another, and that is all.</p>
+      </div>
+      ${this._feedbackStatus ? `<div class="fb-result ${this._feedbackStatus.kind}">
+        ${esc(this._feedbackStatus.text)}
+        ${this._feedbackStatus.copy
+    ? '<button class="ghost-btn" id="fb-copy">Copy the report instead</button>' : ''}
+      </div>` : ''}`;
+
+    const send = $('feedback-send');
+    if (send) {
+      send.disabled = this._feedbackSending;
+      send.textContent = this._feedbackSending ? 'Sending…' : bug ? 'Send Report' : 'Send Idea';
+    }
+    const status = $('feedback-status');
+    if (status) status.textContent = 'Ctrl+Enter sends';
+  }
+
+  /** Posts the report, and says plainly what happened either way. */
+  async _sendFeedback() {
+    if (this._feedbackSending) return;
+    const draft = this._feedbackDraft[this.feedbackTab];
+    // Read the fields back rather than trusting the draft: autofill and paste
+    // do not always produce an input event.
+    draft.title = $('fb-title')?.value ?? draft.title;
+    draft.body = $('fb-body')?.value ?? draft.body;
+    this._feedbackDraft.contact = $('fb-contact')?.value ?? this._feedbackDraft.contact;
+
+    if (draft.title.trim().length < 3) {
+      this._feedbackStatus = { kind: 'err', text: 'Give it a one-line summary first.' };
+      audio.denied();
+      this._renderFeedback();
+      return;
+    }
+    if (draft.body.trim().length < 10) {
+      this._feedbackStatus = { kind: 'err', text: 'Say a little more — ten characters is not a bug report.' };
+      audio.denied();
+      this._renderFeedback();
+      return;
+    }
+
+    this._feedbackSending = true;
+    this._feedbackStatus = null;
+    this._renderFeedback();
+
+    try {
+      const res = await fetch('feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: this.feedbackTab,
+          title: draft.title,
+          body: draft.body,
+          contact: this._feedbackDraft.contact,
+          diagnostics: this._feedbackDraft.diagnostics ? this._diagnostics() : null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      this._feedbackSending = false;
+      if (res.ok && data.ok) {
+        draft.title = '';
+        draft.body = '';
+        this._feedbackStatus = {
+          kind: 'ok',
+          text: `Sent. ${data.forwarded
+            ? 'It has gone through to whoever runs this server.'
+            : 'It is on this server’s record for them to read.'} Reference ${data.id}.`,
+        };
+        audio.uiClick('confirm');
+      } else {
+        this._feedbackStatus = { kind: 'err', text: data.error || `The server refused it (${res.status}).` };
+        audio.denied();
+      }
+    } catch {
+      // No endpoint, or no network. Neither is the player's fault and neither
+      // should cost them what they just wrote, so the text stays in the box and
+      // the copy button becomes the way out.
+      this._feedbackSending = false;
+      this._feedbackStatus = {
+        kind: 'err',
+        // The only case the copy button belongs on: nothing this player does to
+        // the text will help, because there is nothing listening.
+        copy: true,
+        text: 'Could not reach the server. Your text is still here — copy it and send it another way.',
+      };
+      audio.denied();
+    }
+    this._renderFeedback();
+  }
+
+  /** The escape hatch when the endpoint is not there: the report as plain text. */
+  async _copyFeedback() {
+    const draft = this._feedbackDraft[this.feedbackTab];
+    const diag = this._feedbackDraft.diagnostics ? this._diagnostics() : null;
+    const text = [
+      `${this.feedbackTab === 'bug' ? 'Bug report' : 'Idea'}: ${draft.title}`,
+      '',
+      draft.body,
+      this._feedbackDraft.contact ? `\nFrom ${this._feedbackDraft.contact}` : '',
+      diag ? `\nContext:\n${Object.entries(diag).map(([k, v]) => `  ${k}: ${v}`).join('\n')}` : '',
+    ].join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      this._feedbackStatus = { kind: 'ok', text: 'Copied. Paste it wherever you can reach them.' };
+    } catch {
+      this._feedbackStatus = { kind: 'err', text: 'The browser would not let the page copy. Select the text and copy it by hand.' };
+    }
+    this._renderFeedback();
   }
 
   _purchase(kind, id, cost) {

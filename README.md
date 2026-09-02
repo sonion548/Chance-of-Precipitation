@@ -1099,11 +1099,61 @@ confirm is a volume slider you cannot hear yourself adjusting.
   unbound in red rather than silently losing a slot. Plus mouse sensitivity, a separate
   multiplier that applies only while aiming, and inverted look.
 - **Game** — screen shake (down to zero, which changes nothing else), how hard the body snaps
-  back to the camera, and a button that unlocks every item, weapon and character at once.
+  back to the camera, the case-opening reveal below, and a button that unlocks every item,
+  weapon and character at once.
+
+### The case-opening reveal
+
+Off by default. With it on, a chest sends a strip of items scrolling past a marker, slowing
+down, and stopping on the one you got — the case-opening animation, applied to a drop table
+that already existed.
+
+It cannot change a single drop, and the code is arranged so that it could not: `_grantItem`
+rolls the item through `systems/loot.js` exactly as it always has, and only then hands the
+answer to `game.revealItem`, which builds a reel around it. The reveal is presentation over a
+decision that has already been made. Skip it with any key and you get the same item.
+
+**Solo only**, and that is not a preference. The reel stops the world for five seconds, and in
+a lobby that would either desync you from the party or park your body in a fight while you
+watched a slot machine. The setting says so, and `CaseRoll.enabled` checks again at the moment
+of the drop, so a chest opened in co-op behaves exactly as it did before.
+
+The reel is driven by the wall clock rather than by accumulated frame deltas — five seconds
+has to be five seconds on a machine dropping frames as much as on one that is not — and it
+measures its own tile width back off the DOM, so the stylesheet can change the tile size
+without the reel landing off the marker.
 
 Settings live under their own localStorage key, apart from the profile. Wiping your progress
 should not reset your mouse sensitivity, and a profile carried between browsers should not
 drag someone else's controls along with it.
+
+---
+
+## Feedback
+
+A **Feedback** panel on the main menu, and a *Report a Bug* button on the pause screen, so a
+bug can be reported while it is still on the screen. Two tabs — bug report and idea — a
+summary, the details, an optional name, and a context block (version, stage, run time,
+difficulty, character, co-op state, browser) that the player can read in full and switch off
+before sending.
+
+It posts to `POST /feedback` on the same server that served the page (`tools/feedback.js`,
+mounted by `tools/serve.js`), so there is nothing to sign up for and nothing to configure
+before it works: every report is written to `data/feedback.jsonl` and held in memory. Setting
+`FEEDBACK_WEBHOOK_URL` forwards them to a Discord or Slack channel; `RESEND_API_KEY` plus
+`FEEDBACK_EMAIL_TO` emails them; `FEEDBACK_ADMIN_TOKEN` unlocks `GET /feedback`, a page of
+everything received, newest first. Without that last variable the route 404s — the alternative
+is a public page listing everything anyone ever reported.
+
+Reports are length-capped, rate-limited per sender and overall, stripped of control characters,
+and escaped everywhere they are displayed. Discord mentions are disabled on the way out. The
+sender's address is never stored, only a per-process salted hash of it, so you can tell one
+sender from another and nothing else.
+
+**On Render's free tier the disk is ephemeral**, so the log survives a restart but not a
+redeploy. If the reports matter, set a webhook or email — those are the copies that leave the
+machine. Full setup, including the two-minute Discord path, is in
+[FEEDBACK.md](FEEDBACK.md).
 
 ---
 

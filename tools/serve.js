@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import { spawn } from 'node:child_process';
 import { Relay } from './relay.js';
+import { Feedback } from './feedback.js';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -47,10 +48,24 @@ const TYPES = {
   '.ico': 'image/x-icon',
 };
 
+/**
+ * Bug reports and ideas from the game's Feedback panel.
+ *
+ * Built before the server so its configuration can be printed at startup —
+ * "where do the reports go" is the one thing about it worth knowing, and it is
+ * read entirely from the environment, which is not somewhere you can look.
+ */
+const feedback = new Feedback({
+  root: ROOT,
+  log: (line) => console.log(`  [feedback] ${line}`),
+});
+
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     let path = decodeURIComponent(url.pathname);
+
+    if (await feedback.handle(req, res, url)) return;
 
     // The page cannot discover the machine's LAN address on its own, and that
     // address is exactly what a host needs to read out to their friends.
@@ -89,7 +104,15 @@ function announce(port) {
   ];
   for (const ip of lanAddresses()) lines.push(`  → http://${ip}:${port}   (share this one for co-op)`);
   lines.push('', '  Co-op relay listening on the same port at /net.');
-  lines.push('  Playing with people outside your network? See MULTIPLAYER.md.', '');
+  lines.push('  Playing with people outside your network? See MULTIPLAYER.md.');
+  lines.push('', `  Feedback: reports are kept in ${feedback.file}`);
+  if (feedback.webhook) lines.push('            and forwarded to your webhook.');
+  if (feedback.emailTo && feedback.resendKey) lines.push(`            and emailed to ${feedback.emailTo}.`);
+  if (!feedback.forwards) lines.push('            Set FEEDBACK_WEBHOOK_URL to have them sent to you — see FEEDBACK.md.');
+  lines.push(feedback.adminToken
+    ? `            Read them at http://localhost:${port}/feedback?token=…`
+    : '            Set FEEDBACK_ADMIN_TOKEN to read them at /feedback in a browser.');
+  lines.push('');
   console.log(lines.join('\n'));
 }
 
