@@ -1,4 +1,4 @@
-import { RARITY, RARITY_ORDER } from '../core/config.js';
+import { RARITY, RARITY_ORDER, RARITY_TABLES } from '../core/config.js';
 import { itemIconDataURL } from '../data/itemArt.js';
 import { itemDescription } from '../data/items.js';
 import { availableItemPool } from '../meta/progression.js';
@@ -33,14 +33,19 @@ const JITTER = 0.33;
 const AUTO_TAKE = 15;
 
 /**
- * What the filler tiles look like.
+ * The strip is the chest's own drop table.
  *
- * Not the chest's own table: a Legendary chest's table never rolls a Common, so
- * a reel built from it would be a wall of gold with one gold winner and no
- * tension at all. The strip is meant to look like the *pool*, so that the good
- * tiles going past are the ones you were hoping it would stop on.
+ * Every tile that goes past is something this chest could actually have given
+ * you, at roughly the rate it gives it: a Legendary Chest shows no Commons
+ * because it cannot roll one, a Large Chest shows no Commons either, and a plain
+ * Chest is mostly Commons with the occasional bright one going by — which is
+ * both honest and, as it turns out, better theatre than a generic strip was.
+ *
+ * The alternative — a reel that shows items the chest cannot produce — is a lie
+ * told to the player about their own odds, and it is the one thing a reveal over
+ * a real drop table must not do.
  */
-const FILLER_WEIGHTS = { common: 52, uncommon: 30, rare: 12, epic: 5, legendary: 1 };
+const FALLBACK_TABLE = { common: 74, uncommon: 20, rare: 4.6, epic: 1.1, legendary: 0.3 };
 
 /**
  * The case-opening reveal: a strip of items scrolling past a marker, slowing
@@ -64,6 +69,7 @@ export class CaseRoll {
     this.el = {
       root: $('case-roll'),
       source: $('cr-source'),
+      odds: $('cr-odds'),
       window: $('cr-window'),
       reel: $('cr-reel'),
       result: $('cr-result'),
@@ -91,7 +97,7 @@ export class CaseRoll {
    * is responsible for the drop as usual — so a chest opened with the setting
    * off, or in co-op, or mid-teardown, behaves exactly as it did before.
    */
-  play(item, onDone, label = 'Chest') {
+  play(item, onDone, { label = 'Chest', table = 'chest' } = {}) {
     if (!item || !this.enabled || this.active || !this.el.root) return false;
     if (!this.game.freezeForReveal()) return false;
 
@@ -100,12 +106,14 @@ export class CaseRoll {
     this._done = onDone;
     this._winner = item;
 
+    const weights = RARITY_TABLES[table] || FALLBACK_TABLE;
     this.el.source.textContent = label;
+    this.el.odds.innerHTML = this._oddsChips(weights);
     this.el.result.innerHTML = '';
     this.el.result.classList.remove('show');
     this.el.hint.textContent = 'Unsealing…';
     this.el.root.classList.remove('hidden');
-    this._buildReel(item);
+    this._buildReel(item, weights);
 
     // Measured after the overlay is visible: a hidden element has no width, and
     // the landing offset is nothing but width arithmetic.
@@ -142,7 +150,15 @@ export class CaseRoll {
     this.advance();
   }
 
-  /** Tears the reveal down without granting anything — for a run ending under it. */
+  /**
+   * Tears the reveal down without granting anything — for a run ending under it.
+   *
+   * Deliberately does *not* unfreeze: the only caller is `game._teardownRun`,
+   * which is on its way to setting the state itself (to `running` for a new run,
+   * to `menu` for an abandoned one), and handing back pointer lock on the way to
+   * the main menu would be exactly wrong. The caller owns the state; this owns
+   * the overlay.
+   */
   cancel() {
     if (!this.active) return;
     cancelAnimationFrame(this._raf);
@@ -152,7 +168,16 @@ export class CaseRoll {
     this.phase = 'idle';
     this._done = null;
     this._winner = null;
+    this._winTile = null;
     this.el.root?.classList.add('hidden');
+    // Fifty-eight tiles, each holding a data-URL icon. Leaving them parented to
+    // a hidden overlay keeps the whole strip alive until the next roll.
+    this._clearStrip();
+  }
+
+  _clearStrip() {
+    if (this.el.reel) this.el.reel.innerHTML = '';
+    if (this.el.result) this.el.result.innerHTML = '';
   }
 
   // ------------------------------------------------------------------ internals
@@ -162,14 +187,19 @@ export class CaseRoll {
    * The two tiles either side of the win are never the winning item: a reel that
    * stops between two copies of what you got reads as a bug, not as luck.
    */
-  _buildReel(winner) {
+  _buildReel(winner, weights) {
     const pool = availableItemPool(this.game.profile.data);
+    // Restricted once, up front, rather than per tile: a tier the table can roll
+    // but which the player has unlocked nothing in produces no tiles, because
+    // `loot.pickItem` would have stepped away from it too. The strip and the
+    // roll therefore agree about what this chest can currently produce.
+    const tiers = RARITY_ORDER.filter((r) => (weights[r] ?? 0) > 0 && pool.some((i) => i.rarity === r));
     const tiles = [];
     for (let i = 0; i < REEL_LENGTH; i++) {
       if (i === WIN_INDEX) { tiles.push(winner); continue; }
       const near = Math.abs(i - WIN_INDEX) <= 2;
-      let pick = this._filler(pool);
-      if (near && pick === winner) pick = this._filler(pool, winner);
+      let pick = this._filler(pool, tiers, weights);
+      if (near && pick === winner) pick = this._filler(pool, tiers, weights, winner);
       tiles.push(pick || winner);
     }
     this.el.reel.innerHTML = tiles.map((item, i) => {
@@ -198,22 +228,45 @@ export class CaseRoll {
     if (!(this._stride > 1)) this._stride = STRIDE;
   }
 
-  /** One filler item, weighted to look like a pool rather than like a table. */
-  _filler(pool, avoid = null) {
+  /**
+   * One filler item, drawn from the chest's own table.
+   *
+   * `tiers` has already been narrowed to rarities this chest can roll *and* the
+   * player has items in, so the only job left is to pick among them at the
+   * table's own rates and then pick an item of that rarity.
+   */
+  _filler(pool, tiers, weights, avoid = null) {
+    if (!tiers.length) return pool.find((i) => i !== avoid) ?? null;
     let total = 0;
-    for (const r of RARITY_ORDER) total += FILLER_WEIGHTS[r] ?? 0;
+    for (const r of tiers) total += weights[r] ?? 0;
     let roll = Math.random() * total;
-    let rarity = RARITY_ORDER[0];
-    for (const r of RARITY_ORDER) {
-      roll -= FILLER_WEIGHTS[r] ?? 0;
+    let rarity = tiers[tiers.length - 1];
+    for (const r of tiers) {
+      roll -= weights[r] ?? 0;
       if (roll <= 0) { rarity = r; break; }
     }
-    // Early on, whole tiers are still locked. Widening to the entire pool beats
-    // an empty tile, and the strip is scenery either way.
-    let candidates = pool.filter((i) => i.rarity === rarity && i !== avoid);
-    if (!candidates.length) candidates = pool.filter((i) => i !== avoid);
-    if (!candidates.length) return null;
+    const candidates = pool.filter((i) => i.rarity === rarity && i !== avoid);
+    // Only reachable when the tier holds exactly the winning item, which the
+    // two tiles either side of the win ask us to avoid. Any other tile will do.
+    if (!candidates.length) return pool.find((i) => i.rarity === rarity) ?? null;
     return candidates[(Math.random() * candidates.length) | 0];
+  }
+
+  /**
+   * The tier chips under the chest's name: what this chest can produce, and how
+   * often. It is the same table the reel and the roll both read, so a player
+   * counting gold tiles going past is counting something real.
+   */
+  _oddsChips(weights) {
+    const total = RARITY_ORDER.reduce((n, r) => n + (weights[r] ?? 0), 0) || 1;
+    return RARITY_ORDER.filter((r) => (weights[r] ?? 0) > 0).map((r) => {
+      // One decimal only where it says something: a chest's Legendary slice is
+      // 0.3%, and rounding that to 0% — or its Rare 4.6% to 5% — would make the
+      // chips a worse description of the table than the table itself.
+      const pct = Math.round(((weights[r] / total) * 1000)) / 10;
+      return `<span class="cr-odd" style="--rar:${RARITY[r].color}">${RARITY[r].name}
+        <b>${Number.isInteger(pct) ? pct : pct.toFixed(1)}%</b></span>`;
+    }).join('');
   }
 
   _offset(x) {
@@ -290,7 +343,8 @@ export class CaseRoll {
     this._done = null;
     this._winner = null;
     this.el.root.classList.add('hidden');
-    this.el.reel.innerHTML = '';
+    this._winTile = null;
+    this._clearStrip();
     // Unfreeze first: the drop spawns a pickup and plays effects, and those
     // belong to a running world.
     this.game.unfreezeFromReveal();

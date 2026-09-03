@@ -1052,12 +1052,15 @@ export class Game {
    * mid-spin, or refused outright (co-op, a run ending) without any of that
    * touching what the chest actually produced.
    */
-  revealItem(item, position, label = 'Chest') {
+  revealItem(item, position, source = {}) {
     const drop = () => {
       this.spawnItemPickup(item, position);
       this.fx.explosion(position, 3, RARITY[item.rarity].hex, 0.7);
     };
-    if (!this.caseRoll?.play(item, drop, label)) drop();
+    // `source` is the device's own name and rarity table, so the reel can be
+    // built from what this particular chest can produce rather than from a
+    // generic strip. See ui/caseRoll.js.
+    if (!this.caseRoll?.play(item, drop, source)) drop();
   }
 
   spawnItemPickup(item, position) {
