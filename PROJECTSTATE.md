@@ -307,8 +307,13 @@ it is, how to regenerate it, and where it disagrees with the source).
   scheduled against the audio clock with a 0.25s lookahead — it skips the gap after a stall
   rather than firing every missed note at once.
 - **A reveal presents a roll; it never makes one.** `Chest._grantItem` rolls through
-  `systems/loot.js` and hands the answer to `game.revealItem`, which either drops it or plays
-  the case-opening reel around it (`ui/caseRoll.js`) and drops it after. The separation is the
+  `systems/loot.js` and hands the answer to `game.revealItem` — along with the device's own
+  label and `RARITY_TABLES` key — which either drops it or plays the case-opening reel around
+  it (`ui/caseRoll.js`) and drops it after. The reel's filler is weighted by that same table, so
+  every tile going past is something this chest could actually have given you: a Legendary Chest
+  shows no Commons because it cannot roll one. Tiers are narrowed to those the table can roll
+  *and* the player has unlocked something in, because `loot.pickItem` would have stepped away
+  from an empty tier too. The separation is the
   point: the animation is skippable, refusable and switchable-off precisely because nothing
   downstream of the roll can reach back into it. The reel freezes the world via
   `game.freezeForReveal`, which is why it is solo-only — `CaseRoll.enabled` re-checks
