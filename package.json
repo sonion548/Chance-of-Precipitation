@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node tools/serve.js",
     "dev": "node tools/serve.js",
+    "feedback:test": "node tools/feedback-test.js",
     "check": "node --experimental-vm-modules tools/check.js && npm run --silent check:coop",
     "check:coop": "node --import ./tools/vendor-resolve.mjs tools/coop-check.js"
   },

@@ -37,24 +37,58 @@ anything else that accepts a JSON `POST`, which receives the whole record as JSO
 
 ---
 
-## If you would rather have email
+## Email
 
 Email needs a provider. This uses [Resend](https://resend.com), whose free tier is ample and
 whose API is one HTTPS call, so it adds no dependency to the project.
 
-1. Make a Resend account and create an API key.
-2. Set these on your service:
+### The five-minute version, no domain needed
+
+1. Sign up at [resend.com](https://resend.com) **using the address you want the reports to
+   arrive at**. This matters — see the note below.
+2. **API Keys → Create API Key**. Sending permission is all it needs. Copy the key; Resend
+   shows it once.
+3. Set two variables on your service (Render: your service → **Environment**):
 
    | Key | Value |
    | --- | --- |
-   | `RESEND_API_KEY` | the key from Resend |
-   | `FEEDBACK_EMAIL_TO` | where you want the reports (several, comma-separated, is fine) |
-   | `FEEDBACK_EMAIL_FROM` | *optional* — a sender on a domain you have verified with Resend |
+   | `RESEND_API_KEY` | the key you just copied, `re_…` |
+   | `FEEDBACK_EMAIL_TO` | the address you signed up with |
 
-If you leave `FEEDBACK_EMAIL_FROM` unset it sends from Resend's shared `onboarding@resend.dev`,
-which needs no domain setup at all but **will only deliver to the address on your own Resend
-account**. That is usually exactly what you want here. To send anywhere else, verify a domain
-in Resend and set the variable to an address on it.
+4. Check it before trusting it:
+
+   ```bash
+   node tools/feedback-test.js --send
+   ```
+
+   That prints what is configured, sends a real test report through it, and tells you which
+   sinks accepted it — including the provider's own words when one refuses. Run it wherever the
+   variables are set. On Render that means the service's **Shell** tab; locally, export the same
+   variables first.
+
+**Both variables or neither.** A key with no address, or an address with no key, means email is
+off. That used to fail silently; the server now says so at startup and the check above says so
+too.
+
+### Why step 1 said to use the address you want reports at
+
+With `FEEDBACK_EMAIL_FROM` unset, mail is sent from Resend's shared `onboarding@resend.dev`.
+That needs no domain setup at all, but Resend **will only deliver it to the address on your own
+Resend account**. For "just show me the reports" that is exactly right, and it is why signing
+up with the destination address makes the whole thing two variables instead of a DNS chore.
+
+### Sending anywhere else
+
+To reach an address that is not your Resend account — a shared inbox, a co-maintainer — you
+need a domain:
+
+1. In Resend: **Domains → Add Domain**, then add the DNS records it gives you at your registrar
+   (an MX and some TXT records). Verification usually takes minutes.
+2. Set `FEEDBACK_EMAIL_FROM` to an address on that domain, e.g. `feedback@yourdomain.com`.
+3. `FEEDBACK_EMAIL_TO` can then be anything, including several addresses separated by commas.
+
+Run the check again afterwards. An unverified domain fails with a message saying so, which the
+check prints verbatim.
 
 Email and the webhook are independent — set both and reports go to both.
 
@@ -103,7 +137,8 @@ and is the only way to keep the log across deploys.)
 | `FEEDBACK_FILE` | `data/feedback.jsonl` | where the log is written |
 
 The server prints which of these are live when it starts, so `node tools/serve.js` locally
-tells you what a deploy would do before you deploy it.
+tells you what a deploy would do before you deploy it. `node tools/feedback-test.js` prints the
+same summary without starting a server, and `--send` puts a real report through it.
 
 ---
 

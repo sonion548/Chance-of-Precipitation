@@ -19,6 +19,13 @@ const SINK_TIMEOUT = 8000;
 const TYPES = { bug: 'Bug report', idea: 'Idea' };
 
 /**
+ * Resend's shared sender. It needs no domain set up at all, but it will only
+ * deliver to the address on the Resend account itself — which is exactly the
+ * "just show me the reports" case, so it is the default.
+ */
+const DEFAULT_FROM = 'onboarding@resend.dev';
+
+/**
  * Where a report can end up.
  *
  * Every one of these is optional and configured by environment variable, which
@@ -42,10 +49,7 @@ export class Feedback {
       : resolve(root, 'data', 'feedback.jsonl');
     this.webhook = (env.FEEDBACK_WEBHOOK_URL || '').trim();
     this.emailTo = (env.FEEDBACK_EMAIL_TO || '').trim();
-    // Resend's shared sender works with no domain set up at all, but it will
-    // only deliver to the address on the Resend account itself. That is exactly
-    // the "just show me the ideas" case, so it is the default.
-    this.emailFrom = (env.FEEDBACK_EMAIL_FROM || 'onboarding@resend.dev').trim();
+    this.emailFrom = (env.FEEDBACK_EMAIL_FROM || DEFAULT_FROM).trim();
     this.resendKey = (env.RESEND_API_KEY || '').trim();
     this.adminToken = (env.FEEDBACK_ADMIN_TOKEN || '').trim();
     // Salts the address hash kept on each record. Regenerated per process on
@@ -61,6 +65,64 @@ export class Feedback {
 
   /** True if any configured sink forwards a report off this machine. */
   get forwards() { return !!(this.webhook || (this.emailTo && this.resendKey)); }
+
+  /** True once both halves of the email setup are present. */
+  get emailOn() { return !!(this.emailTo && this.resendKey); }
+
+  /**
+   * What this instance is configured to do, in the order it does it.
+   *
+   * Returned as lines rather than printed so the startup banner and the
+   * `feedback:test` command say exactly the same thing — a setup that reads one
+   * way when the server starts and another when you test it is worse than
+   * either message on its own.
+   *
+   * The half-configured email case gets a warning of its own, because it is the
+   * one mistake here that fails silently: a key with no address, or an address
+   * with no key, simply means no email, and nothing anywhere would say so.
+   */
+  describe() {
+    const lines = [`Reports are written to ${this.file}`];
+    if (this.webhook) lines.push(`Forwarded to a webhook at ${hostOf(this.webhook) || 'that URL'}`);
+    if (this.emailOn) lines.push(`Emailed from ${this.emailFrom} to ${this.emailTo}`);
+
+    if (this.resendKey && !this.emailTo) {
+      lines.push('! RESEND_API_KEY is set but FEEDBACK_EMAIL_TO is not, so email is OFF.');
+    } else if (this.emailTo && !this.resendKey) {
+      lines.push('! FEEDBACK_EMAIL_TO is set but RESEND_API_KEY is not, so email is OFF.');
+    }
+    if (this.emailOn && this.emailFrom === DEFAULT_FROM) {
+      lines.push(`  Sending from ${DEFAULT_FROM} only reaches the address on your own Resend`);
+      lines.push('  account. To reach anywhere else, verify a domain and set FEEDBACK_EMAIL_FROM.');
+    }
+    if (!this.forwards) lines.push('Nothing is forwarded off this machine yet — see FEEDBACK.md.');
+    lines.push(this.adminToken
+      ? 'Readable in a browser at /feedback?token=…'
+      : 'Set FEEDBACK_ADMIN_TOKEN to read them at /feedback in a browser.');
+    return lines;
+  }
+
+  /**
+   * Sends a synthetic report through every configured sink.
+   *
+   * The whole point is that it takes the same path a real report takes — same
+   * validation, same record shape, same delivery — so a pass here means the
+   * next real report will arrive, and is not merely evidence that a key parses.
+   * It deliberately skips the rate limiter: testing your own setup twice in a
+   * row should not lock you out of it.
+   */
+  async sendTest() {
+    const record = this._validate({
+      type: 'idea',
+      title: 'Test report from the feedback setup check',
+      body: 'If you are reading this, reports from the game will reach you here. '
+        + 'Nothing is wrong; someone ran the setup check.',
+      contact: 'tools/feedback-test.js',
+      diagnostics: { version: 'setup-check', page: 'not a real report' },
+    }, 'self-test');
+    if (record.error) throw new Error(record.error);
+    return { id: record.value.id, delivered: await this._deliver(record.value) };
+  }
 
   /**
    * Handles the feedback routes. Returns false for anything else so the static
@@ -152,7 +214,7 @@ export class Feedback {
     const done = [];
     if (await this._store(record)) done.push('log');
     if (this.webhook && await this._post(record)) done.push('webhook');
-    if (this.emailTo && this.resendKey && await this._email(record)) done.push('email');
+    if (this.emailOn && await this._email(record)) done.push('email');
     return done;
   }
 

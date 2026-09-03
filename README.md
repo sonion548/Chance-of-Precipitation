@@ -1142,7 +1142,8 @@ mounted by `tools/serve.js`), so there is nothing to sign up for and nothing to 
 before it works: every report is written to `data/feedback.jsonl` and held in memory. Setting
 `FEEDBACK_WEBHOOK_URL` forwards them to a Discord or Slack channel; `RESEND_API_KEY` plus
 `FEEDBACK_EMAIL_TO` emails them; `FEEDBACK_ADMIN_TOKEN` unlocks `GET /feedback`, a page of
-everything received, newest first. Without that last variable the route 404s — the alternative
+everything received, newest first. `node tools/feedback-test.js` prints what is configured and
+why, and `--send` puts a real report through it so a setup can be proved before it is trusted. Without that last variable the route 404s — the alternative
 is a public page listing everything anyone ever reported.
 
 Reports are length-capped, rate-limited per sender and overall, stripped of control characters,
