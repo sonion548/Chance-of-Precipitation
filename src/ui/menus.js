@@ -658,6 +658,10 @@ export class Menus {
       if (res.ok && data.ok) {
         draft.title = '';
         draft.body = '';
+        // `forwarded` is what happened to this report, not what the server was
+        // configured to do with it. Telling someone their bug report reached a
+        // maintainer when a refused webhook left it sitting in a log file is the
+        // kind of small lie that costs a real report.
         this._feedbackStatus = {
           kind: 'ok',
           text: `Sent. ${data.forwarded

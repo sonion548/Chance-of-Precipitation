@@ -14,19 +14,49 @@ no config file to edit and no shell to edit it from.
 
 ---
 
+## How to add an environment variable on Render
+
+Every setting below is one of these, so this is the mechanic for all of them:
+
+1. **Render Dashboard → your service → `Environment`** in the left pane.
+2. Under *Environment Variables*, click **+ Add Environment Variable**.
+3. Fill in **Key** (e.g. `FEEDBACK_WEBHOOK_URL`) and **Value**. Add as many as you need.
+4. Save — and **mind the dropdown**. It offers three things:
+   - **Save, rebuild, and deploy** — full rebuild. Always correct, just slowest.
+   - **Save and deploy** — redeploys the existing build with the new values. This is the one
+     you want here; nothing about these variables needs a rebuild.
+   - **Save only** — stores them and changes nothing that is running. Pick this by accident
+     and your setting appears in the dashboard while the live service carries on without it,
+     which is a genuinely confusing half-hour.
+
+The values are secret — an API key, a webhook URL that anyone holding it can post to your
+channel — so keep them here rather than in the repository. Nothing in this project reads a
+`.env` file.
+
+**Locally**, set the same variables on the command line for one run:
+
+```bash
+RESEND_API_KEY=re_xxx FEEDBACK_EMAIL_TO=you@example.com node tools/feedback-test.js --send
+```
+
+or `export` them first if you want them to stick for the whole terminal session. On Windows
+`cmd`, that is `set RESEND_API_KEY=re_xxx` on its own line before the command.
+
+---
+
 ## The fastest thing that works: a Discord webhook
 
 Two minutes, free, and reports arrive as messages in a channel.
 
 1. In Discord: **Server Settings → Integrations → Webhooks → New Webhook**. Point it at a
    channel, then **Copy Webhook URL**.
-2. In Render: your service → **Environment** → **Add Environment Variable**.
+2. Add one variable, as above:
 
    | Key | Value |
    | --- | --- |
    | `FEEDBACK_WEBHOOK_URL` | the URL you just copied |
 
-3. Save. Render redeploys; from then on every report shows up in that channel as an embed —
+3. Save **and deploy**. From then on every report shows up in that channel as an embed —
    red for bugs, teal for ideas — with the context block attached.
 
 The same variable takes a **Slack** incoming-webhook URL (posted as plain text), or the URL of
@@ -37,24 +67,63 @@ anything else that accepts a JSON `POST`, which receives the whole record as JSO
 
 ---
 
-## If you would rather have email
+## Email
 
 Email needs a provider. This uses [Resend](https://resend.com), whose free tier is ample and
 whose API is one HTTPS call, so it adds no dependency to the project.
 
-1. Make a Resend account and create an API key.
-2. Set these on your service:
+### The five-minute version, no domain needed
+
+1. Sign up at [resend.com](https://resend.com) **using the address you want the reports to
+   arrive at**. This matters — see the note below.
+2. **API Keys → Create API Key**. Sending permission is all it needs. Copy the key; Resend
+   shows it once.
+3. Set two variables on your service (Render: your service → **Environment**):
 
    | Key | Value |
    | --- | --- |
-   | `RESEND_API_KEY` | the key from Resend |
-   | `FEEDBACK_EMAIL_TO` | where you want the reports (several, comma-separated, is fine) |
-   | `FEEDBACK_EMAIL_FROM` | *optional* — a sender on a domain you have verified with Resend |
+   | `RESEND_API_KEY` | the key you just copied, `re_…` |
+   | `FEEDBACK_EMAIL_TO` | the address you signed up with |
 
-If you leave `FEEDBACK_EMAIL_FROM` unset it sends from Resend's shared `onboarding@resend.dev`,
-which needs no domain setup at all but **will only deliver to the address on your own Resend
-account**. That is usually exactly what you want here. To send anywhere else, verify a domain
-in Resend and set the variable to an address on it.
+4. Check it before trusting it — **from your own machine**, with the same two variables:
+
+   ```bash
+   RESEND_API_KEY=re_xxx FEEDBACK_EMAIL_TO=you@example.com node tools/feedback-test.js --send
+   ```
+
+   That prints what is configured, sends a real test report through it, and tells you which
+   sinks accepted it — including the provider's own words when one refuses, so a mistyped key
+   says so instead of going quiet. Resend does not care where the call came from, so a pass
+   locally means the key and the address are right.
+
+   Then confirm **Render** has them too: deploy, open the service's **Logs** tab, and read the
+   `Feedback:` block the server prints on startup. It lists exactly what it will do. (Render's
+   **Shell** tab would let you run the check on the server itself, but shell access is a paid
+   feature — on the free tier, local check plus the startup log is the way.)
+
+**Both variables or neither.** A key with no address, or an address with no key, means email is
+off. That used to fail silently; the server now says so at startup and the check above says so
+too.
+
+### Why step 1 said to use the address you want reports at
+
+With `FEEDBACK_EMAIL_FROM` unset, mail is sent from Resend's shared `onboarding@resend.dev`.
+That needs no domain setup at all, but Resend **will only deliver it to the address on your own
+Resend account**. For "just show me the reports" that is exactly right, and it is why signing
+up with the destination address makes the whole thing two variables instead of a DNS chore.
+
+### Sending anywhere else
+
+To reach an address that is not your Resend account — a shared inbox, a co-maintainer — you
+need a domain:
+
+1. In Resend: **Domains → Add Domain**, then add the DNS records it gives you at your registrar
+   (an MX and some TXT records). Verification usually takes minutes.
+2. Set `FEEDBACK_EMAIL_FROM` to an address on that domain, e.g. `feedback@yourdomain.com`.
+3. `FEEDBACK_EMAIL_TO` can then be anything, including several addresses separated by commas.
+
+Run the check again afterwards. An unverified domain fails with a message saying so, which the
+check prints verbatim.
 
 Email and the webhook are independent — set both and reports go to both.
 
@@ -103,7 +172,8 @@ and is the only way to keep the log across deploys.)
 | `FEEDBACK_FILE` | `data/feedback.jsonl` | where the log is written |
 
 The server prints which of these are live when it starts, so `node tools/serve.js` locally
-tells you what a deploy would do before you deploy it.
+tells you what a deploy would do before you deploy it. `node tools/feedback-test.js` prints the
+same summary without starting a server, and `--send` puts a real report through it.
 
 ---
 

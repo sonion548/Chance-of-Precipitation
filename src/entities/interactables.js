@@ -327,7 +327,7 @@ export class Chest {
     if (!item) return;
     const spawn = this.position.clone();
     spawn.y += this.isShrine ? 2.6 : 1.4;
-    this.game.revealItem(item, spawn, this.label);
+    this.game.revealItem(item, spawn, { label: this.label, table: this.table });
   }
 
   update(dt, time) {

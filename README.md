@@ -1108,6 +1108,17 @@ Off by default. With it on, a chest sends a strip of items scrolling past a mark
 down, and stopping on the one you got — the case-opening animation, applied to a drop table
 that already existed.
 
+**Each device's reel is built from its own table.** A Legendary Chest's strip is rare, epic and
+legendary and nothing else, because those are the only things it can roll; a Large Chest shows
+no Commons; the Blood Altar, Cursed Cache and Scrap Forge all share the Large table and look
+like it; the Shrine of Chance has its own. The tier chips under the chest's name spell the odds
+out, read from the same `RARITY_TABLES` entry the reel and the roll both use — so a player
+counting gold tiles going past is counting something real.
+
+A tier the table can roll but which the player has unlocked nothing in produces no tiles at
+all, because `loot.pickItem` would have stepped away from it too. The strip and the roll always
+agree about what a chest can currently produce.
+
 It cannot change a single drop, and the code is arranged so that it could not: `_grantItem`
 rolls the item through `systems/loot.js` exactly as it always has, and only then hands the
 answer to `game.revealItem`, which builds a reel around it. The reveal is presentation over a
@@ -1142,7 +1153,8 @@ mounted by `tools/serve.js`), so there is nothing to sign up for and nothing to 
 before it works: every report is written to `data/feedback.jsonl` and held in memory. Setting
 `FEEDBACK_WEBHOOK_URL` forwards them to a Discord or Slack channel; `RESEND_API_KEY` plus
 `FEEDBACK_EMAIL_TO` emails them; `FEEDBACK_ADMIN_TOKEN` unlocks `GET /feedback`, a page of
-everything received, newest first. Without that last variable the route 404s — the alternative
+everything received, newest first. `node tools/feedback-test.js` prints what is configured and
+why, and `--send` puts a real report through it so a setup can be proved before it is trusted. Without that last variable the route 404s — the alternative
 is a public page listing everything anyone ever reported.
 
 Reports are length-capped, rate-limited per sender and overall, stripped of control characters,

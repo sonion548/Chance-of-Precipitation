@@ -105,13 +105,11 @@ function announce(port) {
   for (const ip of lanAddresses()) lines.push(`  → http://${ip}:${port}   (share this one for co-op)`);
   lines.push('', '  Co-op relay listening on the same port at /net.');
   lines.push('  Playing with people outside your network? See MULTIPLAYER.md.');
-  lines.push('', `  Feedback: reports are kept in ${feedback.file}`);
-  if (feedback.webhook) lines.push('            and forwarded to your webhook.');
-  if (feedback.emailTo && feedback.resendKey) lines.push(`            and emailed to ${feedback.emailTo}.`);
-  if (!feedback.forwards) lines.push('            Set FEEDBACK_WEBHOOK_URL to have them sent to you — see FEEDBACK.md.');
-  lines.push(feedback.adminToken
-    ? `            Read them at http://localhost:${port}/feedback?token=…`
-    : '            Set FEEDBACK_ADMIN_TOKEN to read them at /feedback in a browser.');
+  // Straight from the Feedback instance, so this and `npm run feedback:test`
+  // can never describe the same environment differently.
+  lines.push('', '  Feedback:');
+  for (const line of feedback.describe()) lines.push(`    ${line}`);
+  lines.push('    Check it with: node tools/feedback-test.js --send');
   lines.push('');
   console.log(lines.join('\n'));
 }
