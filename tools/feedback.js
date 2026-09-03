@@ -121,7 +121,7 @@ export class Feedback {
       diagnostics: { version: 'setup-check', page: 'not a real report' },
     }, 'self-test');
     if (record.error) throw new Error(record.error);
-    return { id: record.value.id, delivered: await this._deliver(record.value) };
+    return { id: record.value.id, ...await this._deliver(record.value) };
   }
 
   /**
@@ -168,13 +168,21 @@ export class Feedback {
     const record = this._validate(payload, who);
     if (record.error) { json(res, 400, { ok: false, error: record.error }); return; }
 
-    const delivered = await this._deliver(record.value);
+    const { done: delivered, failed } = await this._deliver(record.value);
     if (!delivered.length) {
       json(res, 500, { ok: false, error: 'The report could not be recorded. Nothing was saved — try again shortly.' });
       return;
     }
-    this.log(`${TYPES[record.value.type]}: ${record.value.title} → ${delivered.join(', ')}`);
-    json(res, 200, { ok: true, id: record.value.id, delivered, forwarded: this.forwards });
+    this.log(`${TYPES[record.value.type]}: ${record.value.title} → ${delivered.join(', ')}`
+      + (failed.length ? ` (REFUSED by ${failed.join(', ')} — see above)` : ''));
+    // `forwarded` says what actually happened to this report, not what was
+    // configured to happen to it.
+    json(res, 200, {
+      ok: true,
+      id: record.value.id,
+      delivered,
+      forwarded: delivered.some((d) => d !== 'log'),
+    });
   }
 
   /**
@@ -209,13 +217,22 @@ export class Feedback {
     };
   }
 
-  /** Puts the record everywhere it can go. Returns the sinks that took it. */
+  /**
+   * Puts the record everywhere it can go.
+   *
+   * Returns what took it *and* what was configured but refused. The difference
+   * matters: a configured sink that fails is the operator's problem, not the
+   * reporter's, and reporting "delivered" on the strength of the configuration
+   * rather than the outcome is how a broken forward stays broken — everyone is
+   * told it worked, including the person who could fix it.
+   */
   async _deliver(record) {
     const done = [];
+    const failed = [];
     if (await this._store(record)) done.push('log');
-    if (this.webhook && await this._post(record)) done.push('webhook');
-    if (this.emailOn && await this._email(record)) done.push('email');
-    return done;
+    if (this.webhook) ((await this._post(record)) ? done : failed).push('webhook');
+    if (this.emailOn) ((await this._email(record)) ? done : failed).push('email');
+    return { done, failed };
   }
 
   /**
