@@ -154,21 +154,43 @@ export const WEAPONS = [
     tag: 'Melee · Proximity',
     color: 0xa15bff,
     model: 'shadowblade',
-    desc: 'A matched pair folded out of a collapsed star, one in each hand. They pay for reach in damage and then refuse to sell any of it back: at arm\'s length a cut is worth four times what the same cut is worth at the tip, so a character with 88 health and negative armour has exactly one way to do damage, and it is forward.',
-    displayStats: { Damage: '480% → 120%', 'Swing Rate': '2.4/s', Range: '6.5m', Proc: '1.0' },
+    desc: 'A matched pair folded out of a collapsed star, one in each hand. They pay for reach in damage and then refuse to sell any of it back: at arm\'s length a cut is worth four times what the same cut is worth at the tip. What leaves the blade at the end of the stroke is worth about what the tip is, so a character with 88 health and negative armour is no longer helpless at range — just far, far better paid for closing.',
+    displayStats: { Damage: '520% → 130%', Wave: '150% · 26m', 'Swing Rate': '2.4/s', Range: '6.5m' },
     primary: {
+      /* The cut, and then the cut that keeps going.
+       *
+       * The blades used to be melee and nothing else, which on an 88-health
+       * body with negative armour meant every point of damage had to be bought
+       * by standing inside the reach of the thing you were killing. Against
+       * anything ranged, or anything the arena would not let you reach, the
+       * character simply had no answer and was not playable.
+       *
+       * The wave is that answer, and it is deliberately priced as the *tip* of
+       * the swing rather than as a second weapon: the whole identity is that
+       * forward is worth four times what standing off is, and a crescent worth
+       * as much as the hilt would have thrown that away to fix the range
+       * problem. So the stroke still pays 520% in someone's face, and what
+       * flies off the end of it pays 150% — a shade over the tip's 130%,
+       * because unlike the tip it has to cross the room to get there.
+       */
       name: 'Void Slashes', key: 'M1', icon: '◜', hold: true,
       anim: 'slash',
-      desc: 'Cut with one blade and then the other for 480% damage in your face, falling to 120% at the very tip of the reach. Heals you for 7% of everything it takes.',
+      desc: 'Cut with one blade and then the other for 520% damage in your face, falling to 130% at the very tip. Every stroke throws a crescent that keeps going for 26m, cutting everything it sweeps for 150%. Heals you for 11% of everything the blades take, and 5% of what the wave does.',
       cooldown: 0.42, scalesWithAttackSpeed: true,
       fire(ctx) {
-        ctx.melee({
-          damage: ctx.dmg * 4.8, proc: 1.0, range: 6.5, angle: 1.15,
-          lifesteal: 0.07, color: 0xa15bff, tilt: 0.3,
+        ctx.slashWave({
+          damage: ctx.dmg * 5.2, proc: 1.0, range: 6.5, angle: 1.15,
+          lifesteal: 0.11, color: 0xa15bff, tilt: 0.22,
           // 1.0 at the hilt down to 0.25 at the tip. Written as a curve rather
           // than as two numbers so the middle of the swing is worth something
           // specific instead of being whatever a lerp happened to produce.
           rangeScale: (t) => 1 - 0.75 * t * t,
+          // Its own damage event with its own proc coefficient, so holding M1
+          // is not secretly double-dipping every on-hit item you own.
+          wave: {
+            damage: ctx.dmg * 1.5, proc: 0.45, lifesteal: 0.05,
+            speed: 34, range: 26, radius: 2.6,
+          },
         });
         ctx.recoil(0.9);
       },

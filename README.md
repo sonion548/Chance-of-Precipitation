@@ -279,13 +279,13 @@ how you shoot, in a single choice.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Vanguard | Balanced baseline — 115 HP, no sharp edges | **Standard Issue** | Service Round | Focused Shot | Combat Roll | Overclock | Fire Mission |
 | Unloader | Heavy exosuit, 165 HP, slow but armoured | **Momentum** | **Punch** | **Down Slam** | Grapple Gun | Overcharged Fist | Terminal Velocity |
-| Wraith | Glass cannon — 88 HP, negative armour, double jump | **Executioner** | **Void Slashes** | **Phase** | Blink (in the air too) | Umbral Volley | Event Horizon |
+| Wraith | Glass cannon — 106 HP, negative armour, double jump, and a crescent off every stroke | **Executioner** | **Void Slashes** | **Phase** | Blink (in the air too) | Umbral Volley | Event Horizon |
 | Bulwark | 200 HP and 16 armour, walks slowly at the problem | **Overshield** | **Shotgun** | **Guard** (held) | Shield Charge | Bastion | Last Stand |
 | Halcyon | 84 HP, −10 armour, softer damage — and it **flies** | **Altitude** | **Beam** | **Missile Cluster** | Thruster Flight | Bomb Cluster | Ordnance Override |
 | Dasher | 76 HP, −8 armour, the fastest and hardest-hitting frame | **Desperation** | **Lance** (3-hit) | **Parry** | Lance Dash | Marking Spear (×2) | Skewer |
 | Chain | 104 HP wanderer in a straw hat. Owns one thing and throws it | **Chain Reaction** | **Chain Hat** | **Chain Pull** | Wanderer's Mark | Hat Toss | Unbroken Chain |
 | Sniper | 92 HP overwatch: one round, one body, then be gone | **Standoff** | Bolt Round | Sidearm Revolver | Break Contact | Range Card | Kill Order |
-| **Diver** | 108 HP drop-suit that **never has to land** | **Firebomb** | **Scatter Shot** | **Fire Patch** (×3) | **Speed Dash** (×2) | **Dive Slam** | **Inferno** |
+| **Diver** | 98 HP drop-suit that **never has to land** | **Firebomb** | **Scatter Shot** | **Fire Patch** (×3) | **Speed Dash** (×2) | **Dive Slam** | **Inferno** |
 
 **Passives** are the newest slot and the one that does the most work per line. Each is a
 sentence about the character that is true whether or not you press anything, and each reads
@@ -298,7 +298,7 @@ something about the *moment* rather than about the build:
 | Dasher · Desperation | Up to +85% damage as your health falls. 76 HP and −8 armour already; the passive doubles down rather than softening it |
 | Halcyon · Altitude | Up to +55% movement speed with height, full at 30m above the ground under you |
 | Bulwark · Overshield | A hit worth 12% of your health grants a barrier worth 25% of it, once every 20s. Flat reduction is worth least against exactly the hit that kills you |
-| Wraith · Executioner | +45% damage to anything at or below 40% health — a threshold you can see on a bar and decide about, not a ramp that quietly exists |
+| Wraith · Executioner | +55% damage to anything at or below 40% health — a threshold you can see on a bar and decide about, not a ramp that quietly exists |
 | Unloader · Momentum | Up to +80% damage with speed, measured against the 30 u/s a grapple leaves you carrying |
 | Chain · Chain Reaction | Every body the thrown hat crosses takes 0.6s off all your cooldowns |
 | Diver · Firebomb | A slam landing on his own fire patches detonates them, for far more than the slam alone |
@@ -306,7 +306,7 @@ something about the *moment* rather than about the build:
 Two of those are worth a paragraph each, because they are the two ends of the design.
 
 **Standoff is the exact inverse of Wraith's blades**, and deliberately: hers pay four times as
-much at the hilt as at the tip, which is what makes 88 health walk *towards* things; his pays
+much at the hilt as at the tip, which is what makes a thin frame walk *towards* things; his pays
 for the opposite, which is what makes 92 health and negative armour refuse to. Two characters
 on one axis at opposite ends — and it is what turns the range card, the cloak and Break Contact
 from three unrelated tools into one plan, because every one of them is about getting back to
@@ -495,7 +495,7 @@ shield will ever fire can be built around that character and nothing else:
 | --- | --- | --- | --- |
 | Vanguard | Service Round | Focused Shot | Standard issue for the standard soldier — the attack the others are measured against |
 | Unloader | **Punch** — 340%, right fist then left, 1.6/s | **Down Slam** | The only primary in the game you *commit* to. It hits for three and a half times a hit because you are standing still for two thirds of a second afterwards |
-| Wraith | **Void Slashes** — 480% at the hilt, 120% at the tip | **Phase** | Pays four times as much at arm's length as at the point, which is the only thing that makes a character with 88 HP walk *towards* something |
+| Wraith | **Void Slashes** — 520% at the hilt, 130% at the tip, plus a 150% crescent thrown 26m off every stroke | **Phase** | Pays four times as much at arm's length as at the point, which is what makes a thin frame walk *towards* something. The wave is priced as the tip, so being at range is an answer rather than a plan |
 | Bulwark | **Shotgun** — 420% close, 8 rounds, 15m | **Guard** (held) | Fifteen metres of reach on the character who walks at 6.9. A weapon that short is only carryable by a body that survives the walk |
 | Halcyon | **Beam** — 62%/tick, no falloff, 40-round cell | **Missile Cluster** | Infinite range because a bombardier four hundred metres up has to be able to reach the ground |
 | Dasher | **Lance** — 210%, 210%, then a 380% thrust at 9m | **Parry** | A finisher that is bigger *and reaches four metres further*, so the combo changes where you are standing |
@@ -527,12 +527,13 @@ abilities that only make sense once you already are.
 His kit is one conversation between two buttons. **Fire Patch** throws burning ground where he
 is looking — three charges on three-second timers, three patches on the floor at a time — and
 on its own it is a mediocre zone. **Dive Slam** drops him onto the aim point at fifty metres a
-second for 560% in 9m, and on its own it is a mediocre nuke. Landing one on the other is the
-character: **Firebomb**, his passive, detonates every patch he lands on for 1340% each. So the
-whole thing is a question of whether you set up two seconds ago, which is exactly what a
-passive should be — true whether or not you remembered. **Speed Dash** (two charges) keeps 45%
-movement speed for five seconds after it, and **Inferno** sets everything within 22m alight
-for ten seconds while he moves half again as fast through the middle of it.
+second for 480% in 9m, and on its own it is a mediocre nuke. Landing one on the other is the
+character: **Firebomb**, his passive, detonates every patch he lands on for 700% each — at most
+three, which is the standing cap on live patches. So the whole thing is a question of whether
+you set up two seconds ago, which is exactly what a passive should be — true whether or not you
+remembered. **Speed Dash** (two charges) keeps 45% movement speed for five seconds after it,
+and **Inferno** sets everything within 18m alight for eight seconds while he moves a third
+again as fast through the middle of it.
 
 Bulwark's **Shotgun** is the only kit with a magazine that is not a beam: eight in the tube,
 then a second and a half to fill it. Fifteen metres of reach on a character who walks at 6.9

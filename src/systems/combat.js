@@ -22,6 +22,18 @@ function settleTeleport(player, arena, start, end) {
   return !player.grounded || end.y > ground + 0.05;
 }
 
+/**
+ * What a repeat Kill Order round is worth, compounding.
+ *
+ * The first round into a body is worth full, the second 72% of that, the third
+ * 52%, and so on. Twelve rounds into a lone boss come to about three and a half
+ * rounds' worth rather than twelve — a little under what Vanguard's Fire
+ * Mission does to the same body — while twelve rounds across a field are still
+ * worth twelve. That gap is the whole point: this is an ultimate that clears a
+ * field, not one that deletes whatever is biggest.
+ */
+const KILL_ORDER_REPEAT = 0.72;
+
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _dir = new THREE.Vector3();
@@ -688,16 +700,44 @@ export class Combat {
     if (order.timer > 0) return;
     order.timer = order.interval;
 
+    /* One round, one body — including here.
+     *
+     * The order used to pick the highest-health target every time, which in a
+     * boss fight is the boss on all fourteen rounds: an ultimate whose own
+     * description is "work down the field" was in practice a single-target
+     * execution with a guaranteed critical on every shot. It deleted bosses,
+     * and it did it harder the more crit damage the build had bought, because
+     * `critChanceToDamage` turns this character's crit-chance items into
+     * multiplier.
+     *
+     * So the order now works down the field for real: it takes the biggest
+     * thing it has *not* already shot, and only doubles back once everything in
+     * range has been served. A second round into the same body is worth a
+     * fraction of the first, which is what a marksman working a field would do
+     * anyway, and what stops fourteen rounds stacking into one health bar.
+     */
     const targets = this.game.enemies.nearest(player.position, order.radius, 24);
     let best = null;
-    for (const e of targets) if (!best || e.health > best.health) best = e;
-    if (best) {
+    let fresh = null;
+    for (const e of targets) {
+      if (!best || e.health > best.health) best = e;
+      if (!order.hits.has(e) && (!fresh || e.health > fresh.health)) fresh = e;
+    }
+    const target = fresh ?? best;
+    if (target) {
+      // Every round after the first into the same body is a repeat, and each
+      // one is worth less than the last rather than a flat discount — a boss
+      // that soaks the whole order should see the returns visibly close up.
+      const repeats = order.hits.get?.(target) ?? (order.hits.has(target) ? 1 : 0);
+      const scale = repeats === 0 ? 1 : KILL_ORDER_REPEAT ** repeats;
+      order.hits.set(target, repeats + 1);
+
       const from = player.muzzlePosition.clone();
-      const to = best.center.clone();
+      const to = target.center.clone();
       const dir = to.clone().sub(from).normalize();
       this.game.fxApi.beam(from, to, order.color, 0.16, 0.06);
       this.game.fxApi.muzzle(from, dir, order.color, 1.6);
-      this.damageEnemy(best, order.damage, {
+      this.damageEnemy(target, order.damage * scale, {
         proc: 1, source: 'Kill Order', hitPoint: to, crit: true,
         knockback: 10, knockbackDir: dir,
       });
@@ -960,6 +1000,12 @@ export class Combat {
   /**
    * Sets everything within `radius` of a point alight, consuming any patch it
    * catches. Returns how many patches went up, which is what the slam reports.
+   */
+  /**
+   * Sets off every fire patch under a slam. At most three exist at any moment —
+   * `placeFirePatch` retires the oldest past that — so this is already bounded
+   * and the slam's per-patch figure is priced against three, not against a
+   * carpet.
    */
   detonateFirePatches(position, radius, damage, color) {
     let count = 0;
@@ -2342,6 +2388,9 @@ export class Combat {
       killOrder(spec) {
         self._killOrder = {
           left: spec.count ?? 12,
+          // Which bodies have already taken a round, and how many. A Map rather
+          // than a Set because the falloff compounds per repeat.
+          hits: new Map(),
           timer: 0,
           interval: spec.interval ?? 0.28,
           damage: spec.damage,
