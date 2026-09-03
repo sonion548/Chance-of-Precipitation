@@ -115,7 +115,7 @@ across the head and chest.
   reaches 15m because only a 200-health frame could walk into that range, Halcyon's beam has
   no falloff at all because a bombardier four hundred metres up has to reach the ground, and
   Wraith's blades pay 480% at the hilt against 120% at the tip because that is the only thing
-  that makes 88 health walk *towards* something. Every ability names an `anim` — or `animFor`
+  that makes a thin frame walk *towards* something. Every ability names an `anim` — or `animFor`
   when it changes shot to shot — and the rig acts it out (slash / swing / punch / punchL /
   thrust / pump / lob / beam / shoot).
 - **Q has four shapes**: a plain press, `charges: n` (Diver's three fire patches on

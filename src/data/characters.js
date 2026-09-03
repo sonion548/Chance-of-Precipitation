@@ -187,13 +187,18 @@ export const CHARACTERS = [
     unlocked: false,
     echoCost: 750,
     color: 0x1f1b29, accent: 0x7a3ff2, visor: 0xa855f7,
-    desc: 'Thin armour, sharpened everything else. Blinks instead of running and pays for its damage in health it does not have.',
+    desc: 'Thin armour, sharpened everything else. Blinks instead of running, throws a crescent off the end of every stroke, and pays for its damage in health it does not have.',
     lore: 'Phase-shift trials had a survivor. This is what came back.',
-    /* A matched pair, and they pay for reach in damage. Thin armour and 88 health need a weapon that pays some of it back, and one that pays most at arm's length is the only thing that makes walking towards something a plan. */
+    /* A matched pair, and they pay for reach in damage. Thin armour needs a weapon that pays some of it back, and one that pays most at arm's length is the only thing that makes walking towards something a plan. */
     weapon: 'shadow_blades',
+    /* The frame was the other half of why this character was unplayable.
+       88 health and -6 armour on a body that had to be inside 6.5m to do
+       anything meant two unblinked hits from almost anything. It is still the
+       thinnest frame in the descent bar Halcyon — the point is that it now
+       survives the mistake it takes to learn the character. */
     stats: {
-      health: 88, healthPerLevel: 25, regen: 0.8, regenPerLevel: 0.16,
-      damage: 15.5, damagePerLevel: 3.1, moveSpeed: 9.2, armor: -6, crit: 0.12, jumps: 2,
+      health: 106, healthPerLevel: 30, regen: 1.0, regenPerLevel: 0.2,
+      damage: 15.5, damagePerLevel: 3.1, moveSpeed: 9.2, armor: -2, crit: 0.12, jumps: 2,
     },
     passive: {
       /* A finisher, and deliberately not a ramp.
@@ -201,14 +206,14 @@ export const CHARACTERS = [
          about, which is what makes it a passive you play around rather than a
          number that quietly exists. */
       name: 'Executioner', icon: '💀',
-      desc: 'Deal 45% more damage to anything at or below 40% health.',
+      desc: 'Deal 55% more damage to anything at or below 40% health.',
       damageMult(player, enemy) {
         if (!enemy || !enemy.maxHealth) return 1;
-        return enemy.health / enemy.maxHealth <= 0.4 ? 1.45 : 1;
+        return enemy.health / enemy.maxHealth <= 0.4 ? 1.55 : 1;
       },
     },
     utility: {
-      name: 'Blink', key: 'SHIFT', icon: '⟿', cooldown: 3.4, charges: 2,
+      name: 'Blink', key: 'SHIFT', icon: '⟿', cooldown: 2.6, charges: 2,
       desc: 'Phase 13m the way you are moving — through the air if you are in it — leaving an afterimage that detonates for 320% damage.',
       fire(ctx) {
         ctx.blink({ distance: 13, damage: ctx.dmg * 3.2, radius: 4.5, color: 0xd94bff });
@@ -216,9 +221,9 @@ export const CHARACTERS = [
     },
     special: {
       name: 'Umbral Volley', key: 'R', icon: '✦', cooldown: 11,
-      desc: 'Release 9 homing shades that seek nearby enemies for 200% damage each.',
+      desc: 'Release 11 homing shades that seek nearby enemies for 260% damage each.',
       fire(ctx) {
-        ctx.homingVolley({ count: 9, damage: ctx.dmg * 2.0, color: 0xd94bff, spread: 1.1 });
+        ctx.homingVolley({ count: 11, damage: ctx.dmg * 2.6, color: 0xd94bff, spread: 1.1 });
         ctx.fx.ring(ctx.player.position, 0.5, 7, 0xd94bff, 0.6, 0.9);
       },
     },
@@ -599,12 +604,20 @@ export const CHARACTERS = [
          Sniper's whole problem is throughput — one round every second and a
          quarter, and a reload you can fail. The order does not add a new gun;
          it takes the two things the gun is short of, rate and certainty, and
-         removes them for four seconds. Every round is a seam hit, so every
-         point of crit damage the build has bought is spent at once. */
-      desc: 'Work down the field: fourteen rounds at 750% each, one every 0.28s, each one a guaranteed critical, put through the biggest thing still standing within 60m. Anything that dies to it hands the next round to whatever is behind it.',
+         removes them for three seconds. Every round is a seam hit, so every
+         point of crit damage the build has bought is spent at once.
+
+         Which is exactly why the rounds have to spread out. Guaranteed crits
+         on a character whose crit-chance items are converted into crit
+         *damage* means this is the single most multiplied thing in the game,
+         and pointing all fourteen of them at whatever had the most health left
+         made it a boss-deletion button wearing a field-clearing description.
+         It now shoots what it has not already shot, and a repeat into the same
+         body compounds down — see `KILL_ORDER_REPEAT` in systems/combat.js. */
+      desc: 'Work down the field: twelve rounds at 700% each, one every 0.28s, each one a guaranteed critical, put through the biggest thing it has not already shot within 60m. Once everything in range has taken one it doubles back, and each repeat into the same body is worth less than the last.',
       fire(ctx) {
         ctx.killOrder({
-          count: 14, damage: ctx.dmg * 7.5, interval: 0.28, radius: 60, color: 0xff6a4d,
+          count: 12, damage: ctx.dmg * 7.0, interval: 0.28, radius: 60, color: 0xff6a4d,
         });
         ctx.toast('KILL ORDER', '#ff6a4d');
       },
@@ -636,9 +649,14 @@ export const CHARACTERS = [
        make sense once you already are. Hold jump to climb, hold nothing and he
        sinks gently enough to fight from the floor and leave again. */
     infiniteFlight: true,
+    /* Infinite flight is the most valuable defensive property in the descent —
+       most of what the game throws is a ground problem — and the frame was
+       being paid as though it were a drawback. It is the one character who can
+       simply decline to be where the fight is, so it no longer also gets a
+       midfield health pool and above-average damage on top. */
     stats: {
-      health: 108, healthPerLevel: 31, regen: 1.0, regenPerLevel: 0.2,
-      damage: 14.5, damagePerLevel: 2.9, moveSpeed: 8.4, armor: 0, crit: 0.04, jumps: 1,
+      health: 98, healthPerLevel: 28, regen: 0.9, regenPerLevel: 0.18,
+      damage: 13.0, damagePerLevel: 2.6, moveSpeed: 8.4, armor: 0, crit: 0.04, jumps: 1,
     },
     passive: {
       /* The passive is the combo, written down.
@@ -661,23 +679,32 @@ export const CHARACTERS = [
       },
     },
     special: {
-      name: 'Dive Slam', key: 'R', icon: '⤓', cooldown: 10,
+      /* The largest single number any special in the game paid, and it paid it
+         on a ten-second cooldown to a character who never has to land. Three
+         patches is the standing cap, so the combo was 560% plus three times
+         1340% — 4580% on one button, roughly two and a half times what any
+         other special in the descent does, on the shortest cooldown of the
+         lot. The per-patch figure is close to halved and the slam waits three
+         seconds longer, which leaves the combo worth about 2580% on 13s: still
+         far and away the biggest single press he has, and no longer most of a
+         boss. */
+      name: 'Dive Slam', key: 'R', icon: '⤓', cooldown: 13,
       anim: 'punch',
-      desc: 'Drop onto your aim point at fifty metres a second for 560% damage in 9m — and set off every fire patch you land on for 1340% each.',
+      desc: 'Drop onto your aim point at fifty metres a second for 480% damage in 9m — and set off every fire patch you land on for 700% each.',
       fire(ctx) {
         ctx.diveSlam({
-          damage: ctx.dmg * 5.6, radius: 9, speed: 52, maxRange: 36,
-          knockback: 20, patchRadius: 9, patchDamage: ctx.dmg * 13.4, color: 0xff7a2a,
+          damage: ctx.dmg * 4.8, radius: 9, speed: 52, maxRange: 36,
+          knockback: 20, patchRadius: 9, patchDamage: ctx.dmg * 7.0, color: 0xff7a2a,
         });
       },
     },
     ultimate: {
       name: 'Inferno', key: 'F', icon: '🌋',
-      desc: 'For 10s everything within 22m of you catches and keeps burning — 150% a pulse twice a second, on top of the burn — and you move 50% faster for the whole of it.',
+      desc: 'For 8s everything within 18m of you catches and keeps burning — 100% a pulse twice a second, on top of the burn — and you move 35% faster for the whole of it.',
       fire(ctx) {
         ctx.inferno({
-          duration: 10, radius: 22, damage: ctx.dmg * 1.5, burn: ctx.dmg * 0.55,
-          interval: 0.5, move: 0.5, burnTime: 6, color: 0xff7a2a,
+          duration: 8, radius: 18, damage: ctx.dmg * 1.0, burn: ctx.dmg * 0.45,
+          interval: 0.5, move: 0.35, burnTime: 6, color: 0xff7a2a,
         });
       },
     },
