@@ -295,6 +295,18 @@ it is, how to regenerate it, and where it disagrees with the source).
   side-step — blended by `rig.gaitF/gaitB/gaitS` from the travel direction in the body's own
   frame, all on one shared clock so a diagonal is a continuous gait changing shape rather than
   a crossfade. `rig.onStep` fires on each footfall, which is what drives footstep audio.
+
+  Four things beyond the gaits, each of which is a *state* the body is in rather than a timer:
+  **attacks** run a signed envelope, so a negative value replays the move's own pose backwards
+  and every strike gets its wind-up for free (`ATTACK_ANTICIPATION`), then holds at full
+  extension for three frames so a hit lands rather than passes through. **The air** is read off
+  `velocity.y` as three shapes — push, apex, reach — with the launch detected from an upward
+  velocity step too large to be gravity, so it also catches the second jump and a pitched dash,
+  and works for a teammate we are only told the position and speed of. **The dash** is its own
+  held pose (`poseDash`), because feeding forty metres a second to a walk cycle is what made the
+  legs windmill; `cadenceSpeed` caps the cycle at 1.45× the character's walk for the same
+  reason. **Melee steps in**: the hips load back through the wind-up and drive through the blow,
+  with the legs answering that turn exactly as they answer `pelvisSwing`.
 - **Input is addressed by action, never by key.** `input.actionDown('secondary')`, not
   `input.down('KeyQ')`. Mouse buttons live in the same code namespace (`Mouse0/1/2`), which is
   the whole reason the rebinding screen can offer them for anything. Bindings live in

@@ -1021,6 +1021,8 @@ export class Player {
       weaponUp: this.dead ? false : this._weaponUp(this._lastInput),
       dead: this.dead,
       grapple: !!this.grapple,
+      // A dash is its own pose, not a very fast run — see `poseDash`.
+      dashing: this.dashTime > 0,
       cloaked: this.buffs.has('cloak'),
       aimPoint: this.aimPoint,
       // Standing on something is standing, whatever the thrusters are doing.

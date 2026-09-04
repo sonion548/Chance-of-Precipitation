@@ -70,12 +70,25 @@ export function createRig(yaw = 0) {
     // its own so the drift under thrust is not locked to the walk cycle.
     fly: 0,
     flyPhase: Math.random() * 10,
+    dash: 0,
+    travelF: 0,
+    travelS: 0,
+    idlePhase: Math.random() * 10,
+    idleShift: 0,
     armRX: 0, armRY: 0, armRZ: 0, armRLower: 0,
     armLX: 0, armLY: 0, armLZ: 0, armLLower: 0,
     torsoY: 0, torsoZ: 0, torsoX: 0,
     ready: 0,
     land: 0,
     airTime: 0,
+    // Where the body is in its arc, and how hard it left the ground. `rise` and
+    // `fall` are not opposites: both are zero at the apex, which is the third
+    // shape a jump has and the one the old single tuck was standing in for.
+    rise: 0,
+    fall: 0,
+    launch: 0,
+    fallSpeed: 0,
+    prevVY: 0,
     prevGrounded: true,
     deathTime: 0,
     strafe: 0,
@@ -88,6 +101,7 @@ export function createRig(yaw = 0) {
     gaitF: 1,
     gaitB: 0,
     gaitS: 0,
+    pivot: 0,
     lookOffset: 0,
     stepIndex: 0,
     onStep: null,
@@ -113,25 +127,70 @@ export function rigAttack(rig, kind = 'shoot', power = 1) {
   rig.attackTime = 0;
   rig.attackPower = 0.5 + 0.5 * (power ?? 1);
   rig.attackDur = ATTACK_DURATION[kind] ?? 0.2;
+  rig.attackAntic = ATTACK_ANTICIPATION[kind] ?? 0.3;
   // Alternate the swing direction so holding attack reads as a sequence of
   // strokes rather than one shape stuttering.
   rig.attackSide = -(rig.attackSide || 1);
 }
 
 const ATTACK_DURATION = {
-  slash: 0.34, punch: 0.26, punchL: 0.26, swing: 0.40, thrust: 0.24,
-  pump: 0.3, lob: 0.28, beam: 0.16, shoot: 0.16,
+  slash: 0.38, punch: 0.30, punchL: 0.30, swing: 0.46, thrust: 0.28,
+  pump: 0.32, lob: 0.34, beam: 0.16, shoot: 0.16,
 };
 
 /**
- * Attack envelope: snaps out, eases back. 0 → 1 by a third of the way through,
- * then down to 0 at the end — the shape of something being swung, not a sine.
+ * How far each move winds back before it goes forward, as a fraction of its
+ * own full extension.
+ *
+ * This is the thing the animation was missing. Every strike used to begin at
+ * rest and travel one way, which is what a swing looks like when nobody has
+ * animated the part before it — the eye reads the absence immediately, because
+ * nothing heavy in the world starts moving at full speed. A blade goes back
+ * before it comes across, a fist is drawn in before it is thrown, and an
+ * overarm lob reaches behind the shoulder first.
+ *
+ * A rifle does not, which is why `shoot` is almost nothing: the anticipation on
+ * a gun is the trigger finger, and it is a recoil kick afterwards rather than a
+ * wind-up before.
  */
-function attackEnvelope(t) {
+const ATTACK_ANTICIPATION = {
+  slash: 0.42, swing: 0.58, punch: 0.40, punchL: 0.40, thrust: 0.46,
+  pump: 0.26, lob: 0.52, beam: 0, shoot: 0.06,
+};
+
+/* The four phases, as fractions of the move. Wind back, strike, hold at full
+   extension, recover. The hold is two or three frames and is the whole of why
+   a hit reads as landing on something rather than passing through it. */
+const WIND_END = 0.26;
+const STRIKE_END = 0.46;
+const HOLD_END = 0.56;
+
+/**
+ * Attack envelope: wind up, strike, hold, recover.
+ *
+ * Returns a **signed** value, and that sign is the trick. Every attack pose in
+ * this file is written as an offset scaled by this number, so a negative one
+ * runs the same pose backwards and gives every move its anticipation for free —
+ * the slash winds back along the arc it is about to cut, the punch pulls the
+ * fist in along the line it is about to travel, and neither needed a second
+ * pose written for it.
+ *
+ * Consumers must therefore test `Math.abs(rig.attack)`, never `rig.attack > 0`.
+ */
+function attackEnvelope(t, antic) {
   if (t <= 0 || t >= 1) return 0;
-  return t < 0.34
-    ? Math.sin((t / 0.34) * Math.PI * 0.5)
-    : Math.cos(((t - 0.34) / 0.66) * Math.PI * 0.5);
+  // Wind back, accelerating away from rest.
+  if (t < WIND_END) return -antic * Math.sin((t / WIND_END) * Math.PI * 0.5);
+  // The strike itself: the fastest part of the move, covering the wind-up and
+  // the full extension in a fifth of its duration.
+  if (t < STRIKE_END) {
+    const u = (t - WIND_END) / (STRIKE_END - WIND_END);
+    return lerp(-antic, 1, Math.sin(u * Math.PI * 0.5));
+  }
+  // Contact. Held, not passed through.
+  if (t < HOLD_END) return 1;
+  // Recovery, back to the guard.
+  return Math.cos(((t - HOLD_END) / (1 - HOLD_END)) * Math.PI * 0.5);
 }
 
 /** Take-a-hit flinch. `side` is -1..1 in the body's own frame. */
@@ -183,6 +242,11 @@ export function updateRig(model, rig, dt, s) {
   const ref = Math.max(speed, 0.001);
   rig.forward = damp(rig.forward, vz / ref * stride, 10, dt);
   rig.strafe = damp(rig.strafe, vx / ref * stride, 10, dt);
+  // The same two numbers undamped. A dash lasts a quarter of a second, which is
+  // less than the smoothing above takes to arrive, so a pose that has to commit
+  // to a direction *now* reads these instead.
+  rig.travelF = vz / ref;
+  rig.travelS = vx / ref;
 
   /* ---- gait blend ----
      Three cycles share one clock. Which of them you are actually watching is
@@ -203,11 +267,22 @@ export function updateRig(model, rig, dt, s) {
   // Backing up runs the cycle the other way so the feet do not moonwalk, and a
   // side-step is a shorter, quicker cycle than a run of the same speed.
   const dirSign = rig.gaitB > 0.55 ? -1 : 1;
-  const cadence = 2.0 + speed * (0.95 + rig.gaitS * 0.35 + rig.gaitB * 0.2);
+  /* Legs can only turn over so fast.
+     The cadence used to be driven by the raw speed, and the raw speed in this
+     game is not bounded by the walk: Overclock adds 25%, Inferno 50%, a Speed
+     Dash 45% and the dash itself moves at forty metres a second. Feeding any of
+     those straight in spun the legs into a blur — the stride is already clamped
+     to 1, so past a point the cycle was going faster without covering any more
+     ground, which is the definition of a treadmill. */
+  const cadenceSpeed = Math.min(speed, (s.moveSpeed || 8) * 1.45);
+  const cadence = 2.0 + cadenceSpeed * (0.95 + rig.gaitS * 0.35 + rig.gaitB * 0.2);
   const prevPhase = rig.walkPhase;
   rig.walkPhase += dt * cadence * dirSign;
   rig.breathPhase += dt * (1.05 + stride * 0.9);
   rig.swayPhase += dt * 0.53;
+  // Slow enough that a weight change is something you notice having happened
+  // rather than something you watch happen: about eleven seconds a cycle.
+  rig.idlePhase += dt * 0.58;
   const ph = rig.walkPhase;
 
   // A foot lands every half cycle. Reporting it here rather than guessing from
@@ -222,12 +297,41 @@ export function updateRig(model, rig, dt, s) {
     }
   }
 
+  /* ---- the arc ----------------------------------------------------------
+     A jump is three shapes, not one: the push off the ground, the moment at the
+     top where the legs come up, and the fall, where they reach back down for
+     the floor. The rig used to hold a single tuck for the whole time in the air
+     and blend into it on a timer, which is why every jump in the game looked
+     the same and looked like it was over before it started.
+
+     All three are read off the vertical velocity, which costs nothing, needs no
+     new call from the player, and works for a networked teammate — who is only
+     ever described to us by where they are and how fast. */
+  const vy = s.velocity?.y ?? 0;
+  rig.rise = damp(rig.rise, s.grounded ? 0 : clamp01(vy / 8), 14, dt);
+  rig.fall = damp(rig.fall, s.grounded ? 0 : clamp01(-vy / 12), 14, dt);
+
+  /* The push-off, from an upward step in velocity too large to be gravity.
+     Gravity is worth about 0.57 per frame and it is always negative, so an
+     upward jump of 3+ is unambiguous — and because it is the velocity being
+     read and not a jump button, this also catches the second jump, a pitched
+     dash and anything else that throws the body upward. */
+  const dv = vy - rig.prevVY;
+  rig.prevVY = vy;
+  if (dv > 3.2 && vy > 1.5) rig.launch = 1;
+  rig.launch = Math.max(0, rig.launch - dt * 5.5);
+
   // Airborne / landing bookkeeping.
   if (s.grounded) {
-    if (!rig.prevGrounded) rig.land = Math.min(1, 0.35 + rig.airTime * 0.9);
+    // Weighted by how hard the body actually arrived rather than by how long it
+    // was in the air: a drop off a ledge and a hop over a rock are different
+    // landings, and timing them made them the same one.
+    if (!rig.prevGrounded) rig.land = clamp01(0.22 + rig.fallSpeed * 0.030);
     rig.airTime = 0;
+    rig.fallSpeed = 0;
   } else {
     rig.airTime += dt;
+    rig.fallSpeed = Math.max(rig.fallSpeed, -vy);
   }
   rig.prevGrounded = s.grounded;
   rig.land = Math.max(0, rig.land - dt * 3.4);
@@ -238,7 +342,7 @@ export function updateRig(model, rig, dt, s) {
   if (rig.attackKind) {
     rig.attackTime += dt;
     const t = rig.attackTime / rig.attackDur;
-    rig.attack = attackEnvelope(t) * rig.attackPower;
+    rig.attack = attackEnvelope(t, rig.attackAntic ?? 0.3) * rig.attackPower;
     if (t >= 1) { rig.attackKind = null; rig.attack = 0; }
   } else {
     rig.attack = 0;
@@ -246,7 +350,7 @@ export function updateRig(model, rig, dt, s) {
 
   // Weapon readiness. Rises almost instantly (you snap a gun up), falls slowly.
   // Mid-swing the weapon is up by definition, whatever the situation says.
-  const wantUp = (s.weaponUp || rig.attack > 0.02) ? 1 : 0;
+  const wantUp = (s.weaponUp || Math.abs(rig.attack) > 0.02) ? 1 : 0;
   rig.ready = wantUp > rig.ready
     ? Math.min(1, rig.ready + dt * 16)
     : damp(rig.ready, wantUp, 2.6, dt);
@@ -271,14 +375,22 @@ export function updateRig(model, rig, dt, s) {
      be answered at the hip. See `poseLegs`. */
   const pelvisSwing = -Math.sin(ph) * PELVIS_SWING * stride * (rig.gaitF + rig.gaitB);
 
-  poseLegs(ud, rig, dt, { stride, dirSign, ph, airborne, land: rig.land, strafe: rig.strafe, pelvisSwing });
-  posePelvis(ud, rig, dt, { stride, ph, land: rig.land, strafe: rig.strafe, breath, idle, pelvisSwing });
+  /* How far the hips turn into a melee swing. Shared by the pelvis, which does
+     it, and the legs, which have to answer it — the same split the gait's own
+     `pelvisSwing` uses, and for the same reason. */
+  const meleeStep = (MELEE_KINDS.has(rig.attackKind) ? rig.attack : 0) * 0.22 * (rig.attackSide || 1);
+
+  poseLegs(ud, rig, dt, { stride, dirSign, ph, airborne, land: rig.land, strafe: rig.strafe, pelvisSwing, meleeStep });
+  posePelvis(ud, rig, dt, { stride, ph, land: rig.land, strafe: rig.strafe, breath, idle, pelvisSwing, meleeStep });
   poseTorso(ud, rig, dt, s, { stride, ph, breath, idle, airborne, land: rig.land });
   poseHead(ud, rig, dt, s, { breath, idle, ph, stride });
   poseArms(ud, rig, dt, s, { stride, ph, airborne, breath, idle });
   // After the gait, before the weapon: flight overrides the limbs, and the
   // weapon mount has to be resolved from wherever the arms actually ended up.
   poseFlight(ud, rig, dt, s);
+  // A dash overrides both the gait and the flight pose: it is the most
+  // committed thing the body does and it should look like nothing else.
+  poseDash(ud, rig, dt, s);
   poseWeapon(ud, rig, dt, s);
   applyCloak(model, s.cloaked);
   // Cloth trails whatever the body just did, so it is settled last of all.
@@ -332,9 +444,23 @@ const LEG_TRACK = 0.75;
  */
 function poseLegs(ud, rig, dt, o) {
   if (!ud.legL || !ud.legR) return;
-  const { stride, dirSign, ph, airborne, land, pelvisSwing } = o;
+  const { stride, dirSign, ph, airborne, land, pelvisSwing, meleeStep } = o;
   const wF = rig.gaitF, wB = rig.gaitB, wS = rig.gaitS;
   const side = rig.strafeSign || 1;
+
+  /* Turning on the spot.
+     Spinning a standing body used to rotate it as one rigid piece, feet planted
+     and sliding across the floor — the single most obvious mannequin tell left
+     in the rig, and very visible in this game because the body is welded to a
+     camera the player whips around. A person pivoting opens the leading foot
+     out and lets the trailing one follow, so the two legs counter-yaw against
+     each other in proportion to how fast the turn is and how little the stride
+     is already explaining. */
+  // Kept on the rig, not on `o`: the state object is rebuilt every frame, so a
+  // damp seeded from it would restart from zero each time and never accumulate.
+  rig.pivot = damp(rig.pivot,
+    clamp(rig.turnRate, -1, 1) * 0.30 * (1 - stride) * (1 - airborne), 9, dt);
+  o.pivot = rig.pivot;
 
   const legPose = (leg, phase, mirror) => {
     const sw = Math.sin(phase);
@@ -391,27 +517,78 @@ function poseLegs(ud, rig, dt, o) {
        separation the arms use for their attack poses, and for the same reason. */
     const toeOut = rig.strafe * (0.42 + wS * 0.55) + wB * -rig.strafe * 0.2;
     leg.userData.toeOut = damp(leg.userData.toeOut ?? 0, toeOut, 10, dt);
-    leg.rotation.y = leg.userData.toeOut - pelvisSwing * LEG_TRACK;
+    leg.rotation.y = leg.userData.toeOut - pelvisSwing * LEG_TRACK + o.pivot * mirror
+      // The hips turn into a swing; the legs give some of it back, so the feet
+      // stay planted while the body rotates over them rather than skating round
+      // with it. Same relationship the gait already has with `pelvisSwing`.
+      - meleeStep * LEG_TRACK;
   };
   legPose(ud.legL, ph, 1);
   legPose(ud.legR, ph + Math.PI, -1);
 
+  /* --- off the ground ---
+     Three poses again, and for the same reason the gait has three: which one
+     you are looking at is a fact about the body's state, not about how long it
+     has been in this state.
+
+       push    driven off a straightening leg, the other trailing, toes down
+       apex    knees up, the shape everything used to hold for the whole jump
+       reach   legs swinging down and forward, ankles flexed to take the floor
+
+     `rise` and `fall` are both zero at the top of the arc, so the apex weight
+     falls out of them rather than needing its own test. */
   if (airborne > 0.01) {
-    // Tuck: lead leg pulls up, trailing leg extends.
+    const rise = rig.rise;
+    const fall = rig.fall;
+    const apex = Math.max(0, 1 - rise - fall);
     const k = airborne;
-    ud.legL.rotation.x = lerp(ud.legL.rotation.x, -0.62, k);
-    ud.legR.rotation.x = lerp(ud.legR.rotation.x, 0.34, k);
-    // Tucked legs come together a little. Written as "inboard of rest" rather
-    // than as a fixed sign, so it still means that after the splay was flipped.
-    for (const leg of [ud.legL, ud.legR]) {
+
+    // Lead / trail split, so the two legs never mirror exactly — a body with
+    // its legs in perfect symmetry in the air reads as a doll being dropped.
+    const legAir = (leg, lead) => {
+      if (!leg) return;
+      const push = lead ? 0.34 : 0.12;          // extended, driving down and back
+      const tuck = lead ? -0.66 : 0.30;         // knees up
+      const reach = lead ? -0.30 : -0.06;       // swinging down to meet the floor
+      leg.rotation.x = lerp(leg.rotation.x, push * rise + tuck * apex + reach * fall, k);
+
       const rest = leg.userData.restZ ?? 0;
       const out = leg.userData.outZ ?? 1;
-      leg.rotation.z = lerp(leg.rotation.z, rest - out * 0.06, k);
+      // Together at the top, opening again to take the landing.
+      leg.rotation.z = lerp(leg.rotation.z, rest - out * (0.07 * apex - 0.03 * fall), k);
+
+      if (leg.userData.lower) {
+        const kn = (lead ? 0.16 : 0.34) * rise + (lead ? 1.25 : 0.55) * apex + (lead ? 0.30 : 0.16) * fall;
+        leg.userData.lower.rotation.x = lerp(leg.userData.lower.rotation.x, kn, k);
+      }
+      if (leg.userData.ankle) {
+        // Pointed off the push, relaxed at the top, and toes up on the way down:
+        // a foot that stays pointed into a landing is a foot that breaks.
+        const an = 0.5 * rise + 0.3 * apex - 0.34 * fall;
+        leg.userData.ankle.rotation.x = lerp(leg.userData.ankle.rotation.x, an, k);
+      }
+    };
+    legAir(ud.legL, true);
+    legAir(ud.legR, false);
+  }
+
+  /* The push itself: a short, hard extension of both legs as the body leaves.
+     Added over the air pose rather than blended into it, because it is an
+     impulse and not a state — it wants to be visible for a tenth of a second
+     and then gone, whatever the arc is doing around it. */
+  if (rig.launch > 0.01) {
+    for (const leg of [ud.legL, ud.legR]) {
+      if (!leg) continue;
+      leg.rotation.x += rig.launch * 0.30;
+      // Straightened, and no further: zero is a straight leg, and a knee is the
+      // one joint on the body with nothing behind it to stop at. Subtracting
+      // the push blind drove it to -0.43 — a shin bent backwards through the
+      // kneecap, which is a good deal more noticeable than the pose it was
+      // meant to improve.
+      const knee = leg.userData.lower;
+      if (knee) knee.rotation.x = Math.max(0, knee.rotation.x - rig.launch * 0.55);
+      if (leg.userData.ankle) leg.userData.ankle.rotation.x += rig.launch * 0.55;
     }
-    if (ud.legL.userData.lower) ud.legL.userData.lower.rotation.x = lerp(ud.legL.userData.lower.rotation.x, 1.15, k);
-    if (ud.legR.userData.lower) ud.legR.userData.lower.rotation.x = lerp(ud.legR.userData.lower.rotation.x, 0.5, k);
-    if (ud.legL.userData.ankle) ud.legL.userData.ankle.rotation.x = lerp(ud.legL.userData.ankle.rotation.x, 0.34, k);
-    if (ud.legR.userData.ankle) ud.legR.userData.ankle.rotation.x = lerp(ud.legR.userData.ankle.rotation.x, 0.28, k);
   }
 
   if (land > 0.01) {
@@ -441,6 +618,9 @@ function poseLegs(ud, rig, dt, o) {
  */
 const canTranslate = (ud) => !ud.authored;
 
+/** Moves that are thrown with the body rather than fired from it. */
+const MELEE_KINDS = new Set(['slash', 'swing', 'punch', 'punchL', 'thrust']);
+
 /* ---------------------------------------------------------------- pelvis */
 function posePelvis(ud, rig, dt, o) {
   if (!ud.pelvis) return;
@@ -452,14 +632,34 @@ function posePelvis(ud, rig, dt, o) {
   const bob = Math.abs(Math.sin(ph)) * bobScale * stride;
   const idleBob = breath * 0.012 * idle;
   const sway = Math.sin(ph) * 0.06 * rig.gaitS * stride * (rig.strafeSign || 1);
-  ud.pelvis.position.y = ud.hipY - 0.045 * stride - land * 0.26 + bob + idleBob;
-  ud.pelvis.position.x = (ud.hipX ??= ud.pelvis.position.x) + sway;
+  /* Standing still is not standing still.
+     Nobody holds their weight evenly on both feet for more than a few seconds;
+     they settle onto one hip, drift, and change over. It is a very small
+     movement and it is most of the difference between a character who is idle
+     and a character who has been paused — and unlike the breath, which is
+     vertical and easy to miss, this one moves the silhouette. Its own slow
+     clock so it never syncs up with the breathing. */
+  const weight = Math.sin(rig.idlePhase) * o.idle;
+  ud.pelvis.position.y = ud.hipY - 0.045 * stride - land * 0.26 + bob + idleBob
+    - Math.abs(weight) * 0.012;
+  ud.pelvis.position.x = (ud.hipX ??= ud.pelvis.position.x) + sway + weight * 0.022;
   // The swing half comes in from `updateRig` so the legs can answer the exact
   // same number. The strafe offset stays here: it is a standing orientation
   // rather than part of the step, and the feet are meant to follow it.
   ud.pelvis.rotation.y = o.pelvisSwing + strafe * 0.24;
-  ud.pelvis.rotation.z = Math.sin(ph) * (0.1 + rig.gaitS * 0.12) * stride - strafe * 0.12;
-  ud.pelvis.rotation.x = damp(ud.pelvis.rotation.x, land * 0.2 - rig.gaitB * stride * 0.1, 12, dt);
+  ud.pelvis.rotation.z = Math.sin(ph) * (0.1 + rig.gaitS * 0.12) * stride - strafe * 0.12
+    + weight * 0.05;
+
+  /* Stepping into a swing.
+     A strike used to be entirely above the waist, which is how a swing looks
+     when the person doing it is bolted to the floor. The hips lead it: they
+     load back over the rear foot through the wind-up and drive through as the
+     blow lands — and because `rig.attack` is signed, both halves of that come
+     out of one number without a second pose being written. */
+  const melee = MELEE_KINDS.has(rig.attackKind) ? rig.attack : 0;
+  ud.pelvis.rotation.y += o.meleeStep;
+  ud.pelvis.rotation.x = damp(ud.pelvis.rotation.x, land * 0.2 - rig.gaitB * stride * 0.1, 12, dt)
+    + melee * 0.12;
 }
 
 /* ----------------------------------------------------------------- torso */
@@ -489,8 +689,13 @@ function poseTorso(ud, rig, dt, s, o) {
   // Backing up leans away rather than into it, which is most of what sells a
   // retreat as deliberate instead of as a run played backwards.
   const lean = clamp(rig.forward * 0.22, -0.2, 0.22);
+  /* Through the arc the trunk does the opposite of the legs: it opens up over
+     the push, hangs at the top, and curls forward on the way down to get the
+     feet out in front. `airborne * 0.12` used to be the whole of it, which is a
+     constant, and a constant is the one thing a body in the air is not. */
+  const arc = -rig.launch * 0.22 - rig.rise * 0.10 + rig.fall * 0.20;
   const target = -s.pitch * 0.38 + lean - rig.recoil * 0.12 - rig.flinch * 0.16
-    + land * 0.34 + airborne * 0.12;
+    + land * 0.34 + arc;
   rig.torsoX = damp(rig.torsoX, target, 12, dt);
 
   /* A swing is a whole-body movement or it is a wrist flick. The trunk leads
@@ -502,7 +707,7 @@ function poseTorso(ud, rig, dt, s, o) {
   let twist = 0;
   let fold = 0;
   let roll = 0;
-  if (atk > 0.001) {
+  if (Math.abs(atk) > 0.001) {
     switch (rig.attackKind) {
       case 'slash': twist = side * 0.52 * atk; roll = side * 0.14 * atk; fold = 0.1 * atk; break;
       /* A round swing is a slash with the whole body behind it: the trunk
@@ -570,6 +775,11 @@ function poseFlight(ud, rig, dt, s) {
 
   const climb = clamp(s.flightClimb ?? 0, -1, 1);
   const drive = clamp01(rig.stride);            // how hard you are going somewhere
+  /* Banking. A body under thrust turns by rolling into it — this is the one
+     place the rig can say "these are thrusters and not a jetpack-shaped hat",
+     and without it a flying character changing direction just rotates on the
+     spot like a turret. */
+  const bank = clamp(rig.turnRate, -1, 1) * 0.5;
 
   /* --- trunk ---
      Nose down into a cruise, chest up under climb. This is the whole read: a
@@ -577,14 +787,18 @@ function poseFlight(ud, rig, dt, s) {
   const lean = drive * 0.34 - climb * 0.44;
   if (ud.torso) {
     ud.torso.rotation.x = lerp(ud.torso.rotation.x, lean + sway * 0.03, k);
-    ud.torso.rotation.z = lerp(ud.torso.rotation.z, -rig.strafe * 0.44 + sway2 * 0.03, k);
+    ud.torso.rotation.z = lerp(ud.torso.rotation.z,
+      -rig.strafe * 0.44 - bank + sway2 * 0.03, k);
+    // Yawing into the turn as well as rolling: a shoulder leads the direction
+    // the body is coming round to, the way a diver's does.
+    ud.torso.rotation.y = lerp(ud.torso.rotation.y, rig.turnRate * 0.18, k);
   }
   if (ud.pelvis) {
     // The pelvis follows the chest at half depth and stops counter-rotating —
     // there is no step for it to counter.
     ud.pelvis.rotation.x = lerp(ud.pelvis.rotation.x, lean * 0.55, k);
     ud.pelvis.rotation.y = lerp(ud.pelvis.rotation.y, 0, k);
-    ud.pelvis.rotation.z = lerp(ud.pelvis.rotation.z, -rig.strafe * 0.2, k);
+    ud.pelvis.rotation.z = lerp(ud.pelvis.rotation.z, -rig.strafe * 0.2 - bank * 0.5, k);
     ud.pelvis.position.y = lerp(ud.pelvis.position.y, ud.hipY ?? ud.pelvis.position.y, k);
   }
 
@@ -594,13 +808,16 @@ function poseFlight(ud, rig, dt, s) {
      down off a hard climb. */
   const trail = 0.22 + drive * 0.6 - climb * 0.18;
   const knee = 0.55 - drive * 0.3;
+  // The legs swing outboard of the roll, which is what keeps a bank reading as
+  // the whole body coming round rather than the chest alone.
+  const legBank = bank * 0.5;
   for (const [leg, sign] of [[ud.legL, 1], [ud.legR, -1]]) {
     if (!leg) continue;
     const scissor = sway * 0.11 * sign;
     const rest = leg.userData.restZ ?? 0;
     const out = leg.userData.outZ ?? 1;
     leg.rotation.x = lerp(leg.rotation.x, trail + scissor, k);
-    leg.rotation.z = lerp(leg.rotation.z, rest + out * 0.06 + sway2 * 0.025 * sign, k);
+    leg.rotation.z = lerp(leg.rotation.z, rest + out * 0.06 + sway2 * 0.025 * sign - legBank, k);
     leg.rotation.y = lerp(leg.rotation.y, 0, k);
     if (leg.userData.lower) {
       leg.userData.lower.rotation.x = lerp(leg.userData.lower.rotation.x, knee - scissor * 1.1, k);
@@ -616,7 +833,7 @@ function poseFlight(ud, rig, dt, s) {
      them. Yielded entirely the moment the weapon comes up or an ability plays:
      those poses are load-bearing — the weapon is cone-clamped to the arm, so an
      arm left out here would drag the gun off the crosshair. */
-  const free = k * (1 - rig.ready) * (1 - clamp01(rig.attack));
+  const free = k * (1 - rig.ready) * (1 - clamp01(Math.abs(rig.attack)));
   if (free > 0.002) {
     for (const [arm, sign] of [[ud.armR, 1], [ud.armL, -1]]) {
       if (!arm) continue;
@@ -626,6 +843,80 @@ function poseFlight(ud, rig, dt, s) {
       if (arm.userData.lower) {
         arm.userData.lower.rotation.x = lerp(arm.userData.lower.rotation.x, -0.24, free);
       }
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ dash */
+/**
+ * The dash, which is not a fast run.
+ *
+ * A dash moves at thirty to forty-five metres a second for about a quarter of a
+ * second. Fed to the gait that is simply a very large `speed`, and the gait did
+ * the only thing it could with it: ran the walk cycle as fast as it would go.
+ * The result was a character crossing ten metres with their legs going round
+ * like a cartoon, which is the single least convincing thing the rig did.
+ *
+ * What a body actually does over a distance it cannot take a step through is
+ * commit: it points itself at where it is going and stops cycling. So the legs
+ * trail split behind the direction of travel, the trunk drives into it, and the
+ * arms sweep back out of the way. It reads as one shape held for four frames,
+ * which is exactly how long it lasts.
+ *
+ * Blended over the finished pose rather than branching around it, so the run
+ * flows into it and back out; and yielded from the arms the moment the weapon
+ * is up, for the same reason flight yields them — the mount is cone-clamped to
+ * the arm and an arm swept back here would drag the weapon off the crosshair.
+ */
+function poseDash(ud, rig, dt, s) {
+  // Fast in, slower out: a dash should snap into its shape and settle out of it.
+  rig.dash = damp(rig.dash, s.dashing ? 1 : 0, s.dashing ? 22 : 9, dt);
+  if (rig.dash < 0.002) return;
+
+  const k = rig.dash;
+  // Undamped, because the whole move is over before the damping would arrive.
+  const f = clamp(rig.travelF, -1, 1);
+  const side = clamp(rig.travelS, -1, 1);
+
+  if (ud.torso) {
+    // Into the direction of travel — including backwards, where a dash away
+    // from something leans away from it rather than pretending to charge.
+    ud.torso.rotation.x = lerp(ud.torso.rotation.x, f * 0.42, k);
+    ud.torso.rotation.z = lerp(ud.torso.rotation.z, -side * 0.40, k);
+    ud.torso.rotation.y = lerp(ud.torso.rotation.y, side * 0.24, k);
+  }
+  if (ud.pelvis) {
+    ud.pelvis.rotation.x = lerp(ud.pelvis.rotation.x, f * 0.2, k);
+    ud.pelvis.rotation.z = lerp(ud.pelvis.rotation.z, -side * 0.18, k);
+  }
+
+  /* Legs split along the line of travel and hold there — a leading leg reaching
+     out of the dash and a trailing one still behind it, neither of them cycling.
+     Dashing sideways splits them laterally instead, which is the difference
+     between a lunge and a hop. */
+  for (const [leg, lead] of [[ud.legL, 1], [ud.legR, -1]]) {
+    if (!leg) continue;
+    const rest = leg.userData.restZ ?? 0;
+    const out = leg.userData.outZ ?? 1;
+    leg.rotation.x = lerp(leg.rotation.x, -f * (0.30 + lead * 0.34), k);
+    leg.rotation.z = lerp(leg.rotation.z, rest - out * side * (0.34 + lead * 0.2), k);
+    leg.rotation.y = lerp(leg.rotation.y, 0, k);
+    if (leg.userData.lower) {
+      // The trailing leg folds, the leading one reaches. Never negative.
+      leg.userData.lower.rotation.x = lerp(leg.userData.lower.rotation.x,
+        Math.max(0, 0.42 + lead * 0.34 * f), k);
+    }
+    if (leg.userData.ankle) leg.userData.ankle.rotation.x = lerp(leg.userData.ankle.rotation.x, 0.4, k);
+  }
+
+  const free = k * (1 - rig.ready) * (1 - clamp01(Math.abs(rig.attack)));
+  if (free > 0.002) {
+    for (const [arm, sign] of [[ud.armR, 1], [ud.armL, -1]]) {
+      if (!arm) continue;
+      // Swept back and tucked in, the way arms go when the body is thrown.
+      arm.rotation.x = lerp(arm.rotation.x, 0.75 - f * 0.3, free);
+      arm.rotation.z = lerp(arm.rotation.z, sign * 0.34, free);
+      if (arm.userData.lower) arm.userData.lower.rotation.x = lerp(arm.userData.lower.rotation.x, -0.5, free);
     }
   }
 }
@@ -688,9 +979,21 @@ function poseArms(ud, rig, dt, s, o) {
   /* ---- right arm: the weapon hand ---- */
   const bracedR = (-1.15 + aimLift) - rig.recoil * 0.55;
   const loweredR = -0.16 + swingR;
+  /* What the arms do in the air, and only while they are free to do it.
+     A braced weapon owns the shoulder — the mount is cone-clamped to the arm,
+     so an arm thrown up here would drag the gun off the crosshair — so all of
+     this is scaled by how far the weapon is *down*.
+
+     Off the push the arms swing up and back; on the way down they come out
+     wide, which is what a body does when it is about to have to balance. */
+  // The raw arc, before either arm's own claim on it is taken into account.
+  const arcLift = -rig.launch * 0.55 - rig.rise * 0.22 + rig.fall * 0.30;
+  const arcSpread = rig.fall * 0.36 + rig.launch * 0.18;
+
   rig.armRX = damp(rig.armRX,
-    lerp(loweredR, bracedR + swingR * 0.5, ready) - airborne * 0.2, 18, dt);
-  rig.armRZ = damp(rig.armRZ, lerp(0.06, -0.12, ready) - sideDrift, 12, dt);
+    lerp(loweredR, bracedR + swingR * 0.5, ready) - airborne * 0.2 + arcLift * (1 - ready), 18, dt);
+  rig.armRZ = damp(rig.armRZ,
+    lerp(0.06, -0.12, ready) - sideDrift - arcSpread * (1 - ready), 12, dt);
   rig.armRY = damp(rig.armRY, -rig.turnRate * 0.2 * ready, 12, dt);
 
   /* ---- left arm: supports the weapon, or reaches out on a grapple ---- */
@@ -705,8 +1008,10 @@ function poseArms(ud, rig, dt, s, o) {
   const bracedL = (-0.95 + aimLift) - rig.recoil * 0.28;
   const loweredL = -0.16 + swingL;
   const supportPose = s.grapple ? -1.5 : lerp(loweredL, bracedL - swingL * 0.5, readyL);
-  rig.armLX = damp(rig.armLX, supportPose - airborne * 0.2, 18, dt);
-  rig.armLZ = damp(rig.armLZ, s.grapple ? 0.1 : lerp(-0.06, 0.34, readyL) - sideDrift, 12, dt);
+  rig.armLX = damp(rig.armLX,
+    supportPose - airborne * 0.2 + arcLift * (1 - readyL), 18, dt);
+  rig.armLZ = damp(rig.armLZ,
+    s.grapple ? 0.1 : lerp(-0.06, 0.34, readyL) - sideDrift + arcSpread * (1 - readyL), 12, dt);
   rig.armLY = damp(rig.armLY, s.grapple ? 0 : lerp(0.04, -0.28, readyL), 12, dt);
 
   /* Elbows.
@@ -757,7 +1062,7 @@ function poseArms(ud, rig, dt, s, o) {
 function poseAttackArms(rig) {
   const out = { rx: 0, ry: 0, rz: 0, lx: 0, ly: 0, lz: 0, rElbow: 0, lElbow: 0 };
   const a = rig.attack;
-  if (a <= 0.001) return out;
+  if (Math.abs(a) <= 0.001) return out;
   const side = rig.attackSide;
   switch (rig.attackKind) {
     case 'slash':
@@ -881,7 +1186,7 @@ function poseWeapon(ud, rig, dt, s) {
   let swingRoll = 0;
   let swingPitch = 0;
   let reach = 0;
-  if (a > 0.001) {
+  if (Math.abs(a) > 0.001) {
     switch (rig.attackKind) {
       case 'slash': swingRoll = rig.attackSide * 1.15 * a; swingPitch = -0.3 * a; break;
       case 'swing': swingRoll = 1.6 * a; swingPitch = -0.15 * a; break;
@@ -982,7 +1287,7 @@ function poseFixedWeapon(ud, rig) {
   let swingRoll = 0;
   let swingPitch = 0;
   let reach = 0;
-  if (a > 0.001) {
+  if (Math.abs(a) > 0.001) {
     switch (rig.attackKind) {
       case 'slash': swingRoll = rig.attackSide * 1.15 * a; swingPitch = -0.3 * a; break;
       case 'swing': swingRoll = 1.6 * a; swingPitch = -0.15 * a; break;
