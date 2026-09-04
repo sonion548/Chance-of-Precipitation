@@ -264,9 +264,16 @@ export function updateRig(model, rig, dt, s) {
   rig.gaitS = damp(rig.gaitS, sAmt / total, 12, dt);
   rig.strafeSign = Math.abs(rig.strafe) < 0.02 ? (rig.strafeSign || 1) : Math.sign(rig.strafe);
 
-  // Backing up runs the cycle the other way so the feet do not moonwalk, and a
-  // side-step is a shorter, quicker cycle than a run of the same speed.
-  const dirSign = rig.gaitB > 0.55 ? -1 : 1;
+  /* The clock only ever runs forwards.
+     It used to be reversed for a backpedal *and* the pose negated on top, which
+     cancelled out exactly: hip and knee both came out as functions of +sin(ct),
+     identical in time to the forward run and merely smaller. The feet walked
+     forwards while the body travelled backwards, which is a moonwalk, and it is
+     what a backpedal has looked like in this game all along.
+
+     A backwards walk is not a forwards walk played in reverse anyway — the knee
+     leads it — so it is authored as its own cycle below rather than derived
+     from one, and nothing here needs to know which way the body is going. */
   /* Legs can only turn over so fast.
      The cadence used to be driven by the raw speed, and the raw speed in this
      game is not bounded by the walk: Overclock adds 25%, Inferno 50%, a Speed
@@ -277,7 +284,7 @@ export function updateRig(model, rig, dt, s) {
   const cadenceSpeed = Math.min(speed, (s.moveSpeed || 8) * 1.45);
   const cadence = 2.0 + cadenceSpeed * (0.95 + rig.gaitS * 0.35 + rig.gaitB * 0.2);
   const prevPhase = rig.walkPhase;
-  rig.walkPhase += dt * cadence * dirSign;
+  rig.walkPhase += dt * cadence;
   rig.breathPhase += dt * (1.05 + stride * 0.9);
   rig.swayPhase += dt * 0.53;
   // Slow enough that a weight change is something you notice having happened
@@ -380,7 +387,7 @@ export function updateRig(model, rig, dt, s) {
      `pelvisSwing` uses, and for the same reason. */
   const meleeStep = (MELEE_KINDS.has(rig.attackKind) ? rig.attack : 0) * 0.22 * (rig.attackSide || 1);
 
-  poseLegs(ud, rig, dt, { stride, dirSign, ph, airborne, land: rig.land, strafe: rig.strafe, pelvisSwing, meleeStep });
+  poseLegs(ud, rig, dt, { stride, ph, airborne, land: rig.land, strafe: rig.strafe, pelvisSwing, meleeStep });
   posePelvis(ud, rig, dt, { stride, ph, land: rig.land, strafe: rig.strafe, breath, idle, pelvisSwing, meleeStep });
   poseTorso(ud, rig, dt, s, { stride, ph, breath, idle, airborne, land: rig.land });
   poseHead(ud, rig, dt, s, { breath, idle, ph, stride });
@@ -444,7 +451,7 @@ const LEG_TRACK = 0.75;
  */
 function poseLegs(ud, rig, dt, o) {
   if (!ud.legL || !ud.legR) return;
-  const { stride, dirSign, ph, airborne, land, pelvisSwing, meleeStep } = o;
+  const { stride, ph, airborne, land, pelvisSwing, meleeStep } = o;
   const wF = rig.gaitF, wB = rig.gaitB, wS = rig.gaitS;
   const side = rig.strafeSign || 1;
 
@@ -466,34 +473,72 @@ function poseLegs(ud, rig, dt, o) {
     const sw = Math.sin(phase);
     const swingAmt = Math.max(0, -Math.cos(phase));
 
-    // --- swing about X: forwards and backwards gaits ---
+    /* --- swing about X ---
+       Negative is the leg forward, positive is the leg back. A backpedal keeps
+       its foot behind the hip through the whole cycle — you do not reach a leg
+       out in front of you to travel backwards — which is what the `+0.16` is,
+       and what the old `-0.10` was meant to be before the sign flip ate it. */
     const runX = sw * 0.78;
-    const backX = sw * 0.46 - 0.10;              // sits behind the hip throughout
+    const backX = sw * 0.44 + 0.16;
     const sideX = sw * 0.20;                     // a shuffle barely leaves the ground
-    leg.rotation.x = (runX * wF + backX * wB + sideX * wS) * stride * dirSign;
+    leg.rotation.x = (runX * wF + backX * wB + sideX * wS) * stride;
 
-    // --- knee ---
+    /* --- knee ---
+       Where in the cycle the knee folds *is* the difference between walking
+       forwards and walking backwards, and it is the whole of what was wrong.
+
+       The hip crosses zero twice: once going positive (the leg travelling
+       front to back) and once going negative (back to front). A forward run
+       swings its leg back to front, so the knee folds on the negative-going
+       crossing — `swingAmt`, which peaks where cos is −1. Backing up swings the
+       leg the other way, so its knee has to fold on the *other* crossing, which
+       is `backSwing`, peaking where cos is +1. Nothing else distinguishes the
+       two gaits; get this backwards and the feet moonwalk however good the
+       numbers around it are. */
+    const backSwing = Math.max(0, Math.cos(phase));
     const lower = leg.userData.lower;
     if (lower) {
       const runK = 0.12 + swingAmt * 1.15;
-      const backK = 0.30 + swingAmt * 1.55;      // knee leads a backwards step
+      const backK = 0.24 + backSwing * 1.05;     // knee leads a backwards step
       const sideK = 0.18 + swingAmt * 0.7;
       lower.rotation.x = (runK * wF + backK * wB + sideK * wS) * stride;
     }
 
     // --- ankle ---
     if (leg.userData.ankle) {
-      const runA = -sw * 0.42 * dirSign - swingAmt * 0.25;
-      const backA = -sw * 0.2 * dirSign + 0.18;  // toes reach for the ground behind
-      const sideA = -sw * 0.14 * dirSign;
+      const runA = -sw * 0.42 - swingAmt * 0.25;
+      // Toes point as the foot reaches back for the ground, and flatten as the
+      // body passes over it.
+      const backA = sw * 0.26 + 0.12 - backSwing * 0.2;
+      const sideA = -sw * 0.14;
       leg.userData.ankle.rotation.x = (runA * wF + backA * wB + sideA * wS) * stride;
     }
 
     /* --- swing about Z: the side-step ---
-       The two legs are half a cycle apart, so one abducts out into the travel
-       direction while the other adducts under the body. `mirror` is which leg
-       this is, and it biases the resting stance wider on the leading side. */
-    const abduct = (Math.sin(phase) * 0.40 + 0.10 * mirror) * wS * stride * side;
+     *
+     * `outZ` is +1 on the right leg and −1 on the left, and each leg's resting
+     * splay is signed to match — which means a *positive* `rotation.z` carries
+     * either leg toward the character's right. So the whole step can be written
+     * as one number per foot: how far it sits toward the direction of travel.
+     *
+     * That matters because the old formulation could not express a shuffle. It
+     * swung both legs about the body centre in antiphase, so at every extreme
+     * one foot was out to the left while the other was out to the right — the
+     * legs crossed straight through each other twice a cycle, which is a
+     * scissor and not a side-step, and it is why strafing looked like the
+     * character was tripping over itself.
+     *
+     * A shuffle is two feet on the same side of the body taking turns: the lead
+     * foot plants wide, the trail foot closes up behind it, and the trail never
+     * passes the lead. The two are half a cycle apart, so at full separation
+     * the lead is at +0.50 and the trail at −0.28, and at their closest they are
+     * 0.10 and 0.08 — nearly together, and still not crossed. */
+    const outSign = leg.userData.outZ ?? -mirror;
+    const lead = outSign * side > 0;
+    const lat = lead
+      ? 0.30 + Math.sin(phase) * 0.20      // plants wide, holds while the other closes
+      : -0.10 + Math.sin(phase) * 0.18;    // comes in under the body, stops short
+    const abduct = -lat * side * wS * stride;
     // Running keeps a hint of the old crossover so a hard diagonal still leans.
     const cross = clamp(rig.strafe, -1, 1) * 0.16 * (wF + wB);
     // The rest splay set at build time is the baseline, not zero — writing an
@@ -502,7 +547,24 @@ function poseLegs(ud, rig, dt, o) {
     // Bring a splayed leg under the body in proportion to how hard it is
     // running. Zero on a body modelled with its legs already vertical.
     const tuck = (leg.userData.splayZ ?? 0) * stride * LEG_TUCK;
-    leg.rotation.z = damp(leg.rotation.z, rest + tuck - abduct + cross, 12, dt);
+
+    /* Stance is damped; the step is not — the same split the toe-out below
+       makes, and for the same reason.
+     *
+     * `abduct` is the side-step: the whole motion of the gait, oscillating at
+     * the cadence, which at a walk is about 11.8 rad/s. Running that through a
+     * damp of 12 costs 29% of its amplitude and lags it 44° — so the legs
+     * arrived at their widest a sixth of a cycle after the body had already
+     * moved on, and the defining motion of the shuffle was smeared into a
+     * suggestion. Feeding a damp its own previous output made it worse again,
+     * because last frame's abduction was still in `rotation.z` when the damp
+     * read it.
+     *
+     * So the parts that follow *intent* — the resting splay, the tuck, the
+     * diagonal crossover — are damped on their own base, and the step is added
+     * to that base undamped, arriving exactly when the cycle says it should. */
+    leg.userData.stanceZ = damp(leg.userData.stanceZ ?? rest, rest + tuck + cross, 12, dt);
+    leg.rotation.z = leg.userData.stanceZ - abduct;
 
     /* --- yaw: where the foot points, and undoing the pelvis ---
        Feet turn out towards the direction of travel; a side-step turns them
