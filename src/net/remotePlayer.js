@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PLAYER } from '../core/config.js';
-import { clamp01 } from '../core/mathx.js';
+import { clamp, clamp01 } from '../core/mathx.js';
 import { buildPlayerModel, buildWeaponModel } from '../entities/models.js';
 import { createRig, updateRig, rigRecoil, rigFlinch } from '../entities/characterRig.js';
 import { characterById } from '../data/characters.js';
@@ -227,10 +227,36 @@ export class RemotePlayer {
       this.position.z + Math.cos(this.yaw) * Math.cos(this.pitch) * 40,
     );
 
+    /* Is this teammate under thrust?
+     *
+     * Nothing on the wire says so — the packet is a position, a facing and a
+     * couple of flags — so a flying character was being posed with a walk
+     * cycle and no floor under it, which is exactly the thing `poseFlight`
+     * exists to stop. Two ways to know, and between them they cover both
+     * characters who can do it:
+     *
+     *   Diver's thrusters are a property of the character, always on, so being
+     *   off the ground is enough.
+     *
+     *   Halcyon's are an ability with a timer we are not told about, so it is
+     *   inferred from the one thing a ballistic body cannot do: hang. A jump
+     *   passes through zero vertical speed instantaneously at its apex, so
+     *   holding near it for a third of a second means something is carrying
+     *   the body's weight.
+     */
+    const hanging = !this.grounded && Math.abs(this.velocity.y) < 3;
+    this.hangTime = hanging ? (this.hangTime ?? 0) + dt : 0;
+    const flying = !this.grounded
+      && (!!this.char?.infiniteFlight || this.hangTime > 0.34);
+
     updateRig(this.model, this.rig, dt, {
       position: this.position,
       yaw: this.yaw,
       pitch: this.pitch,
+      // The camera yaw is not replicated, so a teammate's head tracks their
+      // body. Passing the body yaw explicitly keeps that a deliberate choice
+      // rather than the look-split silently reading `undefined`.
+      lookYaw: this.yaw,
       velocity: this.velocity,
       speed: Math.hypot(this.velocity.x, this.velocity.z),
       moveSpeed: this.moveSpeed,
@@ -242,6 +268,9 @@ export class RemotePlayer {
       grapple: false,
       cloaked: false,
       aimPoint: this.aimPoint,
+      flying,
+      // Same normalisation the local player uses, off the same velocity.
+      flightClimb: flying ? clamp(this.velocity.y / 11, -1, 1) : 0,
     });
     if (this.model.userData.muzzle) this.model.userData.muzzle.getWorldPosition(this.muzzlePosition);
 

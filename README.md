@@ -712,6 +712,7 @@ src/
   entities/
     player.js         movement, stats pipeline, third-person camera
     characterRig.js   procedural body animation, shared by local and remote players
+                      gaits, jump arc, dash, flight, attacks — all state, no clips
     enemy.js          AI behaviours + enemy manager
     pet.js            the four pet species and their manager
     projectiles.js    bullets, mortars, hazards, singularities
