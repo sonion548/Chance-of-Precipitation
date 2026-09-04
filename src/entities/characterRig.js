@@ -709,7 +709,14 @@ function posePelvis(ud, rig, dt, o) {
   // same number. The strafe offset stays here: it is a standing orientation
   // rather than part of the step, and the feet are meant to follow it.
   ud.pelvis.rotation.y = o.pelvisSwing + strafe * 0.24;
-  ud.pelvis.rotation.z = Math.sin(ph) * (0.1 + rig.gaitS * 0.12) * stride - strafe * 0.12
+  /* Hip drop, and the lean into a side-step.
+     The roll used to be *increased* for a shuffle (`+ gaitS * 0.12`), which is
+     backwards — a side-step drops the hip less than a run does, not more — and
+     at ±0.22 it was rolling the pelvis, and both legs hanging off it, through
+     nearly 13°. On top of a 19° constant lean the character read as falling
+     over sideways rather than stepping. Both come down: the roll now eases off
+     for a shuffle, and the lean is halved to something a person actually does. */
+  ud.pelvis.rotation.z = Math.sin(ph) * (0.1 - rig.gaitS * 0.04) * stride - strafe * 0.06
     + weight * 0.05;
 
   /* Stepping into a swing.
@@ -730,15 +737,45 @@ function poseTorso(ud, rig, dt, s, o) {
   if (!torso) return;
   const { stride, ph, breath, idle, airborne, land } = o;
 
-  const bob = Math.abs(Math.sin(ph)) * 0.05 * stride;
-  const breathe = breath * (0.022 + idle * 0.03);
-  if (canTranslate(ud)) {
-    torso.position.y = ud.torsoBaseY - 0.03 * stride - land * 0.24 + bob + breathe;
+  /* The breath, as a translation.
+     It was ±5.2cm at rest — ten centimetres of chest travelling up and down
+     against planted hips, which is not breathing, it is the trunk coming off
+     the pelvis. Most of the breath belongs in `swell` below, which scales the
+     chest instead of moving it; what is left here is the small vertical give
+     that goes with it. */
+  const breathe = breath * (0.007 + idle * 0.009);
+  /* The torso rides the pelvis.
+   *
+   * On a body built from primitives these two are *siblings* under the model
+   * root — `g.add(pelvis)` and `g.add(torso)` — while the legs hang off the
+   * pelvis. So every centimetre the pelvis translates and the torso does not is
+   * a centimetre of gap at the waist, with the legs on the far side of it.
+   *
+   * They were being translated independently: different bob amplitudes (0.085
+   * against 0.05) and different landing drops, which stretched the waist 3.5cm
+   * on every step, and — much worse — a lateral hip sway the chest did not
+   * follow at all. That sway is gated on `gaitS`, so it only happened while
+   * strafing, and it reached 5.7cm on a body 50cm wide. That is the legs
+   * visibly coming away from the torso, and it is why it showed up on the
+   * side-step and nowhere else.
+   *
+   * A skinned body already had this right for free: there the torso is a
+   * descendant of the pelvis bone, so the pelvis carries it and the rig never
+   * translates the torso at all.
+   */
+  if (canTranslate(ud) && ud.pelvis) {
+    ud.torsoBaseX ??= torso.position.x;
+    torso.position.x = ud.torsoBaseX + (ud.pelvis.position.x - (ud.hipX ?? ud.pelvis.position.x));
+    /* Vertically it follows too, and what is left over is the one thing a spine
+       actually does on its own: it gives. Following the hips exactly and then
+       keeping a little back on impact means a hard landing compresses the trunk
+       by 6cm and a walk does not stretch it at all. */
+    torso.position.y = ud.torsoBaseY + (ud.pelvis.position.y - ud.hipY) + land * 0.06 + breathe;
   }
 
   // Shoulders counter-rotate against the hips; a lean into the turn on top.
   const counter = Math.sin(ph) * 0.28 * stride * (rig.gaitF + rig.gaitB);
-  const bank = -rig.strafe * 0.2 - rig.turnRate * 0.12;
+  const bank = -rig.strafe * 0.10 - rig.turnRate * 0.12;
   // A quarter of the camera's offset is carried by the chest; the head takes
   // most of the rest. Splitting it across the spine is what stops the neck
   // doing all of the work and looking snapped.
